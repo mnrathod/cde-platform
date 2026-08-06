@@ -230,7 +230,7 @@ public class DocumentController {
                 Files.write(dir.resolve(storedName), fileBytes);
 
                 var uploader = userRepo.findByUsername(principal.getUsername()).orElseThrow();
-                String ct = org.apache.tika.Tika != null ? "application/octet-stream" : "application/octet-stream";
+                String ct = "application/octet-stream";
                 try { ct = new org.apache.tika.Tika().detect(fileBytes, fileName); } catch (Exception ignored) {}
 
                 var doc = Document.builder()
