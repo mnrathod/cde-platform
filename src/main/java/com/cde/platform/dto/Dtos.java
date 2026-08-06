@@ -48,7 +48,7 @@ public class Dtos {
     ) {}
 
     // ── Annotation Reply ─────────────────────────────────────────────
-    record ReplyResponse(
+    public record ReplyResponse(
         Long id, Long annotationId, String authorName,
         String content, java.time.LocalDateTime createdAt
     ) {}
