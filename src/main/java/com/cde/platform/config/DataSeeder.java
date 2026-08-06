@@ -2,13 +2,23 @@ package com.cde.platform.config;
 
 import com.cde.platform.model.*;
 import com.cde.platform.repository.*;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.UUID;
+
 @Configuration
 public class DataSeeder {
+
+    @Value("${cde.storage.upload-dir}")
+    private String uploadDir;
 
     @Bean
     CommandLineRunner seed(UserRepository userRepo, ProjectRepository projectRepo,
@@ -85,10 +95,20 @@ public class DataSeeder {
                 </svg>
                 """;
 
+            // Write the seeded drawing to a real file, exactly like DocumentController.upload()
+            // does for a normal upload — otherwise this document has no filePath and any
+            // feature that reads the file from disk (e.g. digital signing) breaks on it.
+            Path projectDir = Paths.get(uploadDir, proj1.getId().toString());
+            Files.createDirectories(projectDir);
+            String storedName = UUID.randomUUID() + "_CBE-ST-001-RevA.svg";
+            Path filePath = projectDir.resolve(storedName);
+            Files.writeString(filePath, svgDrawing, StandardCharsets.UTF_8);
+
             var doc1 = Document.builder()
                 .name("Structural Plan Level 1").description("Ground floor structural layout")
-                .fileName("CBE-ST-001-RevA.svg").fileType("image/svg+xml").fileSize(2048L)
+                .fileName("CBE-ST-001-RevA.svg").fileType("image/svg+xml").fileSize((long) svgDrawing.length())
                 .documentType(Document.DocumentType.DRAWING).revision("A").drawingNumber("CBE-ST-001")
+                .filePath(filePath.toString())
                 .vectorData(svgDrawing).project(proj1).uploadedBy(engineer).build();
 
             documentRepo.save(doc1);
