@@ -21,6 +21,9 @@ import java.util.*;
 public class XfdfService {
 
     private final ObjectMapper mapper = new ObjectMapper();
+
+    /** Tolerance for treating a bounding box as square (circle vs ellipse). */
+    private static final double SHAPE_EPSILON = 0.01;
     private static final DateTimeFormatter XFDF_DATE = DateTimeFormatter.ofPattern("'D:'yyyyMMddHHmmss");
 
     // ── Export: CDE annotations → XFDF ────────────────────────────
@@ -55,7 +58,12 @@ public class XfdfService {
         String comment = ann.getComment() != null ? escapeXml(ann.getComment()) : "";
 
         return switch (ann.getType()) {
-            case MARKUP -> shapeToXfdf(data, author, date, page, color, width, comment);
+            // ARROW and CLOUD carry their shape in the `tool` field exactly
+            // as MARKUP does. They previously fell through to the default
+            // branch and were exported as sticky notes — silently turning
+            // the two commonest construction markups into text.
+            case MARKUP, ARROW, CLOUD ->
+                shapeToXfdf(data, author, date, page, color, width, comment);
             case COMMENT -> textAnnot(data, author, date, page, color, comment);
             case HIGHLIGHT -> highlightAnnot(data, author, date, page, comment);
             case UNDERLINE -> textMarkupAnnot("underline", data, author, date, page, color, comment);
@@ -82,9 +90,11 @@ public class XfdfService {
             case "cloud"     -> polygonAnnot(d, author, date, page, color, width, comment, true);
             case "polygon"   -> polygonAnnot(d, author, date, page, color, width, comment, false);
             case "polyline"  -> polylineAnnot(d, author, date, page, color, width, comment);
-            case "text"      -> freetextAnnot(d, author, date, page, color, comment);
+            case "text"      -> freetextAnnot(d, author, date, page, color, comment, false);
+            case "callout"   -> freetextAnnot(d, author, date, page, color, comment, true);
+            case "note"      -> textAnnot(d, author, date, page, color, comment);
             case "highlight" -> highlightAnnot(d, author, date, page, comment);
-            default          -> freetextAnnot(d, author, date, page, color, comment);
+            default          -> freetextAnnot(d, author, date, page, color, comment, false);
         };
     }
 
@@ -213,17 +223,27 @@ public class XfdfService {
             page, rect(minX, minY, maxX, maxY), color, width, verts, author, date, comment);
     }
 
+    /**
+     * @param callout writes IT="FreeTextCallout", the marker that lets a
+     *   reader — and our own import — tell a callout from plain free text.
+     *   Without it both come back as the same tool.
+     */
     private String freetextAnnot(JsonNode d, String author, String date, int page,
-                                  String color, String comment) {
+                                  String color, String comment, boolean callout) {
         double x = d.path("x").asDouble(0), y = d.path("y").asDouble(0);
-        String text = escapeXml(d.path("text").asText(comment));
+        // A callout's box is where its leader points, which the shape
+        // records as x2/y2; plain text has no leader.
+        double x2 = callout ? d.path("x2").asDouble(x + 200) : x + 200;
+        double y2 = callout ? d.path("y2").asDouble(y + 30)  : y + 30;
+        String text   = escapeXml(d.path("text").asText(comment));
+        String intent = callout ? " IT=\"FreeTextCallout\"" : "";
         return String.format(
-            "    <freetext page=\"%d\" rect=\"%s\" color=\"%s\"\n" +
+            "    <freetext page=\"%d\" rect=\"%s\" color=\"%s\"%s\n" +
             "              author=\"%s\" date=\"%s\">\n" +
             "      <contents>%s</contents>\n" +
             "      <defaultappearance>/Helvetica 11 Tf 0 0 0 rg</defaultappearance>\n" +
             "    </freetext>\n",
-            page, rect(x, y, x+200, y+30), color, author, date, text);
+            page, rect(x, y, x2, y2), color, intent, author, date, text);
     }
 
     private String textAnnot(JsonNode d, String author, String date, int page,
@@ -364,13 +384,24 @@ public class XfdfService {
             case "line" -> {
                 String[] start = attr(el,"start","0,0").split(",");
                 String[] end   = attr(el,"end","100,100").split(",");
-                shape.put("tool", "head".equals(attr(el,"head")) ? "arrow" : "line");
+                // A measurement line is marked with IT="LineDimension"; an
+                // arrow by the presence of a head. The head test used to
+                // compare the literal "head" against the attribute's VALUE
+                // ("OpenArrow"), so it never matched and every arrow came
+                // back as a plain line.
+                boolean isDimension = "LineDimension".equals(attr(el, "IT"));
+                boolean hasHead     = !attr(el, "head").isBlank();
+
+                shape.put("tool", isDimension ? "dimension" : hasHead ? "arrow" : "line");
                 shape.put("x1", parseDouble(start[0]));
                 shape.put("y1", parseDouble(start.length>1?start[1]:"0"));
                 shape.put("x2", parseDouble(end[0]));
                 shape.put("y2", parseDouble(end.length>1?end[1]:"0"));
-                type = attr(el,"head").isBlank() ? Annotation.AnnotationType.MARKUP
-                                                   : Annotation.AnnotationType.ARROW;
+                if (isDimension && !contents.isBlank()) shape.put("measurement", contents);
+
+                type = isDimension ? Annotation.AnnotationType.DIMENSION
+                     : hasHead     ? Annotation.AnnotationType.ARROW
+                                   : Annotation.AnnotationType.MARKUP;
             }
             case "square" -> {
                 double[] r = parseRect(attr(el,"rect"));
@@ -381,10 +412,20 @@ public class XfdfService {
             }
             case "circle" -> {
                 double[] r = parseRect(attr(el,"rect"));
-                double cx=(r[0]+r[2])/2, cy=(r[1]+r[3])/2;
-                double rad = Math.max((r[2]-r[0]),(r[3]-r[1]))/2;
-                shape.put("tool","circle");
-                shape.put("cx",cx); shape.put("cy",cy); shape.put("r",rad);
+                double boxWidth = r[2]-r[0], boxHeight = r[3]-r[1];
+                // XFDF has no ellipse element — an oval is a Circle bounded
+                // by a non-square rect, which is exactly how ellipseAnnot
+                // writes one. Reading the rect back is therefore what
+                // distinguishes the two on import.
+                if (Math.abs(boxWidth - boxHeight) > SHAPE_EPSILON) {
+                    shape.put("tool","ellipse");
+                    shape.put("x",r[0]); shape.put("y",r[1]);
+                    shape.put("width",boxWidth); shape.put("height",boxHeight);
+                } else {
+                    shape.put("tool","circle");
+                    shape.put("cx",(r[0]+r[2])/2); shape.put("cy",(r[1]+r[3])/2);
+                    shape.put("r", Math.max(boxWidth, boxHeight)/2);
+                }
                 type = Annotation.AnnotationType.MARKUP;
             }
             case "ink" -> {
@@ -427,17 +468,22 @@ public class XfdfService {
                 };
             }
             case "text" -> {
+                // A PDF /Text annotation is a sticky note, not a text box —
+                // the text box is /FreeText, handled below.
                 double[] r = parseRect(attr(el,"rect"));
-                shape.put("tool","text");
+                shape.put("tool","note");
                 shape.put("x",r[0]); shape.put("y",r[1]);
                 shape.put("text", contents);
                 type = Annotation.AnnotationType.COMMENT;
             }
             case "freetext" -> {
                 double[] r = parseRect(attr(el,"rect"));
-                shape.put("tool","callout");
+                // A callout is a FreeText carrying a leader line, marked
+                // with IT="FreeTextCallout"; without it this is plain text.
+                boolean isCallout = "FreeTextCallout".equals(attr(el, "IT"));
+                shape.put("tool", isCallout ? "callout" : "text");
                 shape.put("x",r[0]); shape.put("y",r[1]);
-                shape.put("x2",r[2]); shape.put("y2",r[3]);
+                if (isCallout) { shape.put("x2",r[2]); shape.put("y2",r[3]); }
                 shape.put("text", contents);
                 type = Annotation.AnnotationType.MARKUP;
             }
