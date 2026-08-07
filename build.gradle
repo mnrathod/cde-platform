@@ -53,3 +53,40 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+/**
+ * The Python converter is a separate process with its own test suite. It is
+ * wired in here so a single `gradlew check` covers both halves of the
+ * backend — otherwise CI would build the JVM side and silently skip the
+ * service where most of the PDF logic actually lives.
+ *
+ * Skipped rather than failed when pytest is absent, so a JVM-only checkout
+ * still builds. Install with:
+ *   pip install -r converter/requirements-dev.txt
+ */
+tasks.register('converterTest', Exec) {
+    group = 'verification'
+    description = 'Runs the Python converter test suite (pytest).'
+    workingDir = file('converter')
+    executable = 'python3'
+    args = ['-m', 'pytest', '-q']
+
+    onlyIf {
+        def probe = new ByteArrayOutputStream()
+        def result = exec {
+            commandLine 'python3', '-c', 'import pytest'
+            ignoreExitValue = true
+            standardOutput = probe
+            errorOutput = probe
+        }
+        if (result.exitValue != 0) {
+            logger.lifecycle('converterTest SKIPPED: pytest not installed ' +
+                             '(pip install -r converter/requirements-dev.txt)')
+        }
+        result.exitValue == 0
+    }
+}
+
+tasks.named('check') {
+    dependsOn 'converterTest'
+}

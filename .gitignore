@@ -43,3 +43,4 @@ uploads/
 # Python bytecode (converter service)
 __pycache__/
 *.pyc
+.pytest_cache/

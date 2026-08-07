@@ -1,0 +1,8 @@
+# Test-only dependencies. Kept out of requirements.txt so the production
+# image does not carry the test toolchain.
+-r requirements.txt
+
+pytest>=8.0.0
+# Used only to generate AcroForm fixtures; hand-writing AcroForm
+# dictionaries in tests would obscure what is being asserted.
+reportlab>=4.0.0
