@@ -261,6 +261,10 @@ public class DocumentProcessingController {
             ObjectNode req = mapper.createObjectNode();
             req.put("path",   orig.toString());
             req.put("output", outFile);
+            // flatten=true bakes the values in and drops the interactive
+            // fields, so the result can't be edited further.
+            req.put("flatten",
+                    Boolean.parseBoolean(body.getOrDefault("flatten", false).toString()));
             req.set("fields", mapper.valueToTree(body.getOrDefault("fields", Map.of())));
 
             HttpRequest httpReq = HttpRequest.newBuilder()
