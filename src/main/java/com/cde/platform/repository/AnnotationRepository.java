@@ -6,5 +6,7 @@ import java.util.List;
 
 public interface AnnotationRepository extends JpaRepository<Annotation, Long> {
     List<Annotation> findByDocument_Id(Long documentId);
+
+    void deleteByDocument_Id(Long documentId);
     List<Annotation> findByDocument_IdAndStatus(Long documentId, Annotation.AnnotationStatus status);
 }
