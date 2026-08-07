@@ -58,6 +58,9 @@ public class XfdfService {
             case MARKUP -> shapeToXfdf(data, author, date, page, color, width, comment);
             case COMMENT -> textAnnot(data, author, date, page, color, comment);
             case HIGHLIGHT -> highlightAnnot(data, author, date, page, comment);
+            case UNDERLINE -> textMarkupAnnot("underline", data, author, date, page, color, comment);
+            case STRIKEOUT -> textMarkupAnnot("strikeout", data, author, date, page, color, comment);
+            case SQUIGGLY  -> textMarkupAnnot("squiggly",  data, author, date, page, color, comment);
             case STAMP -> stampAnnot(data, author, date, page, comment);
             case DIMENSION -> dimensionAnnot(data, author, date, page, color, width, comment);
             default -> textAnnot(data, author, date, page, color, comment);
@@ -66,14 +69,19 @@ public class XfdfService {
 
     private String shapeToXfdf(JsonNode d, String author, String date, int page,
                                  String color, String width, String comment) {
-        String shape = d.path("shape").asText("line");
+        // The frontend's ShapeData JSON key is "tool" (see viewer-state.service.ts),
+        // not "shape" — read the field that's actually present.
+        String shape = d.path("tool").asText("line");
         return switch (shape) {
             case "line"      -> lineAnnot(d, author, date, page, color, width, comment, false);
             case "arrow"     -> lineAnnot(d, author, date, page, color, width, comment, true);
             case "rect"      -> squareAnnot(d, author, date, page, color, width, comment);
             case "circle"    -> circleAnnot(d, author, date, page, color, width, comment);
+            case "ellipse"   -> ellipseAnnot(d, author, date, page, color, width, comment);
             case "freehand"  -> inkAnnot(d, author, date, page, color, width, comment);
             case "cloud"     -> polygonAnnot(d, author, date, page, color, width, comment, true);
+            case "polygon"   -> polygonAnnot(d, author, date, page, color, width, comment, false);
+            case "polyline"  -> polylineAnnot(d, author, date, page, color, width, comment);
             case "text"      -> freetextAnnot(d, author, date, page, color, comment);
             case "highlight" -> highlightAnnot(d, author, date, page, comment);
             default          -> freetextAnnot(d, author, date, page, color, comment);
@@ -117,6 +125,23 @@ public class XfdfService {
             "      <contents>%s</contents>\n" +
             "    </circle>\n",
             page, rect(cx-r, cy-r, cx+r, cy+r), color, width, author, date, comment);
+    }
+
+    private String ellipseAnnot(JsonNode d, String author, String date, int page,
+                                 String color, String width, String comment) {
+        // XFDF has no dedicated ellipse element — Acrobat/Bluebeam render a
+        // Circle annotation bounded by a non-square rect as an oval, so a
+        // <circle> whose rect keeps the drawn aspect ratio is the correct
+        // interchange representation (unlike circleAnnot, which is built
+        // from a cx/cy/r scalar radius and always yields a perfect circle).
+        double x = d.path("x").asDouble(0), y = d.path("y").asDouble(0);
+        double w = d.path("width").asDouble(100), h = d.path("height").asDouble(60);
+        return String.format(
+            "    <circle page=\"%d\" rect=\"%s\" color=\"%s\" width=\"%s\"\n" +
+            "            author=\"%s\" date=\"%s\">\n" +
+            "      <contents>%s</contents>\n" +
+            "    </circle>\n",
+            page, rect(x, y, x+w, y+h), color, width, author, date, comment);
     }
 
     private String inkAnnot(JsonNode d, String author, String date, int page,
@@ -165,6 +190,29 @@ public class XfdfService {
             verts, author, date, comment);
     }
 
+    private String polylineAnnot(JsonNode d, String author, String date, int page,
+                                  String color, String width, String comment) {
+        JsonNode pts = d.path("points");
+        StringBuilder verts = new StringBuilder();
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+        if (pts.isArray()) {
+            for (JsonNode pt : pts) {
+                if (verts.length() > 0) verts.append(";");
+                double px = pt.path("x").asDouble(), py = pt.path("y").asDouble();
+                verts.append(String.format("%.2f,%.2f", px, py));
+                minX = Math.min(minX, px); minY = Math.min(minY, py);
+                maxX = Math.max(maxX, px); maxY = Math.max(maxY, py);
+            }
+        }
+        return String.format(
+            "    <polyline page=\"%d\" rect=\"%s\" color=\"%s\" width=\"%s\"\n" +
+            "              vertices=\"%s\" author=\"%s\" date=\"%s\">\n" +
+            "      <contents>%s</contents>\n" +
+            "    </polyline>\n",
+            page, rect(minX, minY, maxX, maxY), color, width, verts, author, date, comment);
+    }
+
     private String freetextAnnot(JsonNode d, String author, String date, int page,
                                   String color, String comment) {
         double x = d.path("x").asDouble(0), y = d.path("y").asDouble(0);
@@ -202,6 +250,24 @@ public class XfdfService {
             "      <contents>%s</contents>\n" +
             "    </highlight>\n",
             page, rect(x, y, x+w, y+h), author, date, qp, comment);
+    }
+
+    // Underline / Strikeout / Squiggly are all PDF "text markup" annotation
+    // subtypes — same quadpoints-over-a-region structure as Highlight, just
+    // rendered differently by the reader. `tag` must be one of those three.
+    private String textMarkupAnnot(String tag, JsonNode d, String author, String date, int page,
+                                    String color, String comment) {
+        double x = d.path("x").asDouble(0), y = d.path("y").asDouble(0);
+        double w = d.path("width").asDouble(100), h = d.path("height").asDouble(14);
+        String qp = String.format("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
+            x, y+h, x+w, y+h, x, y, x+w, y);
+        return String.format(
+            "    <%s page=\"%d\" rect=\"%s\" color=\"%s\"\n" +
+            "               author=\"%s\" date=\"%s\">\n" +
+            "      <quadpoints>%s</quadpoints>\n" +
+            "      <contents>%s</contents>\n" +
+            "    </%s>\n",
+            tag, page, rect(x, y, x+w, y+h), color, author, date, qp, comment, tag);
     }
 
     private String stampAnnot(JsonNode d, String author, String date, int page,
@@ -349,6 +415,17 @@ public class XfdfService {
                 shape.put("color","#FFFF00");
                 type = Annotation.AnnotationType.HIGHLIGHT;
             }
+            case "underline", "strikeout", "squiggly" -> {
+                double[] r = parseRect(attr(el,"rect"));
+                shape.put("tool", tag);
+                shape.put("x",r[0]); shape.put("y",r[1]);
+                shape.put("width",r[2]-r[0]); shape.put("height",r[3]-r[1]);
+                type = switch (tag) {
+                    case "underline" -> Annotation.AnnotationType.UNDERLINE;
+                    case "strikeout" -> Annotation.AnnotationType.STRIKEOUT;
+                    default          -> Annotation.AnnotationType.SQUIGGLY;
+                };
+            }
             case "text" -> {
                 double[] r = parseRect(attr(el,"rect"));
                 shape.put("tool","text");
@@ -376,9 +453,28 @@ public class XfdfService {
                         pts.add(pt);
                     }
                 }
-                shape.put("tool","cloud");
+                // Bluebeam/Acrobat mark cloud-style polygons with IT="PolygonCloud"
+                // (see polygonAnnot's export side) — a plain polygon has no IT.
+                boolean isCloud = "PolygonCloud".equals(attr(el, "IT"));
+                shape.put("tool", isCloud ? "cloud" : "polygon");
                 shape.set("points", pts);
-                type = Annotation.AnnotationType.CLOUD;
+                type = isCloud ? Annotation.AnnotationType.CLOUD : Annotation.AnnotationType.MARKUP;
+            }
+            case "polyline" -> {
+                var pts = mapper.createArrayNode();
+                String[] pairs = attr(el,"vertices").split(";");
+                for (String pair : pairs) {
+                    String[] xy = pair.trim().split(",");
+                    if (xy.length >= 2) {
+                        var pt = mapper.createObjectNode();
+                        pt.put("x", parseDouble(xy[0]));
+                        pt.put("y", parseDouble(xy[1]));
+                        pts.add(pt);
+                    }
+                }
+                shape.put("tool","polyline");
+                shape.set("points", pts);
+                type = Annotation.AnnotationType.MARKUP;
             }
             case "stamp" -> {
                 double[] r = parseRect(attr(el,"rect"));

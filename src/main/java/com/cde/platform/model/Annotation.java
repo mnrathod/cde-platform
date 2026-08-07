@@ -49,7 +49,8 @@ public class Annotation {
     }
 
     public enum AnnotationType {
-        COMMENT, MARKUP, DIMENSION, CLOUD, ARROW, STAMP, HIGHLIGHT
+        COMMENT, MARKUP, DIMENSION, CLOUD, ARROW, STAMP, HIGHLIGHT,
+        UNDERLINE, STRIKEOUT, SQUIGGLY
     }
 
     public enum AnnotationStatus {
