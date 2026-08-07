@@ -653,10 +653,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "Use POST /convert"})
 
     def do_POST(self):
-        ppath = urlparse(self.path).path
+        ppath  = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length", 0))
+        raw    = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw) if raw else {}
+        except Exception:
+            self._json(400, {"success": False, "error": "Invalid JSON"}); return
 
         if ppath == "/redact":
-            body = json.loads(data)
             result = redact_pdf(
                 body.get("path",""),
                 body.get("regions", []),
@@ -667,7 +672,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if ppath == "/flatten":
-            body = json.loads(data)
             result = flatten_annotations_to_pdf(
                 body.get("path",""),
                 body.get("shapes", []),
@@ -678,13 +682,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if ppath == "/form-fields":
-            body = json.loads(data)
             result = inspect_pdf_form(body.get("path",""))
             self._json(200, result)
             return
 
         if ppath == "/form-fill":
-            body = json.loads(data)
             result = fill_pdf_form(
                 body.get("path",""),
                 body.get("fields", {}),
@@ -694,17 +696,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if ppath == "/ifc-tree":
-            body = json.loads(data)
             result = extract_ifc_tree(body.get("path",""))
             self._json(200, result)
             return
 
         if ppath == "/compare":
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(length))
-            except Exception:
-                self._json(400, {"success": False, "error": "Invalid JSON"}); return
             path1 = body.get("path1","").strip()
             path2 = body.get("path2","").strip()
             ct1   = body.get("contentType1","")
@@ -716,12 +712,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if ppath != "/convert":
             self._json(404, {"error": "Not found"}); return
-
-        length = int(self.headers.get("Content-Length", 0))
-        try:
-            body = json.loads(self.rfile.read(length))
-        except Exception:
-            self._json(400, {"success": False, "error": "Invalid JSON"}); return
 
         file_path    = body.get("path", "").strip()
         content_type = body.get("contentType", "")

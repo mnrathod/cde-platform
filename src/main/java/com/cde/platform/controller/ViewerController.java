@@ -103,8 +103,17 @@ public class ViewerController {
             }
 
             // ── PDF ─────────────────────────────────────────────
+            // Return JSON metadata here; the Angular viewer fetches the
+            // actual bytes separately from /{documentId}/pdf (below) via
+            // pdf.js. Returning raw bytes from this endpoint breaks the
+            // frontend, which always expects a JSON envelope from it.
             if (ext.equals("pdf") || ct.contains("pdf")) {
-                return servePdf(Files.readAllBytes(path), s(doc.getFileName()));
+                return ResponseEntity.ok(Map.of(
+                    "type","pdf","name",doc.getName(),
+                    "fileName",s(doc.getFileName()),
+                    "drawingNumber",s(doc.getDrawingNumber()),
+                    "revision",s(doc.getRevision()),
+                    "pdfUrl","/api/viewer/" + documentId + "/pdf"));
             }
 
             // ── Office -> PDF via LibreOffice ───────────────────
@@ -155,6 +164,35 @@ public class ViewerController {
                 "type","unsupported","name",doc.getName(),
                 "fileName",s(doc.getFileName()),"ext",ext));
 
+        } catch (IOException e) {
+            return err("Read error: " + e.getMessage());
+        }
+    }
+
+    // ── Serve raw PDF bytes for pdf.js (called by the Angular viewer using
+    //    the pdfUrl returned from /{documentId} above) ────────────────────
+    @GetMapping("/{documentId}/pdf")
+    public ResponseEntity<?> getPdfBytes(@PathVariable Long documentId) {
+        var docOpt = documentRepo.findById(documentId);
+        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
+        var doc = docOpt.get();
+
+        if (doc.getFilePath() == null)
+            return err("No file path stored for this document.");
+
+        Path path = Paths.get(doc.getFilePath());
+        if (!Files.exists(path))
+            return err("File not found on disk: " + path);
+
+        String ct   = s(doc.getFileType()).toLowerCase();
+        String name = s(doc.getFileName()).toLowerCase();
+        String ext  = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1) : "";
+
+        if (!ext.equals("pdf") && !ct.contains("pdf"))
+            return ResponseEntity.badRequest().body(Map.of("error","Document is not a PDF"));
+
+        try {
+            return servePdf(Files.readAllBytes(path), s(doc.getFileName()));
         } catch (IOException e) {
             return err("Read error: " + e.getMessage());
         }

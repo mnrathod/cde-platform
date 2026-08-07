@@ -54,14 +54,16 @@ public class DocumentProcessingController {
             return ResponseEntity.badRequest().body(Map.of("error","No file path"));
 
         try {
-            // Build output path
-            Path orig    = Paths.get(doc.getFilePath());
+            // Build output path — must be absolute: the Python converter runs as a
+            // separate process with its own working directory, so a relative path
+            // here resolves against the WRONG directory on that side and the write
+            // silently fails ("No such file or directory").
+            Path orig    = Paths.get(doc.getFilePath()).toAbsolutePath();
             String name  = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            Path outDir  = orig.getParent();
-            String outFile = outDir + "/" + name + "_annotated.pdf";
+            String outFile = orig.getParent().resolve(name + "_annotated.pdf").toString();
 
             ObjectNode req = mapper.createObjectNode();
-            req.put("path",    orig.toAbsolutePath().toString());
+            req.put("path",    orig.toString());
             req.put("output",  outFile);
             req.put("quality", body.getOrDefault("quality","screen").toString());
             req.set("shapes",  mapper.valueToTree(body.getOrDefault("shapes", List.of())));
@@ -108,12 +110,12 @@ public class DocumentProcessingController {
             return ResponseEntity.badRequest().body(Map.of("error","No file path"));
 
         try {
-            Path orig    = Paths.get(doc.getFilePath());
+            Path orig    = Paths.get(doc.getFilePath()).toAbsolutePath();
             String name  = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            String outFile = orig.getParent() + "/" + name + "_redacted.pdf";
+            String outFile = orig.getParent().resolve(name + "_redacted.pdf").toString();
 
             ObjectNode req = mapper.createObjectNode();
-            req.put("path",   orig.toAbsolutePath().toString());
+            req.put("path",   orig.toString());
             req.put("output", outFile);
             req.put("burn",   Boolean.TRUE.equals(body.getOrDefault("burn", true)));
             req.set("regions", mapper.valueToTree(body.getOrDefault("regions", List.of())));
@@ -191,12 +193,12 @@ public class DocumentProcessingController {
             return ResponseEntity.badRequest().body(Map.of("error","No file path"));
 
         try {
-            Path orig    = Paths.get(doc.getFilePath());
+            Path orig    = Paths.get(doc.getFilePath()).toAbsolutePath();
             String name  = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            String outFile = orig.getParent() + "/" + name + "_filled.pdf";
+            String outFile = orig.getParent().resolve(name + "_filled.pdf").toString();
 
             ObjectNode req = mapper.createObjectNode();
-            req.put("path",   orig.toAbsolutePath().toString());
+            req.put("path",   orig.toString());
             req.put("output", outFile);
             req.set("fields", mapper.valueToTree(body.getOrDefault("fields", Map.of())));
 
