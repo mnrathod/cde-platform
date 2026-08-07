@@ -1611,6 +1611,12 @@ def _compare_metadata(path1, path2) -> dict:
 #  PHASE 3: PDF REDACTION
 # ══════════════════════════════════════════════════════════════════
 
+# Render DPI for pages that get rasterized. Must be passed to BOTH the
+# render call and the save call — see _rewrite_pdf_pages.
+REDACTION_DPI = 150
+FLATTEN_DPI   = {"screen": 150, "print": 300}
+
+
 def redact_pdf(path: str, regions: list, output: str = "", burn: bool = True) -> dict:
     """
     Redact rectangular regions from a PDF.
@@ -1627,113 +1633,188 @@ def redact_pdf(path: str, regions: list, output: str = "", burn: bool = True) ->
 
     try:
         import pypdfium2 as pdfium
-        from PIL import Image, ImageDraw
-        import io
 
+        # Drop regions pointing outside the document rather than failing the
+        # whole request over one bad index.
         doc = pdfium.PdfDocument(path)
-        redacted_pages = 0
-
-        for region in regions:
-            page_num = int(region.get("page", 1)) - 1  # 0-based
-            if page_num < 0 or page_num >= len(doc):
-                continue
-
-            page = doc[page_num]
-            pw, ph = page.get_width(), page.get_height()
-
-            # Convert region coords (PDF points, origin bottom-left) to redaction rect
-            rx = float(region.get("x", 0))
-            ry = float(region.get("y", 0))
-            rw = float(region.get("width", 100))
-            rh = float(region.get("height", 20))
-
-            if burn:
-                # Render page to image, draw black rect, re-embed
-                # Note: true PDF redaction needs a PDF manipulation library
-                # This approach replaces the page with a rasterized version
-                bitmap = page.render(scale=2)
-                img    = bitmap.to_pil().convert("RGB")
-                iw, ih = img.size
-                scale_x = iw / pw
-                scale_y = ih / ph
-
-                draw = ImageDraw.Draw(img)
-                # PDF coords: origin bottom-left; PIL: top-left
-                px1 = int(rx * scale_x)
-                py1 = int((ph - ry - rh) * scale_y)
-                px2 = int((rx + rw) * scale_x)
-                py2 = int((ph - ry) * scale_y)
-                draw.rectangle([px1, py1, px2, py2], fill=(0, 0, 0))
-                redacted_pages += 1
-            # For preview mode: just count (actual overlay done client-side)
-
+        page_count = len(doc)
         doc.close()
 
-        # Output path
+        by_page = {
+            idx: items
+            for idx, items in _group_by_page(regions).items()
+            if 0 <= idx < page_count
+        }
+        if not by_page:
+            return {"success": False,
+                    "error": f"No regions fall within this document's {page_count} page(s)"}
+
         if not output:
             base = os.path.splitext(path)[0]
             output = base + ("_redacted.pdf" if burn else "_redact_preview.pdf")
 
+        redacted_pages = 0
         if burn:
-            # Re-render all pages with redactions using pypdfium2 + PIL → new PDF
-            _rasterize_pdf_with_redactions(path, regions, output)
+            redacted_pages = _rewrite_pdf_pages(
+                path, output, REDACTION_DPI, by_page, _draw_redactions
+            )
+        # Preview mode draws the overlay client-side; nothing to write here.
 
         return {
             "success": True,
             "outputPath": output,
             "redactedPages": redacted_pages,
+            "totalPages": page_count,
             "totalRegions": len(regions),
             "mode": "permanent" if burn else "preview"
         }
 
     except ImportError as e:
-        return {"success": False, "error": f"Required library missing: {e}. Run: pip install pypdfium2 Pillow"}
+        return {"success": False, "error": f"Required library missing: {e}. Run: pip install pypdfium2 pypdf Pillow"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def _rasterize_pdf_with_redactions(path: str, regions: list, output: str):
-    """Render each page to image, apply redaction rectangles, save as new PDF."""
+def _group_by_page(items: list, key: str = "page") -> dict:
+    """Group edit items by 0-based page index."""
+    grouped = {}
+    for item in items:
+        idx = int(item.get(key, 1)) - 1
+        grouped.setdefault(idx, []).append(item)
+    return grouped
+
+
+def _rewrite_pdf_pages(path: str, output: str, dpi: int,
+                       edits_by_page: dict, draw_page) -> int:
+    """
+    Rebuild a PDF, rasterizing ONLY the pages that carry edits and copying
+    every other page through untouched.
+
+    Copying untouched pages matters for correctness, not just speed:
+    rasterizing a page discards its vector content and its text layer, so
+    blanket-rasterizing silently makes an ENTIRE document unsearchable
+    because one region on one page was redacted.
+
+    The render DPI and the DPI declared when saving must be the same number,
+    or every rasterized page is rescaled by their ratio — rendering at
+    scale=2 (144dpi) while declaring resolution=150 shrank every page to
+    96% of its original size.
+
+    draw_page(draw, items, scale_x, scale_y, page_width, page_height)
+    performs the actual drawing. Returns the count of rasterized pages.
+    """
     import pypdfium2 as pdfium
-    from PIL import Image, ImageDraw
+    from PIL import ImageDraw
+    import pypdf
     import io
 
-    doc   = pdfium.PdfDocument(path)
-    pages_imgs = []
+    src     = pdfium.PdfDocument(path)
+    reader  = pypdf.PdfReader(path)
+    writer  = pypdf.PdfWriter()
+    touched = 0
 
-    for i in range(len(doc)):
-        page   = doc[i]
-        pw, ph = page.get_width(), page.get_height()
-        bitmap = page.render(scale=2)
-        img    = bitmap.to_pil().convert("RGB")
-        iw, ih = img.size
-        scale_x, scale_y = iw / pw, ih / ph
-
-        draw = ImageDraw.Draw(img)
-        for region in regions:
-            if int(region.get("page", 1)) - 1 != i:
+    try:
+        for i in range(len(src)):
+            items = edits_by_page.get(i)
+            if not items:
+                writer.add_page(reader.pages[i])
                 continue
-            rx = float(region.get("x", 0))
-            ry = float(region.get("y", 0))
-            rw = float(region.get("width", 100))
-            rh = float(region.get("height", 20))
-            px1 = int(rx * scale_x)
-            py1 = int((ph - ry - rh) * scale_y)
-            px2 = int((rx + rw) * scale_x)
-            py2 = int((ph - ry) * scale_y)
-            draw.rectangle([px1, py1, px2, py2], fill=(0, 0, 0))
 
-        pages_imgs.append(img)
+            page   = src[i]
+            pw, ph = page.get_width(), page.get_height()
+            img    = page.render(scale=dpi / 72.0).to_pil().convert("RGB")
+            iw, ih = img.size
 
-    doc.close()
+            draw_page(ImageDraw.Draw(img, "RGBA"), items, iw / pw, ih / ph, pw, ph)
 
-    if pages_imgs:
-        pages_imgs[0].save(
-            output, "PDF",
-            save_all=True,
-            append_images=pages_imgs[1:],
-            resolution=150
+            buf = io.BytesIO()
+            img.save(buf, "PDF", resolution=dpi)
+            buf.seek(0)
+            writer.add_page(pypdf.PdfReader(buf).pages[0])
+            touched += 1
+    finally:
+        src.close()
+
+    with open(output, "wb") as fh:
+        writer.write(fh)
+    return touched
+
+
+def _draw_redactions(draw, regions, scale_x, scale_y, page_w, page_h):
+    """Burn opaque black boxes over each region (PDF points, origin bottom-left)."""
+    for region in regions:
+        rx = float(region.get("x", 0))
+        ry = float(region.get("y", 0))
+        rw = float(region.get("width", 100))
+        rh = float(region.get("height", 20))
+        draw.rectangle(
+            [int(rx * scale_x),        int((page_h - ry - rh) * scale_y),
+             int((rx + rw) * scale_x), int((page_h - ry) * scale_y)],
+            fill=(0, 0, 0)
         )
+
+
+def _draw_shapes(draw, shapes, scale_x, scale_y, page_w, page_h):
+    """
+    Paint annotation shapes onto a rasterized page. Shape coordinates are
+    top-left origin (the frontend's screen space at zoom 1, which equals PDF
+    points), unlike redaction regions.
+    """
+    from PIL.ImageColor import getrgb
+
+    for shape in shapes:
+        tool  = shape.get("tool", "rect")
+        try:
+            rgb = getrgb(shape.get("color", "#FF0000"))
+        except Exception:
+            rgb = (255, 0, 0)
+        width = max(1, int(float(shape.get("strokeWidth", 2)) * scale_x * 0.5))
+
+        if tool in ("line", "arrow", "dimension"):
+            draw.line([float(shape.get("x1", 0)) * scale_x, float(shape.get("y1", 0)) * scale_y,
+                       float(shape.get("x2", 0)) * scale_x, float(shape.get("y2", 0)) * scale_y],
+                      fill=rgb, width=width)
+
+        elif tool in ("rect", "highlight", "redact", "ellipse",
+                      "underline", "strikeout", "squiggly"):
+            x = float(shape.get("x", 0)) * scale_x
+            y = float(shape.get("y", 0)) * scale_y
+            w = float(shape.get("width", 100)) * scale_x
+            h = float(shape.get("height", 50)) * scale_y
+            if tool == "redact":
+                draw.rectangle([x, y, x + w, y + h], fill=(0, 0, 0))
+            elif tool == "ellipse":
+                draw.ellipse([x, y, x + w, y + h], outline=rgb, width=width)
+            elif tool == "underline":
+                draw.line([x, y + h, x + w, y + h], fill=rgb, width=width)
+            elif tool == "strikeout":
+                draw.line([x, y + h / 2, x + w, y + h / 2], fill=rgb, width=width)
+            elif tool == "squiggly":
+                draw.line([x, y + h, x + w, y + h], fill=rgb, width=width)
+            else:
+                opacity = int(float(shape.get("opacity", 0.15)) * 255)
+                draw.rectangle([x, y, x + w, y + h],
+                               outline=rgb, width=width, fill=(*rgb, opacity))
+
+        elif tool == "circle":
+            cx = float(shape.get("cx", 0)) * scale_x
+            cy = float(shape.get("cy", 0)) * scale_y
+            r  = float(shape.get("r", 50)) * scale_x
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=rgb, width=width)
+
+        elif tool in ("freehand", "cloud", "polygon", "polyline"):
+            pts = shape.get("points", [])
+            if len(pts) >= 2:
+                scaled = [(p["x"] * scale_x, p["y"] * scale_y) for p in pts]
+                if tool == "polygon":
+                    scaled.append(scaled[0])   # close the ring
+                draw.line(scaled, fill=rgb, width=width)
+
+        elif tool in ("text", "stamp", "callout", "note"):
+            text = shape.get("text", "")
+            if text:
+                draw.text((float(shape.get("x", 0)) * scale_x,
+                           float(shape.get("y", 0)) * scale_y), text, fill=rgb)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1814,7 +1895,13 @@ def ocr_pdf_to_searchable(path: str, output: str = "", lang: str = "eng",
             bitmap = page.render(scale=dpi / 72.0)
             img    = bitmap.to_pil().convert("RGB")
 
-            page_pdf = pytesseract.image_to_pdf_or_hocr(img, lang=lang, extension="pdf")
+            # --dpi must be passed explicitly: Tesseract otherwise assumes
+            # 70dpi for a bitmap carrying no resolution metadata and sizes
+            # the output page from that, which silently inflated every
+            # OCR'd page to (dpi/70)x its true dimensions.
+            page_pdf = pytesseract.image_to_pdf_or_hocr(
+                img, lang=lang, extension="pdf", config=f"--dpi {dpi}"
+            )
             ocr_page = pypdf.PdfReader(io.BytesIO(page_pdf))
             for p in ocr_page.pages:
                 writer.add_page(p)
@@ -1865,96 +1952,27 @@ def flatten_annotations_to_pdf(path: str, shapes: list, output: str = "", qualit
         return {"success": False, "error": f"File not found: {path}"}
 
     try:
-        import pypdfium2 as pdfium
-        from PIL import Image, ImageDraw, ImageFont
-        import io
-
-        scale = 2.0 if quality == "screen" else 3.0
-        doc   = pdfium.PdfDocument(path)
-        pages_imgs = []
-
-        for i in range(len(doc)):
-            page   = doc[i]
-            pw, ph = page.get_width(), page.get_height()
-            bitmap = page.render(scale=scale)
-            img    = bitmap.to_pil().convert("RGB")
-            iw, ih = img.size
-            sx, sy = iw / pw, ih / ph
-
-            draw   = ImageDraw.Draw(img, "RGBA")
-            page_shapes = [s for s in shapes if int(s.get("pageNumber", 1)) - 1 == i]
-
-            for shape in page_shapes:
-                tool  = shape.get("tool", "rect")
-                color = shape.get("color", "#FF0000")
-                sw    = max(1, int(shape.get("strokeWidth", 2) * scale * 0.5))
-
-                # Parse color
-                try:
-                    from PIL.ImageColor import getrgb
-                    rgb = getrgb(color)
-                except Exception:
-                    rgb = (255, 0, 0)
-
-                if tool in ("line", "arrow", "dimension"):
-                    x1 = float(shape.get("x1", 0)) * sx
-                    y1 = float(shape.get("y1", 0)) * sy
-                    x2 = float(shape.get("x2", 0)) * sx
-                    y2 = float(shape.get("y2", 0)) * sy
-                    draw.line([x1, y1, x2, y2], fill=rgb, width=sw)
-
-                elif tool in ("rect", "highlight"):
-                    x  = float(shape.get("x", 0)) * sx
-                    y  = float(shape.get("y", 0)) * sy
-                    w  = float(shape.get("width", 100)) * sx
-                    h  = float(shape.get("height", 50)) * sy
-                    op = int(float(shape.get("opacity", 0.15)) * 255)
-                    fill = (*rgb, op)
-                    draw.rectangle([x, y, x+w, y+h], outline=rgb, width=sw, fill=fill)
-
-                elif tool == "circle":
-                    cx = float(shape.get("cx", 0)) * sx
-                    cy = float(shape.get("cy", 0)) * sy
-                    r  = float(shape.get("r", 50)) * sx
-                    draw.ellipse([cx-r, cy-r, cx+r, cy+r], outline=rgb, width=sw)
-
-                elif tool in ("freehand", "cloud"):
-                    pts = shape.get("points", [])
-                    if len(pts) >= 2:
-                        scaled = [(p["x"]*sx, p["y"]*sy) for p in pts]
-                        draw.line(scaled, fill=rgb, width=sw)
-
-                elif tool in ("text", "stamp", "callout"):
-                    x   = float(shape.get("x", 0)) * sx
-                    y   = float(shape.get("y", 0)) * sy
-                    txt = shape.get("text", "")
-                    if txt:
-                        draw.text((x, y), txt, fill=rgb)
-
-            pages_imgs.append(img)
-
-        doc.close()
-
         if not output:
             base   = os.path.splitext(path)[0]
             output = base + "_annotated.pdf"
 
-        if pages_imgs:
-            pages_imgs[0].save(
-                output, "PDF", save_all=True,
-                append_images=pages_imgs[1:],
-                resolution=150 if quality == "screen" else 300
-            )
+        dpi     = FLATTEN_DPI.get(quality, FLATTEN_DPI["screen"])
+        by_page = _group_by_page(shapes, key="pageNumber")
+
+        flattened_pages = _rewrite_pdf_pages(
+            path, output, dpi, by_page, _draw_shapes
+        )
 
         return {
-            "success":    True,
-            "outputPath": output,
-            "pages":      len(pages_imgs),
-            "shapes":     len(shapes)
+            "success":        True,
+            "outputPath":     output,
+            "flattenedPages": flattened_pages,
+            "shapes":         len(shapes),
+            "dpi":            dpi
         }
 
     except ImportError as e:
-        return {"success": False, "error": f"Missing library: {e}. Run: pip install pypdfium2 Pillow"}
+        return {"success": False, "error": f"Missing library: {e}. Run: pip install pypdfium2 pypdf Pillow"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
