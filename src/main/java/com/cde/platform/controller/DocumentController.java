@@ -2,6 +2,7 @@ package com.cde.platform.controller;
 
 import com.cde.platform.dto.Dtos.*;
 import com.cde.platform.model.*;
+import com.cde.platform.service.DocumentDeletionService;
 import com.cde.platform.repository.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -21,15 +22,17 @@ public class DocumentController {
     private final DocumentRepository documentRepo;
     private final ProjectRepository projectRepo;
     private final UserRepository userRepo;
+    private final DocumentDeletionService deletionService;
 
     @Value("${cde.storage.upload-dir}")
     private String uploadDir;
 
     public DocumentController(DocumentRepository documentRepo, ProjectRepository projectRepo,
-                              UserRepository userRepo) {
+                              UserRepository userRepo, DocumentDeletionService deletionService) {
         this.documentRepo = documentRepo;
         this.projectRepo = projectRepo;
         this.userRepo = userRepo;
+        this.deletionService = deletionService;
     }
 
     @GetMapping("/project/{projectId}")
@@ -184,9 +187,12 @@ public class DocumentController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!documentRepo.existsById(id)) return ResponseEntity.notFound().build();
-        documentRepo.deleteById(id);
-        return ResponseEntity.noContent().build();
+        // Delegated: annotations, replies and signatures reference the
+        // document with non-null, non-cascading foreign keys, so deleting it
+        // directly fails on a referential-integrity constraint.
+        return deletionService.deleteDocument(id)
+            ? ResponseEntity.noContent().build()
+            : ResponseEntity.notFound().build();
     }
 
     // ── Chunked upload ────────────────────────────────────────────

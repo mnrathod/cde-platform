@@ -6,4 +6,6 @@ import java.util.List;
 
 public interface AnnotationReplyRepository extends JpaRepository<AnnotationReply, Long> {
     List<AnnotationReply> findByAnnotation_IdOrderByCreatedAtAsc(Long annotationId);
+
+    void deleteByAnnotation_IdIn(java.util.Collection<Long> annotationIds);
 }

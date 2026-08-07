@@ -2,6 +2,7 @@ package com.cde.platform.controller;
 
 import com.cde.platform.dto.Dtos.*;
 import com.cde.platform.model.*;
+import com.cde.platform.service.DocumentDeletionService;
 import com.cde.platform.repository.*;
 import jakarta.validation.Valid;
 import org.springframework.http.*;
@@ -18,12 +19,15 @@ public class ProjectController {
     private final ProjectRepository projectRepo;
     private final UserRepository userRepo;
     private final DocumentRepository documentRepo;
+    private final DocumentDeletionService deletionService;
 
     public ProjectController(ProjectRepository projectRepo, UserRepository userRepo,
-                             DocumentRepository documentRepo) {
+                             DocumentRepository documentRepo,
+                             DocumentDeletionService deletionService) {
         this.projectRepo = projectRepo;
         this.userRepo = userRepo;
         this.documentRepo = documentRepo;
+        this.deletionService = deletionService;
     }
 
     @GetMapping
@@ -72,9 +76,10 @@ public class ProjectController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!projectRepo.existsById(id)) return ResponseEntity.notFound().build();
-        projectRepo.deleteById(id);
-        return ResponseEntity.noContent().build();
+        // Cascades through the project's documents and their dependents.
+        return deletionService.deleteProject(id)
+            ? ResponseEntity.noContent().build()
+            : ResponseEntity.notFound().build();
     }
 
     private ProjectResponse toResponse(Project p) {
