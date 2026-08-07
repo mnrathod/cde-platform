@@ -349,23 +349,71 @@ class XfdfServiceTest {
     @DisplayName("round trip")
     class RoundTrip {
 
-        @ParameterizedTest(name = "{0} survives export then import")
-        @ValueSource(strings = {"rect", "circle", "freehand", "cloud", "polygon", "polyline"})
+        /**
+         * Every tool the frontend can draw must come back as the same tool.
+         * Four of these previously degraded silently — an arrow returned as
+         * a line, an ellipse as a circle, a dimension as a line and a note
+         * as a text box — which only shows up when the file is reopened.
+         */
+        @ParameterizedTest(name = "{1} survives export then import")
+        @CsvSource({
+            "MARKUP,    line",
+            "ARROW,     arrow",
+            "MARKUP,    rect",
+            "MARKUP,    circle",
+            "MARKUP,    ellipse",
+            "MARKUP,    freehand",
+            "CLOUD,     cloud",
+            "MARKUP,    polygon",
+            "MARKUP,    polyline",
+            "MARKUP,    text",
+            "MARKUP,    callout",
+            "COMMENT,   note",
+            "HIGHLIGHT, highlight",
+            "UNDERLINE, underline",
+            "STRIKEOUT, strikeout",
+            "SQUIGGLY,  squiggly",
+            "STAMP,     stamp",
+            "DIMENSION, dimension",
+        })
         @DisplayName("a shape exported and re-imported keeps its tool")
-        void toolSurvives(String tool) throws Exception {
+        void toolSurvives(Annotation.AnnotationType type, String tool) throws Exception {
             String shapeData = """
                 {"tool":"%s","x":10,"y":20,"width":100,"height":50,
-                 "cx":50,"cy":50,"r":25,
+                 "x1":0,"y1":0,"x2":80,"y2":60,"cx":50,"cy":50,"r":25,
                  "points":[{"x":1,"y":2},{"x":3,"y":4},{"x":5,"y":6}],
-                 "color":"#FF0000","strokeWidth":2}
+                 "text":"content","color":"#FF0000","strokeWidth":2}
                 """.formatted(tool);
 
-            String xfdf = service.toXfdf(
-                List.of(annotation(Annotation.AnnotationType.MARKUP, shapeData)), "d.pdf");
+            String xfdf = service.toXfdf(List.of(annotation(type, shapeData)), "d.pdf");
             var imported = service.fromXfdf(xfdf.getBytes());
 
             assertThat(imported).hasSize(1);
             assertThat(imported.get(0).shapeData()).contains("\"tool\":\"" + tool + "\"");
+        }
+
+        @Test
+        @DisplayName("a circle stays a circle rather than becoming an ellipse")
+        void circleIsNotWidenedToEllipse() throws Exception {
+            String xfdf = service.toXfdf(List.of(annotation(Annotation.AnnotationType.MARKUP,
+                "{\"tool\":\"circle\",\"cx\":50,\"cy\":50,\"r\":25}")), "d.pdf");
+
+            assertThat(service.fromXfdf(xfdf.getBytes()).get(0).shapeData())
+                .contains("\"tool\":\"circle\"");
+        }
+
+        @Test
+        @DisplayName("a dimension keeps its measurement text")
+        void dimensionKeepsMeasurement() throws Exception {
+            Annotation dimension = annotation(Annotation.AnnotationType.DIMENSION,
+                "{\"tool\":\"dimension\",\"x1\":0,\"y1\":0,\"x2\":100,\"y2\":0," +
+                "\"measurement\":\"12.5 m\"}", 1, "");
+
+            String xfdf = service.toXfdf(List.of(dimension), "d.pdf");
+            var imported = service.fromXfdf(xfdf.getBytes());
+
+            assertThat(imported.get(0).type()).isEqualTo(Annotation.AnnotationType.DIMENSION);
+            assertThat(imported.get(0).shapeData()).contains("12.5 m");
         }
 
         @ParameterizedTest(name = "{0} survives export then import")
