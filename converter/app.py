@@ -258,6 +258,28 @@ def find_dwg2dxf():
     return shutil.which("dwg2dxf")
 
 
+def find_tesseract():
+    """
+    Locate the Tesseract OCR binary. Single source of truth — the same
+    discovery was previously inlined in three places (text extraction,
+    startup banner, health check) with slightly different candidate lists.
+    """
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    if IS_WINDOWS:
+        for p in [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            r"C:\Users\{}\AppData\Local\Programs\Tesseract-OCR\tesseract.exe".format(
+                os.environ.get("USERNAME", "")),
+        ]:
+            if os.path.isfile(p):
+                return p
+    p = os.environ.get("TESSERACT_PATH", "")
+    return p if p and os.path.isfile(p) else None
+
+
 def dwg_via_libredwg(dwg_path: str) -> dict:
     tool = find_dwg2dxf()
     if not tool:
@@ -640,7 +662,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if urlparse(self.path).path == "/health":
-            lo = find_libreoffice()
+            lo   = find_libreoffice()
+            tess = find_tesseract()
             self._json(200, {
                 "status": "ok", "platform": platform.system(),
                 "ezdxf": EZDXF_OK,
@@ -648,6 +671,7 @@ class Handler(BaseHTTPRequestHandler):
                 "libreoffice": lo is not None, "libreofficePath": lo,
                 "odaInstalled": find_oda() is not None, "odaPath": find_oda(),
                 "libredwgInstalled": find_dwg2dxf() is not None,
+                "tesseractInstalled": tess is not None, "tesseractPath": tess,
             })
         else:
             self._json(404, {"error": "Use POST /convert"})
@@ -667,6 +691,17 @@ class Handler(BaseHTTPRequestHandler):
                 body.get("regions", []),
                 body.get("output",""),
                 body.get("burn", True)
+            )
+            self._json(200, result)
+            return
+
+        if ppath == "/ocr":
+            result = ocr_pdf_to_searchable(
+                body.get("path",""),
+                body.get("output",""),
+                body.get("lang","eng"),
+                body.get("dpi",300),
+                body.get("skipTextPages", True)
             )
             self._json(200, result)
             return
@@ -1264,23 +1299,10 @@ def _extract_text(path: str, ext: str) -> str:
             import pytesseract
             from PIL import Image
 
-            # Find Tesseract on Windows
-            if IS_WINDOWS:
-                for tc in [
-                    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-                    r"C:\Users\{}\AppData\Local\Programs\Tesseract-OCR\tesseract.exe".format(
-                        os.environ.get('USERNAME', '')),
-                ]:
-                    if os.path.isfile(tc):
-                        pytesseract.pytesseract.tesseract_cmd = tc
-                        break
-                else:
-                    found = shutil.which("tesseract")
-                    if found:
-                        pytesseract.pytesseract.tesseract_cmd = found
-                    else:
-                        raise FileNotFoundError("Tesseract not found")
+            tess = find_tesseract()
+            if not tess:
+                raise FileNotFoundError("Tesseract not found")
+            pytesseract.pytesseract.tesseract_cmd = tess
 
             print("[PDF] OCR with pypdfium2 + Tesseract...", flush=True)
             pdf_doc = pdfium.PdfDocument(path)
@@ -1715,6 +1737,120 @@ def _rasterize_pdf_with_redactions(path: str, regions: list, output: str):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  OCR: SCANNED PDF -> SEARCHABLE PDF
+# ══════════════════════════════════════════════════════════════════
+
+def _page_has_text(page, min_chars: int = 10) -> bool:
+    """
+    True if a pypdfium2 page already carries an extractable text layer.
+    Used to skip pages that don't need OCR — re-OCRing a digital page
+    would rasterize it and *lose* quality and real text for no gain.
+    """
+    try:
+        textpage = page.get_textpage()
+        text     = textpage.get_text_range() or ""
+        textpage.close()
+        return len(text.strip()) >= min_chars
+    except Exception:
+        return False
+
+
+def ocr_pdf_to_searchable(path: str, output: str = "", lang: str = "eng",
+                          dpi: int = 300, skip_text_pages: bool = True) -> dict:
+    """
+    Produce a searchable PDF from a scanned/image PDF by adding an invisible
+    text layer, leaving the visible page appearance unchanged.
+
+    Uses Tesseract's own PDF renderer (image_to_pdf_or_hocr) rather than
+    positioning invisible text by hand — Tesseract already knows each glyph's
+    exact box from recognition, so its output aligns text to the image
+    correctly, which hand-placed word boxes reliably get subtly wrong.
+
+    Pages that already have a text layer are copied through untouched
+    (skip_text_pages=True), so this is safe to run on a mixed document.
+    """
+    if not path or not os.path.exists(path):
+        return {"success": False, "error": f"File not found: {path}"}
+
+    tess = find_tesseract()
+    if not tess:
+        return {"success": False, "error": "TESSERACT_NOT_FOUND",
+                "hint": "Install Tesseract OCR: 'sudo apt install tesseract-ocr' "
+                        "(Linux) or https://github.com/UB-Mannheim/tesseract/wiki (Windows)"}
+
+    # Guard rails: dpi below ~150 wrecks recognition accuracy, above 600 costs
+    # a lot of time/memory for no measurable gain.
+    dpi = max(150, min(int(dpi or 300), 600))
+
+    try:
+        import pypdfium2 as pdfium
+        import pytesseract
+        import pypdf
+        import io
+
+        pytesseract.pytesseract.tesseract_cmd = tess
+
+        if not output:
+            output = os.path.splitext(path)[0] + "_searchable.pdf"
+
+        src        = pdfium.PdfDocument(path)
+        reader     = pypdf.PdfReader(path)
+        writer     = pypdf.PdfWriter()
+        total      = len(src)
+        ocr_pages  = 0
+        kept_pages = 0
+
+        print(f"[OCR] {total} page(s) @ {dpi}dpi lang={lang}", flush=True)
+
+        for i in range(total):
+            page = src[i]
+
+            if skip_text_pages and _page_has_text(page):
+                writer.add_page(reader.pages[i])
+                kept_pages += 1
+                continue
+
+            # pypdfium2's render scale is relative to 72dpi
+            bitmap = page.render(scale=dpi / 72.0)
+            img    = bitmap.to_pil().convert("RGB")
+
+            page_pdf = pytesseract.image_to_pdf_or_hocr(img, lang=lang, extension="pdf")
+            ocr_page = pypdf.PdfReader(io.BytesIO(page_pdf))
+            for p in ocr_page.pages:
+                writer.add_page(p)
+            ocr_pages += 1
+
+        src.close()
+
+        with open(output, "wb") as fh:
+            writer.write(fh)
+
+        print(f"[OCR] done — {ocr_pages} OCR'd, {kept_pages} already searchable", flush=True)
+
+        return {
+            "success": True,
+            "outputPath": output,
+            "totalPages": total,
+            "ocrPages": ocr_pages,
+            "skippedPages": kept_pages,
+            "language": lang,
+            "dpi": dpi,
+        }
+
+    except ImportError as e:
+        return {"success": False,
+                "error": f"Required library missing: {e}",
+                "hint": "pip install pypdfium2 pytesseract pypdf Pillow"}
+    except pytesseract.TesseractError as e:
+        # Most common cause: requested language pack not installed
+        return {"success": False, "error": f"Tesseract failed: {e}",
+                "hint": f"Is the '{lang}' language pack installed? "
+                        f"e.g. 'sudo apt install tesseract-ocr-{lang}'"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════
 #  PHASE 3: FLATTEN ANNOTATIONS TO PDF
 # ══════════════════════════════════════════════════════════════════
 
@@ -1983,15 +2119,7 @@ if __name__ == "__main__":
     oda   = find_oda()
     libre = find_dwg2dxf()
 
-    # Detect Tesseract
-    tess = shutil.which("tesseract")
-    if IS_WINDOWS and not tess:
-        for tc in [
-            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-        ]:
-            if os.path.isfile(tc):
-                tess = tc; break
+    tess  = find_tesseract()
 
     # Create C:\Temp on Windows for short paths
     if IS_WINDOWS:

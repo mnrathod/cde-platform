@@ -39,3 +39,7 @@ Thumbs.db
 ### App runtime ###
 uploads/
 *.log
+
+# Python bytecode (converter service)
+__pycache__/
+*.pyc

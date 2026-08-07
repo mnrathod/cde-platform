@@ -39,16 +39,16 @@ if ! python3 -c "import pypdf" 2>/dev/null; then
 fi
 echo "[OK] pypdf $(python3 -c 'import pypdf; print(pypdf.__version__)')"
 
-# ── Tesseract OCR (for scanned PDF comparison) ───────────────
+# ── Tesseract OCR (scanned-PDF comparison + searchable-PDF OCR) ──
 if ! command -v tesseract &>/dev/null; then
     echo "[INFO] Installing Tesseract OCR..."
     sudo apt-get install -y tesseract-ocr -qq
 fi
 echo "[OK] Tesseract: $(tesseract --version 2>&1 | head -1)"
 
-# ── OCR libs (PyMuPDF replaces pdf2image — no Poppler needed) ───────────────────────────────────────
+# ── OCR libs (pypdfium2 replaces pdf2image — no Poppler needed) ──
 if ! python3 -c "import pytesseract, pypdfium2, PIL" 2>/dev/null; then
-    echo "[INFO] Installing pytesseract, PyMuPDF, Pillow..."
+    echo "[INFO] Installing pytesseract, pypdfium2, Pillow..."
     python3 -m pip install pytesseract pypdfium2 Pillow --break-system-packages -q \
         || python3 -m pip install pytesseract pypdfium2 Pillow --user -q
 fi

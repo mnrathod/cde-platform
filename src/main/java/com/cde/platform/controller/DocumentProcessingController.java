@@ -19,6 +19,7 @@ import java.util.*;
  * Document processing endpoints:
  *   POST /api/viewer/{id}/flatten  — flatten annotations into PDF
  *   POST /api/documents/{id}/redact — redact regions from PDF
+ *   POST /api/documents/{id}/ocr    — scanned PDF → searchable PDF
  *   GET  /api/documents/{id}/form-fields — inspect PDF form fields
  *   POST /api/documents/{id}/form-fill  — fill PDF form fields
  */
@@ -136,6 +137,66 @@ public class DocumentProcessingController {
                 String fn    = name + "_redacted.pdf";
                 return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .body(bytes);
+            }
+            return ResponseEntity.ok(result);
+
+        } catch (java.net.ConnectException e) {
+            return ResponseEntity.status(503).body(Map.of("error","Converter offline"));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ── OCR: scanned PDF → searchable PDF ─────────────────────────
+    @PostMapping("/api/documents/{documentId}/ocr")
+    public ResponseEntity<?> ocrDocument(
+        @PathVariable Long documentId,
+        @RequestBody(required = false) Map<String,Object> body
+    ) {
+        var docOpt = documentRepo.findById(documentId);
+        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
+        var doc = docOpt.get();
+
+        if (doc.getFilePath() == null)
+            return ResponseEntity.badRequest().body(Map.of("error","No file path"));
+
+        Map<String,Object> opts = body != null ? body : Map.of();
+
+        try {
+            Path orig      = Paths.get(doc.getFilePath()).toAbsolutePath();
+            String name    = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
+            String outFile = orig.getParent().resolve(name + "_searchable.pdf").toString();
+
+            ObjectNode req = mapper.createObjectNode();
+            req.put("path",   orig.toString());
+            req.put("output", outFile);
+            req.put("lang",   opts.getOrDefault("lang", "eng").toString());
+            req.put("dpi",    Integer.parseInt(opts.getOrDefault("dpi", 300).toString()));
+            req.put("skipTextPages",
+                    Boolean.parseBoolean(opts.getOrDefault("skipTextPages", true).toString()));
+
+            HttpRequest httpReq = HttpRequest.newBuilder()
+                .uri(URI.create(converterUrl + "/ocr"))
+                // OCR is materially slower than the other converter calls —
+                // it rasterizes and recognizes every page — so it gets a
+                // longer ceiling than flatten/redact's 120s.
+                .timeout(Duration.ofMinutes(10))
+                .header("Content-Type","application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req)))
+                .build();
+
+            HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
+            var result = mapper.readTree(resp.body());
+
+            if (result.path("success").asBoolean(false)) {
+                byte[] bytes = Files.readAllBytes(Paths.get(result.path("outputPath").asText()));
+                String fn    = name + "_searchable.pdf";
+                return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
+                    .header("X-OCR-Pages",    result.path("ocrPages").asText("0"))
+                    .header("X-OCR-Skipped",  result.path("skippedPages").asText("0"))
                     .contentType(MediaType.APPLICATION_PDF)
                     .body(bytes);
             }
