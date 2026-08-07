@@ -2055,18 +2055,40 @@ def _qualified_field_name(node) -> str:
     return ".".join(reversed(parts))
 
 
-def _field_page_numbers(reader) -> dict:
-    """Map field name -> 1-based page number of the widget that renders it."""
-    pages = {}
-    for index, page in enumerate(reader.pages, start=1):
+def _field_widget_index(reader) -> dict:
+    """
+    Map field name -> {"page": 1-based page, "widget": widget dictionary}.
+
+    Widget annotations carry attributes that PdfReader.get_fields() does not
+    surface — /MaxLen among them, which only ever appears here — so anything
+    beyond /T /FT /Ff /V /DV has to be read off the page's /Annots directly.
+    """
+    index = {}
+    for page_number, page in enumerate(reader.pages, start=1):
         for annot in (page.get("/Annots") or []):
             try:
-                name = _qualified_field_name(annot.get_object())
+                widget = annot.get_object()
+                name = _qualified_field_name(widget)
             except Exception:
                 continue
-            if name and name not in pages:
-                pages[name] = index
-    return pages
+            if name and name not in index:
+                index[name] = {"page": page_number, "widget": widget}
+    return index
+
+
+def _inherited_attr(node, key, depth: int = 8):
+    """
+    Read an AcroForm attribute, following /Parent — field attributes may be
+    declared on an ancestor rather than the widget itself.
+    """
+    guard = 0
+    while node is not None and guard < depth:
+        if key in node:
+            return node[key]
+        parent = node.get("/Parent")
+        node = parent.get_object() if parent is not None else None
+        guard += 1
+    return None
 
 
 def _is_truthy(value) -> bool:
@@ -2192,8 +2214,8 @@ def inspect_pdf_form(path: str) -> dict:
     try:
         import pypdf
         reader = pypdf.PdfReader(path)
-        fields = reader.get_fields() or {}
-        pages  = _field_page_numbers(reader)
+        fields  = reader.get_fields() or {}
+        widgets = _field_widget_index(reader)
 
         described = []
         for name, field in fields.items():
@@ -2209,7 +2231,7 @@ def inspect_pdf_form(path: str) -> dict:
                 "flags":     flags,
                 "readOnly":  bool(flags & FF_READ_ONLY),
                 "required":  bool(flags & FF_REQUIRED),
-                "page":      pages.get(name, 1),
+                "page":      widgets.get(name, {}).get("page", 1),
             }
 
             if kind in ("checkbox", "radio"):
@@ -2225,7 +2247,8 @@ def inspect_pdf_form(path: str) -> dict:
                 entry["multiSelect"] = bool(flags & FF_MULTISELECT)
 
             if kind in ("text", "textarea", "password"):
-                max_len = field.get("/MaxLen")
+                widget  = widgets.get(name, {}).get("widget")
+                max_len = _inherited_attr(widget, "/MaxLen") if widget is not None else None
                 if max_len is not None:
                     entry["maxLength"] = int(max_len)
                 entry["multiline"] = bool(flags & FF_MULTILINE)
