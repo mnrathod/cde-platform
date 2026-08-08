@@ -1657,7 +1657,8 @@ def redact_pdf(path: str, regions: list, output: str = "", burn: bool = True) ->
         redacted_pages = 0
         if burn:
             redacted_pages = _rewrite_pdf_pages(
-                path, output, REDACTION_DPI, by_page, _draw_redactions
+                path, output, REDACTION_DPI, by_page, _draw_redactions,
+                drop_annots_in=_redaction_rects
             )
         # Preview mode draws the overlay client-side; nothing to write here.
 
@@ -1686,15 +1687,24 @@ def _group_by_page(items: list, key: str = "page") -> dict:
 
 
 def _rewrite_pdf_pages(path: str, output: str, dpi: int,
-                       edits_by_page: dict, draw_page) -> int:
+                       edits_by_page: dict, draw_page,
+                       drop_annots_in=None) -> int:
     """
-    Rebuild a PDF, rasterizing ONLY the pages that carry edits and copying
-    every other page through untouched.
+    Rebuild a PDF, rasterizing ONLY the pages that carry edits and leaving
+    every other page untouched.
 
-    Copying untouched pages matters for correctness, not just speed:
+    Leaving untouched pages alone matters for correctness, not just speed:
     rasterizing a page discards its vector content and its text layer, so
     blanket-rasterizing silently makes an ENTIRE document unsearchable
     because one region on one page was redacted.
+
+    The document is cloned and the affected pages have their content
+    *replaced* in place, rather than being rebuilt page by page into an empty
+    writer. Rebuilding dropped the document catalog — most visibly /AcroForm,
+    which meant redacting or flattening any page destroyed the form fields on
+    every page, and a later form-fill reported the file as having no form at
+    all. Cloning keeps the catalog, the page objects and their annotations;
+    only the page's own drawing content is swapped for the raster.
 
     The render DPI and the DPI declared when saving must be the same number,
     or every rasterized page is rescaled by their ratio — rendering at
@@ -1702,7 +1712,14 @@ def _rewrite_pdf_pages(path: str, output: str, dpi: int,
     96% of its original size.
 
     draw_page(draw, items, scale_x, scale_y, page_width, page_height)
-    performs the actual drawing. Returns the count of rasterized pages.
+    performs the actual drawing.
+
+    drop_annots_in(items, page_width, page_height) -> list of rectangles whose
+    annotations must not survive. Redaction supplies this: a widget sitting
+    over redacted content would still carry its value in the file even though
+    the pixels beneath it are gone.
+
+    Returns the count of rasterized pages.
     """
     import pypdfium2 as pdfium
     from PIL import ImageDraw
@@ -1710,15 +1727,13 @@ def _rewrite_pdf_pages(path: str, output: str, dpi: int,
     import io
 
     src     = pdfium.PdfDocument(path)
-    reader  = pypdf.PdfReader(path)
-    writer  = pypdf.PdfWriter()
+    writer  = pypdf.PdfWriter(clone_from=path)
     touched = 0
+    orphaned = []          # annotations removed, to prune from the AcroForm
 
     try:
-        for i in range(len(src)):
-            items = edits_by_page.get(i)
-            if not items:
-                writer.add_page(reader.pages[i])
+        for i, items in sorted(edits_by_page.items()):
+            if not items or i >= len(src):
                 continue
 
             page   = src[i]
@@ -1731,14 +1746,140 @@ def _rewrite_pdf_pages(path: str, output: str, dpi: int,
             buf = io.BytesIO()
             img.save(buf, "PDF", resolution=dpi)
             buf.seek(0)
-            writer.add_page(pypdf.PdfReader(buf).pages[0])
+            raster = pypdf.PdfReader(buf).pages[0]
+
+            _stamp_page_content(writer.pages[i], raster)
+            target = writer.pages[i]
+
+            if drop_annots_in:
+                orphaned += _remove_annotations_within(
+                    target, drop_annots_in(items, pw, ph))
+
             touched += 1
+
+        _prune_acroform_fields(writer, orphaned)
     finally:
         src.close()
 
     with open(output, "wb") as fh:
         writer.write(fh)
     return touched
+
+
+def _stamp_page_content(target, replacement) -> None:
+    """
+    Replace a page's drawing content with another page's, in place.
+
+    Used by every operation that rebuilds a page — redaction, flattening, OCR.
+    Replacing content rather than swapping the whole page keeps the page
+    object, so its annotations, its form widgets and the document catalog that
+    references it all survive. Rebuilding pages into a fresh writer instead
+    dropped /AcroForm, which is why OCR'ing a document used to leave it with
+    no fillable fields at all.
+
+    A replacement of a different size is scaled to the target's box; a page
+    produced at a different DPI than the original would otherwise be stamped
+    at the wrong scale and clipped.
+    """
+    from pypdf import Transformation
+
+    target.replace_contents(None)
+
+    target_width  = float(target.mediabox.width)
+    target_height = float(target.mediabox.height)
+    source_width  = float(replacement.mediabox.width)
+    source_height = float(replacement.mediabox.height)
+
+    if (source_width <= 0 or source_height <= 0
+            or (abs(source_width - target_width) < 0.5
+                and abs(source_height - target_height) < 0.5)):
+        target.merge_page(replacement)
+        return
+
+    target.merge_transformed_page(replacement, Transformation().scale(
+        target_width / source_width, target_height / source_height))
+
+
+def _remove_annotations_within(page, rects: list) -> list:
+    """
+    Delete annotations whose rectangle overlaps any of the given areas, and
+    return what was removed.
+
+    Rasterizing destroys the pixels but not the objects drawn on top of them,
+    so a form field or note sitting over a redacted region would keep its
+    contents in the file. Rectangles are in PDF points, origin bottom-left.
+    """
+    from pypdf.generic import ArrayObject, NameObject
+
+    annots = page.get("/Annots")
+    if not annots or not rects:
+        return []
+
+    def overlaps(rect) -> bool:
+        try:
+            ax0, ay0, ax1, ay1 = (float(v) for v in rect)
+        except (TypeError, ValueError):
+            return False
+        lo_x, hi_x = min(ax0, ax1), max(ax0, ax1)
+        lo_y, hi_y = min(ay0, ay1), max(ay0, ay1)
+        return any(lo_x < rx1 and hi_x > rx0 and lo_y < ry1 and hi_y > ry0
+                   for rx0, ry0, rx1, ry1 in rects)
+
+    kept, removed = ArrayObject(), []
+    for ref in annots:
+        if overlaps(ref.get_object().get("/Rect", [])):
+            removed.append(ref)
+        else:
+            kept.append(ref)
+
+    page[NameObject("/Annots")] = kept
+    return removed
+
+
+def _prune_acroform_fields(writer, orphaned: list) -> None:
+    """
+    Drop redacted widgets from the document's AcroForm field list.
+
+    Removing a widget from its page is not enough on its own: the field is
+    also listed in the catalog's /AcroForm /Fields, and a field reachable from
+    there keeps its value in the file whatever the page shows. For a
+    single-widget field — what most generators emit — the widget and the field
+    are one object, so the same reference appears in both places.
+    """
+    if not orphaned:
+        return
+
+    from pypdf.generic import ArrayObject, IndirectObject, NameObject
+
+    acroform = writer._root_object.get("/AcroForm")
+    if acroform is None:
+        return
+    # /AcroForm is normally an indirect reference. Assigning through the
+    # reference updates the proxy, not the dictionary the catalog points at,
+    # so resolve it before writing back.
+    acroform = acroform.get_object()
+    if "/Fields" not in acroform:
+        return
+
+    def key(ref):
+        return ref.idnum if isinstance(ref, IndirectObject) else id(ref)
+
+    removed = {key(ref) for ref in orphaned}
+    acroform[NameObject("/Fields")] = ArrayObject([
+        ref for ref in acroform["/Fields"] if key(ref) not in removed
+    ])
+
+
+def _redaction_rects(regions: list, page_w: float, page_h: float) -> list:
+    """Redacted areas as (x0, y0, x1, y1) in PDF points, origin bottom-left."""
+    rects = []
+    for region in regions:
+        x = float(region.get("x", 0))
+        y = float(region.get("y", 0))
+        w = float(region.get("width", 100))
+        h = float(region.get("height", 20))
+        rects.append((x, y, x + w, y + h))
+    return rects
 
 
 def _draw_redactions(draw, regions, scale_x, scale_y, page_w, page_h):
@@ -1876,8 +2017,11 @@ def ocr_pdf_to_searchable(path: str, output: str = "", lang: str = "eng",
             output = os.path.splitext(path)[0] + "_searchable.pdf"
 
         src        = pdfium.PdfDocument(path)
-        reader     = pypdf.PdfReader(path)
-        writer     = pypdf.PdfWriter()
+        # Clone rather than assembling pages into an empty writer: an empty
+        # writer starts with an empty catalog, so /AcroForm was dropped and an
+        # OCR'd document reported itself as having no fillable form fields —
+        # which then made form-filling impossible on anything already OCR'd.
+        writer     = pypdf.PdfWriter(clone_from=path)
         total      = len(src)
         ocr_pages  = 0
         kept_pages = 0
@@ -1888,7 +2032,6 @@ def ocr_pdf_to_searchable(path: str, output: str = "", lang: str = "eng",
             page = src[i]
 
             if skip_text_pages and _page_has_text(page):
-                writer.add_page(reader.pages[i])
                 kept_pages += 1
                 continue
 
@@ -1903,9 +2046,9 @@ def ocr_pdf_to_searchable(path: str, output: str = "", lang: str = "eng",
             page_pdf = pytesseract.image_to_pdf_or_hocr(
                 img, lang=lang, extension="pdf", config=f"--dpi {dpi}"
             )
-            ocr_page = pypdf.PdfReader(io.BytesIO(page_pdf))
-            for p in ocr_page.pages:
-                writer.add_page(p)
+            recognised = pypdf.PdfReader(io.BytesIO(page_pdf)).pages
+            if recognised:
+                _stamp_page_content(writer.pages[i], recognised[0])
             ocr_pages += 1
 
         src.close()

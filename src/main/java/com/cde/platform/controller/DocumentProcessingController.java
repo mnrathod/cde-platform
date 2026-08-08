@@ -1,296 +1,145 @@
 package com.cde.platform.controller;
 
-import com.cde.platform.repository.DocumentRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import com.cde.platform.dto.Dtos.ProcessingResponse;
+import com.cde.platform.service.DocumentProcessingService;
+import com.cde.platform.service.DocumentProcessingService.ProcessingResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.file.*;
-import java.time.Duration;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 /**
- * Document processing endpoints:
- *   POST /api/viewer/{id}/flatten  — flatten annotations into PDF
- *   POST /api/documents/{id}/redact — redact regions from PDF
- *   POST /api/documents/{id}/ocr    — scanned PDF → searchable PDF
- *   GET  /api/documents/{id}/form-fields — inspect PDF form fields
- *   POST /api/documents/{id}/form-fill  — fill PDF form fields
+ * Document processing endpoints. Each one rewrites the document and commits
+ * the result as a new version:
+ * <pre>
+ *   POST /api/viewer/{id}/flatten        — bake annotations into the page
+ *   POST /api/documents/{id}/redact      — destroy content under regions
+ *   POST /api/documents/{id}/ocr         — scanned pages -> searchable text
+ *   GET  /api/documents/{id}/form-fields — describe AcroForm fields
+ *   POST /api/documents/{id}/form-fill   — write form values
+ * </pre>
+ *
+ * <p>All four rewriting operations reply with the committed version rather
+ * than the file itself. Returning the bytes made them mutually exclusive —
+ * each produced a download built from the untouched original, so they could
+ * never be combined. The client now reloads the document and can run the next
+ * operation on the previous one's result. The file remains available from
+ * {@code /api/documents/{id}/versions/{n}/file}.
  */
 @RestController
 public class DocumentProcessingController {
 
-    private final DocumentRepository documentRepo;
-    private final ObjectMapper        mapper = new ObjectMapper();
-    private final HttpClient          http   = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(5)).build();
+    private static final int MIN_OCR_DPI = 150;   // below this, accuracy collapses
+    private static final int MAX_OCR_DPI = 600;   // above this, memory use is not worth it
 
-    @Value("${cde.converter.url:http://localhost:5001}")
-    private String converterUrl;
+    private final DocumentProcessingService processing;
 
-    @Value("${cde.storage.upload-dir:./uploads}")
-    private String uploadDir;
-
-    public DocumentProcessingController(DocumentRepository documentRepo) {
-        this.documentRepo = documentRepo;
+    public DocumentProcessingController(DocumentProcessingService processing) {
+        this.processing = processing;
     }
 
-    // ── Flatten annotations into PDF ─────────────────────────────
+    // ── Flatten annotations into the page ────────────────────────
     @PostMapping("/api/viewer/{documentId}/flatten")
-    public ResponseEntity<?> flattenAnnotations(
+    public ResponseEntity<ProcessingResponse> flattenAnnotations(
         @PathVariable Long documentId,
-        @RequestBody Map<String,Object> body
+        @RequestBody FlattenRequest request,
+        @AuthenticationPrincipal UserDetails principal
     ) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc = docOpt.get();
+        ProcessingResult result = processing.flatten(
+            documentId, request.shapes(), request.qualityOrDefault(), usernameOf(principal));
+        return respond(documentId, result);
+    }
 
-        if (doc.getFilePath() == null)
-            return ResponseEntity.badRequest().body(Map.of("error","No file path"));
-
-        try {
-            // Build output path — must be absolute: the Python converter runs as a
-            // separate process with its own working directory, so a relative path
-            // here resolves against the WRONG directory on that side and the write
-            // silently fails ("No such file or directory").
-            Path orig    = Paths.get(doc.getFilePath()).toAbsolutePath();
-            String name  = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            String outFile = orig.getParent().resolve(name + "_annotated.pdf").toString();
-
-            ObjectNode req = mapper.createObjectNode();
-            req.put("path",    orig.toString());
-            req.put("output",  outFile);
-            req.put("quality", body.getOrDefault("quality","screen").toString());
-            req.set("shapes",  mapper.valueToTree(body.getOrDefault("shapes", List.of())));
-
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(converterUrl + "/flatten"))
-                .timeout(Duration.ofSeconds(120))
-                .header("Content-Type","application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req)))
-                .build();
-
-            HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            var result = mapper.readTree(resp.body());
-
-            if (result.path("success").asBoolean(false)) {
-                // Return the flattened PDF as download
-                byte[] bytes = Files.readAllBytes(Paths.get(result.path("outputPath").asText()));
-                String fn    = name + "_annotated.pdf";
-                return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
-                    .contentType(MediaType.APPLICATION_PDF)
-                    .body(bytes);
-            }
-            return ResponseEntity.ok(result);
-
-        } catch (java.net.ConnectException e) {
-            return ResponseEntity.status(503).body(Map.of("error","Converter offline"));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+    public record FlattenRequest(List<Map<String, Object>> shapes, String quality) {
+        String qualityOrDefault() {
+            return "print".equalsIgnoreCase(quality) ? "print" : "screen";
         }
     }
 
-    // ── Redact PDF ───────────────────────────────────────────────
+    // ── Redact ───────────────────────────────────────────────────
     @PostMapping("/api/documents/{documentId}/redact")
-    public ResponseEntity<?> redactDocument(
+    public ResponseEntity<ProcessingResponse> redactDocument(
         @PathVariable Long documentId,
-        @RequestBody Map<String,Object> body
+        @RequestBody RedactRequest request,
+        @AuthenticationPrincipal UserDetails principal
     ) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc = docOpt.get();
-
-        if (doc.getFilePath() == null)
-            return ResponseEntity.badRequest().body(Map.of("error","No file path"));
-
-        try {
-            Path orig    = Paths.get(doc.getFilePath()).toAbsolutePath();
-            String name  = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            String outFile = orig.getParent().resolve(name + "_redacted.pdf").toString();
-
-            ObjectNode req = mapper.createObjectNode();
-            req.put("path",   orig.toString());
-            req.put("output", outFile);
-            req.put("burn",   Boolean.TRUE.equals(body.getOrDefault("burn", true)));
-            req.set("regions", mapper.valueToTree(body.getOrDefault("regions", List.of())));
-
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(converterUrl + "/redact"))
-                .timeout(Duration.ofSeconds(120))
-                .header("Content-Type","application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req)))
-                .build();
-
-            HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            var result = mapper.readTree(resp.body());
-
-            if (result.path("success").asBoolean(false) &&
-                Boolean.TRUE.equals(body.getOrDefault("burn", true))) {
-                byte[] bytes = Files.readAllBytes(Paths.get(result.path("outputPath").asText()));
-                String fn    = name + "_redacted.pdf";
-                return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
-                    .contentType(MediaType.APPLICATION_PDF)
-                    .body(bytes);
-            }
-            return ResponseEntity.ok(result);
-
-        } catch (java.net.ConnectException e) {
-            return ResponseEntity.status(503).body(Map.of("error","Converter offline"));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
+        ProcessingResult result = processing.redact(
+            documentId, request.regions(), usernameOf(principal));
+        return respond(documentId, result);
     }
 
-    // ── OCR: scanned PDF → searchable PDF ─────────────────────────
+    public record RedactRequest(List<Map<String, Object>> regions) {}
+
+    // ── OCR ──────────────────────────────────────────────────────
     @PostMapping("/api/documents/{documentId}/ocr")
-    public ResponseEntity<?> ocrDocument(
+    public ResponseEntity<ProcessingResponse> ocrDocument(
         @PathVariable Long documentId,
-        @RequestBody(required = false) Map<String,Object> body
+        @RequestBody(required = false) OcrRequest request,
+        @AuthenticationPrincipal UserDetails principal
     ) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc = docOpt.get();
+        OcrRequest options = request != null ? request : new OcrRequest(null, null, null);
+        ProcessingResult result = processing.runOcr(
+            documentId,
+            options.languageOrDefault(),
+            options.dpiOrDefault(),
+            options.skipTextPagesOrDefault(),
+            usernameOf(principal));
+        return respond(documentId, result);
+    }
 
-        if (doc.getFilePath() == null)
-            return ResponseEntity.badRequest().body(Map.of("error","No file path"));
-
-        Map<String,Object> opts = body != null ? body : Map.of();
-
-        try {
-            Path orig      = Paths.get(doc.getFilePath()).toAbsolutePath();
-            String name    = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            String outFile = orig.getParent().resolve(name + "_searchable.pdf").toString();
-
-            ObjectNode req = mapper.createObjectNode();
-            req.put("path",   orig.toString());
-            req.put("output", outFile);
-            req.put("lang",   opts.getOrDefault("lang", "eng").toString());
-            req.put("dpi",    Integer.parseInt(opts.getOrDefault("dpi", 300).toString()));
-            req.put("skipTextPages",
-                    Boolean.parseBoolean(opts.getOrDefault("skipTextPages", true).toString()));
-
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(converterUrl + "/ocr"))
-                // OCR is materially slower than the other converter calls —
-                // it rasterizes and recognizes every page — so it gets a
-                // longer ceiling than flatten/redact's 120s.
-                .timeout(Duration.ofMinutes(10))
-                .header("Content-Type","application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req)))
-                .build();
-
-            HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            var result = mapper.readTree(resp.body());
-
-            if (result.path("success").asBoolean(false)) {
-                byte[] bytes = Files.readAllBytes(Paths.get(result.path("outputPath").asText()));
-                String fn    = name + "_searchable.pdf";
-                return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
-                    .header("X-OCR-Pages",    result.path("ocrPages").asText("0"))
-                    .header("X-OCR-Skipped",  result.path("skippedPages").asText("0"))
-                    .contentType(MediaType.APPLICATION_PDF)
-                    .body(bytes);
-            }
-            return ResponseEntity.ok(result);
-
-        } catch (java.net.ConnectException e) {
-            return ResponseEntity.status(503).body(Map.of("error","Converter offline"));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+    /**
+     * DPI is clamped rather than rejected: a caller asking for 1200 wants the
+     * best available quality, and failing the request would only make them
+     * guess the limit.
+     */
+    public record OcrRequest(String lang, Integer dpi, Boolean skipTextPages) {
+        String languageOrDefault() {
+            return lang == null || lang.isBlank() ? "eng" : lang;
+        }
+        int dpiOrDefault() {
+            if (dpi == null) return 300;
+            return Math.clamp(dpi, MIN_OCR_DPI, MAX_OCR_DPI);
+        }
+        boolean skipTextPagesOrDefault() {
+            return skipTextPages == null || skipTextPages;
         }
     }
 
-    // ── Inspect PDF form fields ───────────────────────────────────
+    // ── Inspect form fields ──────────────────────────────────────
     @GetMapping("/api/documents/{documentId}/form-fields")
-    public ResponseEntity<?> getFormFields(@PathVariable Long documentId) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc = docOpt.get();
+    public ResponseEntity<JsonNode> getFormFields(@PathVariable Long documentId) {
+        return ResponseEntity.ok(processing.inspectForm(documentId));
+    }
 
-        if (doc.getFilePath() == null)
-            return ResponseEntity.ok(Map.of("fields", List.of(), "count", 0));
+    // ── Fill form ────────────────────────────────────────────────
+    @PostMapping("/api/documents/{documentId}/form-fill")
+    public ResponseEntity<ProcessingResponse> fillForm(
+        @PathVariable Long documentId,
+        @RequestBody FormFillRequest request,
+        @AuthenticationPrincipal UserDetails principal
+    ) {
+        ProcessingResult result = processing.fillForm(
+            documentId, request.fields(), request.flattenOrDefault(), usernameOf(principal));
+        return respond(documentId, result);
+    }
 
-        try {
-            ObjectNode req = mapper.createObjectNode();
-            req.put("path", Paths.get(doc.getFilePath()).toAbsolutePath().toString());
-
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(converterUrl + "/form-fields"))
-                .timeout(Duration.ofSeconds(30))
-                .header("Content-Type","application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req)))
-                .build();
-
-            HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.ok(mapper.readTree(resp.body()));
-
-        } catch (java.net.ConnectException e) {
-            return ResponseEntity.status(503).body(Map.of("error","Converter offline"));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+    public record FormFillRequest(Map<String, Object> fields, Boolean flatten) {
+        boolean flattenOrDefault() {
+            return Boolean.TRUE.equals(flatten);
         }
     }
 
-    // ── Fill PDF form ─────────────────────────────────────────────
-    @PostMapping("/api/documents/{documentId}/form-fill")
-    public ResponseEntity<?> fillForm(
-        @PathVariable Long documentId,
-        @RequestBody Map<String,Object> body
-    ) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc = docOpt.get();
+    // ── Shared ───────────────────────────────────────────────────
+    private ResponseEntity<ProcessingResponse> respond(Long documentId, ProcessingResult result) {
+        return ResponseEntity.ok(
+            ProcessingResponse.from(documentId, result.version(), result.details()));
+    }
 
-        if (doc.getFilePath() == null)
-            return ResponseEntity.badRequest().body(Map.of("error","No file path"));
-
-        try {
-            Path orig    = Paths.get(doc.getFilePath()).toAbsolutePath();
-            String name  = orig.getFileName().toString().replaceAll("\\.[^.]+$","");
-            String outFile = orig.getParent().resolve(name + "_filled.pdf").toString();
-
-            ObjectNode req = mapper.createObjectNode();
-            req.put("path",   orig.toString());
-            req.put("output", outFile);
-            // flatten=true bakes the values in and drops the interactive
-            // fields, so the result can't be edited further.
-            req.put("flatten",
-                    Boolean.parseBoolean(body.getOrDefault("flatten", false).toString()));
-            req.set("fields", mapper.valueToTree(body.getOrDefault("fields", Map.of())));
-
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(converterUrl + "/form-fill"))
-                .timeout(Duration.ofSeconds(60))
-                .header("Content-Type","application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req)))
-                .build();
-
-            HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            var result = mapper.readTree(resp.body());
-
-            if (result.path("success").asBoolean(false)) {
-                byte[] bytes = Files.readAllBytes(Paths.get(result.path("outputPath").asText()));
-                String fn    = name + "_filled.pdf";
-                return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
-                    .contentType(MediaType.APPLICATION_PDF)
-                    .body(bytes);
-            }
-            return ResponseEntity.ok(result);
-
-        } catch (java.net.ConnectException e) {
-            return ResponseEntity.status(503).body(Map.of("error","Converter offline"));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
+    private String usernameOf(UserDetails principal) {
+        return principal != null ? principal.getUsername() : null;
     }
 }

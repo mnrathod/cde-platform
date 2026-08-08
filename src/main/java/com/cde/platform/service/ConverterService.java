@@ -1,5 +1,6 @@
 package com.cde.platform.service;
 
+import com.cde.platform.exception.ConverterOfflineException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -92,6 +93,37 @@ public class ConverterService {
         // Converter returned a JSON error
         JsonNode json = mapper.readTree(resp.body());
         throw new RuntimeException(json.path("error").asText("Conversion failed"));
+    }
+
+    /**
+     * Posts a JSON body to a converter endpoint and returns the parsed reply.
+     *
+     * <p>Shared by every document-processing call so the timeout, headers and
+     * offline handling are defined once rather than repeated per operation.
+     *
+     * @param endpoint path beginning with {@code /}, e.g. {@code /redact}
+     * @param timeout  per-call ceiling; OCR needs far longer than the rest
+     * @throws ConverterOfflineException if the converter cannot be reached
+     */
+    public JsonNode callJson(String endpoint, ObjectNode body, Duration timeout) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(converterUrl + endpoint))
+                .timeout(timeout)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+                .build();
+
+            return mapper.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body());
+
+        } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
+            throw new ConverterOfflineException(converterUrl);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Converter call to " + endpoint + " was interrupted", e);
+        } catch (java.io.IOException e) {
+            throw new ConverterOfflineException(converterUrl);
+        }
     }
 
     public boolean isConverterRunning() {

@@ -13,8 +13,8 @@ import java.util.List;
  * Deletes documents and projects together with everything that references
  * them.
  *
- * Annotations, replies and signatures all hold a non-null foreign key to the
- * document, and none of the mappings cascade, so deleting a document
+ * Annotations, replies, signatures and versions all hold a non-null foreign
+ * key to the document, and none of the mappings cascade, so deleting a document
  * directly raises a referential-integrity error. Worse, that error surfaced
  * to the client as 403 — Spring Security's ExceptionTranslationFilter turns
  * an unhandled exception into an access-denied response — which made a data
@@ -33,17 +33,20 @@ public class DocumentDeletionService {
     private final AnnotationRepository        annotationRepo;
     private final AnnotationReplyRepository   replyRepo;
     private final DocumentSignatureRepository signatureRepo;
+    private final DocumentVersionRepository   versionRepo;
     private final ProjectRepository           projectRepo;
 
     public DocumentDeletionService(DocumentRepository documentRepo,
                                    AnnotationRepository annotationRepo,
                                    AnnotationReplyRepository replyRepo,
                                    DocumentSignatureRepository signatureRepo,
+                                   DocumentVersionRepository versionRepo,
                                    ProjectRepository projectRepo) {
         this.documentRepo  = documentRepo;
         this.annotationRepo = annotationRepo;
         this.replyRepo      = replyRepo;
         this.signatureRepo  = signatureRepo;
+        this.versionRepo    = versionRepo;
         this.projectRepo    = projectRepo;
     }
 
@@ -94,6 +97,9 @@ public class DocumentDeletionService {
             replyRepo.deleteByAnnotation_IdIn(annotationIds);
         }
         annotationRepo.deleteByDocument_Id(documentId);
+        // Signatures reference the version they were taken against, so they
+        // have to go before the versions themselves.
         signatureRepo.deleteByDocument_Id(documentId);
+        versionRepo.deleteByDocument_Id(documentId);
     }
 }

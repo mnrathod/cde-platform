@@ -4,6 +4,7 @@ import com.cde.platform.model.*;
 import com.cde.platform.repository.*;
 import com.cde.platform.service.DigitalSignatureService;
 import com.cde.platform.service.DigitalSignatureService.*;
+import com.cde.platform.service.DocumentVersionService;
 import org.springframework.http.*;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -21,6 +22,7 @@ public class SignatureController {
     private final DocumentRepository       documentRepo;
     private final DocumentSignatureRepository signatureRepo;
     private final UserRepository           userRepo;
+    private final DocumentVersionService   versionService;
 
     // In-memory cert store — in production use HSM or keystore file
     private final Map<String, SelfSignedCert> userCerts = new java.util.concurrent.ConcurrentHashMap<>();
@@ -29,12 +31,14 @@ public class SignatureController {
         DigitalSignatureService sigService,
         DocumentRepository documentRepo,
         DocumentSignatureRepository signatureRepo,
-        UserRepository userRepo
+        UserRepository userRepo,
+        DocumentVersionService versionService
     ) {
-        this.sigService    = sigService;
-        this.documentRepo  = documentRepo;
-        this.signatureRepo = signatureRepo;
-        this.userRepo      = userRepo;
+        this.sigService     = sigService;
+        this.documentRepo   = documentRepo;
+        this.signatureRepo  = signatureRepo;
+        this.userRepo       = userRepo;
+        this.versionService = versionService;
     }
 
     // ── GET /api/signatures/document/{id} ────────────────────────
@@ -59,8 +63,14 @@ public class SignatureController {
             return ResponseEntity.badRequest().body(Map.of("error","Document has no file"));
 
         try {
-            byte[] fileBytes = Files.readAllBytes(Paths.get(doc.getFilePath()));
             var user = userRepo.findByUsername(principal.getUsername()).orElseThrow();
+
+            // Pin the signature to the version being signed. Signing "the
+            // document" would leave it verifying against whatever the head
+            // becomes later, so a subsequent OCR or redaction would invalidate
+            // signatures nobody had tampered with.
+            var signedVersion = versionService.currentVersion(doc, user);
+            byte[] fileBytes  = Files.readAllBytes(Paths.get(signedVersion.getFilePath()));
 
             // Get or generate cert for this user
             SelfSignedCert cert = userCerts.computeIfAbsent(
@@ -88,7 +98,7 @@ public class SignatureController {
             // Persist signature
             var sig = DocumentSignature.builder()
                 .signatureId(record.id())
-                .document(doc).signer(user)
+                .document(doc).documentVersion(signedVersion).signer(user)
                 .signerName(record.signerName())
                 .signerEmail(record.signerEmail())
                 .role(record.role()).reason(record.reason())
@@ -118,6 +128,7 @@ public class SignatureController {
                 "signedAt",     record.signedAt().toString(),
                 "status",       "VALID",
                 "stampSvg",     stampSvg,
+                "version",      signedVersion.getVersionNumber(),
                 "documentStatus", doc.getStatus().name()
             ));
 
@@ -135,7 +146,7 @@ public class SignatureController {
         var sig = sigOpt.get();
 
         try {
-            byte[] fileBytes = Files.readAllBytes(Paths.get(sig.getDocument().getFilePath()));
+            byte[] fileBytes = Files.readAllBytes(signedBytesPath(sig));
 
             // Build a SignatureRecord for verification
             SignatureRecord record = new SignatureRecord(
@@ -184,16 +195,36 @@ public class SignatureController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * The bytes this signature actually covers.
+     *
+     * <p>Always the signed version, never the document head — the head moves
+     * every time the document is redacted, OCR'd or filled, and verifying
+     * against it would report every earlier signature as TAMPERED. Signatures
+     * predating versioning have no version and fall back to the head, which
+     * is the file they were taken from.
+     */
+    private Path signedBytesPath(DocumentSignature signature) {
+        var version = signature.getDocumentVersion();
+        return Paths.get(version != null
+            ? version.getFilePath()
+            : signature.getDocument().getFilePath());
+    }
+
     private Map<String,Object> toResponse(DocumentSignature s) {
-        return Map.of(
-            "id",          s.getId(),
-            "signatureId", s.getSignatureId(),
-            "signerName",  s.getSignerName(),
-            "signerEmail", s.getSignerEmail() != null ? s.getSignerEmail() : "",
-            "role",        s.getRole() != null ? s.getRole() : "",
-            "reason",      s.getReason() != null ? s.getReason() : "",
-            "status",      s.getStatus().name(),
-            "signedAt",    s.getSignedAt().toString()
-        );
+        var response = new LinkedHashMap<String,Object>();
+        response.put("id",          s.getId());
+        response.put("signatureId", s.getSignatureId());
+        response.put("signerName",  s.getSignerName());
+        response.put("signerEmail", s.getSignerEmail() != null ? s.getSignerEmail() : "");
+        response.put("role",        s.getRole() != null ? s.getRole() : "");
+        response.put("reason",      s.getReason() != null ? s.getReason() : "");
+        response.put("status",      s.getStatus().name());
+        response.put("signedAt",    s.getSignedAt().toString());
+        // Which revision this attests to — a signature on v2 says nothing
+        // about v5, and the UI needs to show that distinction.
+        response.put("version",
+            s.getDocumentVersion() != null ? s.getDocumentVersion().getVersionNumber() : null);
+        return response;
     }
 }
