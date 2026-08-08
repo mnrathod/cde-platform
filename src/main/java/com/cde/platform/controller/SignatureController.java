@@ -1,230 +1,122 @@
 package com.cde.platform.controller;
 
-import com.cde.platform.model.*;
-import com.cde.platform.repository.*;
-import com.cde.platform.service.DigitalSignatureService;
-import com.cde.platform.service.DigitalSignatureService.*;
-import com.cde.platform.service.DocumentVersionService;
-import org.springframework.http.*;
+import com.cde.platform.model.DocumentSignature;
+import com.cde.platform.service.DocumentSigningService;
+import com.cde.platform.service.DocumentSigningService.SignRequest;
+import com.cde.platform.service.DocumentSigningService.SigningOutcome;
+import com.cde.platform.service.DocumentSigningService.VerificationOutcome;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.file.*;
-import java.time.LocalDateTime;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
+/**
+ * Digital signatures:
+ * <pre>
+ *   GET    /api/signatures/document/{id}        — signatures on a document
+ *   POST   /api/signatures/document/{id}/sign   — sign it
+ *   POST   /api/signatures/{signatureId}/verify — check a signature
+ *   DELETE /api/signatures/{signatureId}        — revoke the record
+ * </pre>
+ *
+ * <p>Signing a PDF writes the signature into the document and commits a new
+ * version, so the signature travels with the file and any conforming reader
+ * can check it.
+ */
 @RestController
 @RequestMapping("/api/signatures")
 public class SignatureController {
 
-    private final DigitalSignatureService sigService;
-    private final DocumentRepository       documentRepo;
-    private final DocumentSignatureRepository signatureRepo;
-    private final UserRepository           userRepo;
-    private final DocumentVersionService   versionService;
+    private final DocumentSigningService signing;
 
-    // In-memory cert store — in production use HSM or keystore file
-    private final Map<String, SelfSignedCert> userCerts = new java.util.concurrent.ConcurrentHashMap<>();
-
-    public SignatureController(
-        DigitalSignatureService sigService,
-        DocumentRepository documentRepo,
-        DocumentSignatureRepository signatureRepo,
-        UserRepository userRepo,
-        DocumentVersionService versionService
-    ) {
-        this.sigService     = sigService;
-        this.documentRepo   = documentRepo;
-        this.signatureRepo  = signatureRepo;
-        this.userRepo       = userRepo;
-        this.versionService = versionService;
+    public SignatureController(DocumentSigningService signing) {
+        this.signing = signing;
     }
 
-    // ── GET /api/signatures/document/{id} ────────────────────────
     @GetMapping("/document/{documentId}")
     public List<Map<String,Object>> getSignatures(@PathVariable Long documentId) {
-        return signatureRepo.findByDocument_IdOrderBySignedAtDesc(documentId)
-            .stream().map(this::toResponse).toList();
+        return signing.signaturesFor(documentId).stream().map(this::toResponse).toList();
     }
 
-    // ── POST /api/signatures/document/{id}/sign ──────────────────
     @PostMapping("/document/{documentId}/sign")
-    public ResponseEntity<?> signDocument(
+    public ResponseEntity<Map<String,Object>> signDocument(
         @PathVariable Long documentId,
-        @RequestBody Map<String,String> body,
+        @RequestBody(required = false) SignatureRequest request,
         @AuthenticationPrincipal UserDetails principal
     ) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc = docOpt.get();
+        SignatureRequest supplied = request != null ? request : new SignatureRequest(null, null, null);
+        SigningOutcome outcome = signing.sign(
+            documentId, principal.getUsername(), supplied.toSignRequest());
 
-        if (doc.getFilePath() == null)
-            return ResponseEntity.badRequest().body(Map.of("error","Document has no file"));
+        Map<String,Object> body = new LinkedHashMap<>(toResponse(outcome.signature()));
+        body.put("stampSvg",       outcome.stampSvg());
+        body.put("version",        outcome.version().getVersionNumber());
+        body.put("embedded",       outcome.embedded());
+        body.put("documentStatus", outcome.documentStatus());
+        return ResponseEntity.ok(body);
+    }
 
-        try {
-            var user = userRepo.findByUsername(principal.getUsername()).orElseThrow();
-
-            // Pin the signature to the version being signed. Signing "the
-            // document" would leave it verifying against whatever the head
-            // becomes later, so a subsequent OCR or redaction would invalidate
-            // signatures nobody had tampered with.
-            var signedVersion = versionService.currentVersion(doc, user);
-            byte[] fileBytes  = Files.readAllBytes(Paths.get(signedVersion.getFilePath()));
-
-            // Get or generate cert for this user
-            SelfSignedCert cert = userCerts.computeIfAbsent(
-                principal.getUsername(),
-                k -> {
-                    try {
-                        return sigService.generateSelfSignedCert(
-                            user.getUsername(),
-                            "CDE Platform"
-                        );
-                    } catch (Exception e) { throw new RuntimeException(e); }
-                }
-            );
-
-            String role     = body.getOrDefault("role", "Reviewer");
-            String reason   = body.getOrDefault("reason", "Document review and approval");
-            String location = body.getOrDefault("location", "CDE Platform");
-
-            SignatureRecord record = sigService.createSignatureRecord(
-                fileBytes, user.getUsername(),
-                user.getEmail() != null ? user.getEmail() : user.getUsername() + "@cde.platform",
-                role, reason, location, cert
-            );
-
-            // Persist signature
-            var sig = DocumentSignature.builder()
-                .signatureId(record.id())
-                .document(doc).documentVersion(signedVersion).signer(user)
-                .signerName(record.signerName())
-                .signerEmail(record.signerEmail())
-                .role(record.role()).reason(record.reason())
-                .location(record.location())
-                .documentHash(record.documentHash())
-                .signatureB64(record.signatureB64())
-                .certificateB64(record.certificateB64())
-                .algorithm(record.algorithm())
-                .status(DocumentSignature.SignatureStatus.VALID)
-                .signedAt(LocalDateTime.now())
-                .build();
-            signatureRepo.save(sig);
-
-            // Update document status to APPROVED if role is Approver
-            if ("Approver".equalsIgnoreCase(role)) {
-                doc.setStatus(Document.DocumentStatus.APPROVED);
-                documentRepo.save(doc);
-            }
-
-            // Generate visual stamp SVG
-            String stampSvg = sigService.generateSignatureStampSvg(record);
-
-            return ResponseEntity.ok(Map.of(
-                "signatureId",  record.id(),
-                "signerName",   record.signerName(),
-                "role",         record.role(),
-                "signedAt",     record.signedAt().toString(),
-                "status",       "VALID",
-                "stampSvg",     stampSvg,
-                "version",      signedVersion.getVersionNumber(),
-                "documentStatus", doc.getStatus().name()
-            ));
-
-        } catch (Exception e) {
-            return ResponseEntity.status(500)
-                .body(Map.of("error", "Signing failed: " + e.getMessage()));
+    public record SignatureRequest(String role, String reason, String location) {
+        SignRequest toSignRequest() {
+            return new SignRequest(role, reason, location);
         }
     }
 
-    // ── POST /api/signatures/{signatureId}/verify ────────────────
     @PostMapping("/{signatureId}/verify")
-    public ResponseEntity<?> verifySignature(@PathVariable String signatureId) {
-        var sigOpt = signatureRepo.findBySignatureId(signatureId);
-        if (sigOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var sig = sigOpt.get();
-
-        try {
-            byte[] fileBytes = Files.readAllBytes(signedBytesPath(sig));
-
-            // Build a SignatureRecord for verification
-            SignatureRecord record = new SignatureRecord(
-                sig.getSignatureId(), sig.getSignerName(), sig.getSignerEmail(),
-                sig.getRole(), sig.getReason(), sig.getLocation(),
-                sig.getDocumentHash(), sig.getSignatureB64(), sig.getCertificateB64(),
-                sig.getSignedAt(), sig.getAlgorithm(), sig.getStatus().name()
-            );
-
-            VerificationResult result = sigService.verifySignature(fileBytes, record);
-
-            // Update status if tampered
-            if (!"VALID".equals(result.status())) {
-                sig.setStatus(DocumentSignature.SignatureStatus.valueOf(result.status()));
-                signatureRepo.save(sig);
-            }
-
-            return ResponseEntity.ok(Map.of(
-                "valid",   result.valid(),
-                "status",  result.status(),
-                "message", result.message()
-            ));
-
-        } catch (Exception e) {
-            return ResponseEntity.status(500)
-                .body(Map.of("error", "Verification failed: " + e.getMessage()));
-        }
+    public ResponseEntity<Map<String,Object>> verifySignature(@PathVariable String signatureId) {
+        return signing.verify(signatureId)
+            .map(this::toVerificationResponse)
+            .map(ResponseEntity::ok)
+            .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    // ── DELETE /api/signatures/{signatureId} ─────────────────────
     @DeleteMapping("/{signatureId}")
     public ResponseEntity<Void> revokeSignature(
         @PathVariable String signatureId,
         @AuthenticationPrincipal UserDetails principal
     ) {
-        var sigOpt = signatureRepo.findBySignatureId(signatureId);
-        if (sigOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var sig = sigOpt.get();
-
-        // Only the signer or admin can revoke
-        if (!sig.getSignerName().equals(principal.getUsername())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-
-        signatureRepo.delete(sig);
-        return ResponseEntity.noContent().build();
+        return signing.revoke(signatureId, principal.getUsername())
+            .map(revoked -> revoked
+                ? ResponseEntity.noContent().<Void>build()
+                : ResponseEntity.status(HttpStatus.FORBIDDEN).<Void>build())
+            .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /**
-     * The bytes this signature actually covers.
-     *
-     * <p>Always the signed version, never the document head — the head moves
-     * every time the document is redacted, OCR'd or filled, and verifying
-     * against it would report every earlier signature as TAMPERED. Signatures
-     * predating versioning have no version and fall back to the head, which
-     * is the file they were taken from.
-     */
-    private Path signedBytesPath(DocumentSignature signature) {
-        var version = signature.getDocumentVersion();
-        return Paths.get(version != null
-            ? version.getFilePath()
-            : signature.getDocument().getFilePath());
+    private Map<String,Object> toVerificationResponse(VerificationOutcome outcome) {
+        Map<String,Object> body = new LinkedHashMap<>();
+        body.put("valid",   outcome.valid());
+        body.put("status",  outcome.status());
+        body.put("message", outcome.message());
+        // Whether the check read the document itself or only our record of
+        // it — the difference between a signature a recipient can verify and
+        // one only this application knows about.
+        body.put("embedded", outcome.embedded());
+        return body;
     }
 
-    private Map<String,Object> toResponse(DocumentSignature s) {
-        var response = new LinkedHashMap<String,Object>();
-        response.put("id",          s.getId());
-        response.put("signatureId", s.getSignatureId());
-        response.put("signerName",  s.getSignerName());
-        response.put("signerEmail", s.getSignerEmail() != null ? s.getSignerEmail() : "");
-        response.put("role",        s.getRole() != null ? s.getRole() : "");
-        response.put("reason",      s.getReason() != null ? s.getReason() : "");
-        response.put("status",      s.getStatus().name());
-        response.put("signedAt",    s.getSignedAt().toString());
+    private Map<String,Object> toResponse(DocumentSignature signature) {
+        Map<String,Object> response = new LinkedHashMap<>();
+        response.put("id",          signature.getId());
+        response.put("signatureId", signature.getSignatureId());
+        response.put("signerName",  signature.getSignerName());
+        response.put("signerEmail", orEmpty(signature.getSignerEmail()));
+        response.put("role",        orEmpty(signature.getRole()));
+        response.put("reason",      orEmpty(signature.getReason()));
+        response.put("status",      signature.getStatus().name());
+        response.put("signedAt",    signature.getSignedAt().toString());
         // Which revision this attests to — a signature on v2 says nothing
-        // about v5, and the UI needs to show that distinction.
-        response.put("version",
-            s.getDocumentVersion() != null ? s.getDocumentVersion().getVersionNumber() : null);
+        // about v5.
+        response.put("version", signature.getDocumentVersion() != null
+            ? signature.getDocumentVersion().getVersionNumber() : null);
         return response;
+    }
+
+    private String orEmpty(String value) {
+        return value != null ? value : "";
     }
 }

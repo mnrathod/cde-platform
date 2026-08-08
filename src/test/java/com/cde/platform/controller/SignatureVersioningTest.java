@@ -9,6 +9,12 @@ import com.cde.platform.repository.ProjectRepository;
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.service.DocumentVersionService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,8 +79,10 @@ class SignatureVersioningTest {
             .phase(Project.ProjectPhase.DESIGN)
             .build());
 
+        // A real PDF, not a text file named .pdf: signing now writes into
+        // the document, so it has to be one.
         Path original = storage.resolve("uuid_contract.pdf");
-        Files.writeString(original, "CONTRACT AS SIGNED");
+        writePdf(original, "CONTRACT AS SIGNED");
 
         document = documentRepo.save(Document.builder()
             .name("Contract").fileName("contract.pdf").fileType("application/pdf")
@@ -83,6 +91,21 @@ class SignatureVersioningTest {
             .documentType(Document.DocumentType.SPECIFICATION)
             .project(project).uploadedBy(signer)
             .build());
+    }
+
+    private void writePdf(Path path, String text) throws IOException {
+        try (PDDocument pdf = new PDDocument()) {
+            PDPage page = new PDPage();
+            pdf.addPage(page);
+            try (PDPageContentStream content = new PDPageContentStream(pdf, page)) {
+                content.beginText();
+                content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 14);
+                content.newLineAtOffset(70, 700);
+                content.showText(text);
+                content.endText();
+            }
+            pdf.save(path.toFile());
+        }
     }
 
     private String sign() throws Exception {
@@ -97,10 +120,14 @@ class SignatureVersioningTest {
         return mapper.readTree(response).path("signatureId").asText();
     }
 
-    /** Stands in for a processing run that rewrites the document. */
+    /**
+     * Stands in for a processing run that rewrites the document. It has to
+     * produce a real PDF: a later signature parses whatever the head points
+     * at, so a text file here would fail for the wrong reason.
+     */
     private void processDocument(String newContent) throws IOException {
         Path work = versionService.allocateWorkPath(document, "test");
-        Files.writeString(work, newContent);
+        writePdf(work, newContent);
         versionService.commit(document, work, DocumentOperation.OCR,
             "Recognised 3 page(s)", signer);
     }
@@ -115,7 +142,10 @@ class SignatureVersioningTest {
         mockMvc.perform(post("/api/signatures/document/{id}/sign", document.getId())
                 .contentType("application/json").content(body))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.version").value(1))
+            // Signing writes into the document, so it commits a version of
+            // its own — and that is the version the signature covers.
+            .andExpect(jsonPath("$.version").value(2))
+            .andExpect(jsonPath("$.embedded").value(true))
             .andExpect(jsonPath("$.status").value("VALID"));
     }
 
@@ -127,9 +157,9 @@ class SignatureVersioningTest {
 
         processDocument("CONTRACT AS SIGNED + OCR TEXT LAYER");
 
-        // The head has moved, but the signature covers version 1 and version 1
-        // still holds exactly the bytes that were signed.
-        assertThat(document.getCurrentVersion()).isEqualTo(2);
+        // The head has moved to v3, but the signature covers v2 and v2 still
+        // holds exactly the bytes that were signed.
+        assertThat(document.getCurrentVersion()).isEqualTo(3);
         mockMvc.perform(post("/api/signatures/{id}/verify", signatureId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.valid").value(true))
@@ -145,8 +175,10 @@ class SignatureVersioningTest {
         // Rewrite the signed version in place — the case the signature exists
         // to catch, and the one that must not be masked by the fix above.
         Path signedVersion = Path.of(
-            versionService.findVersion(document.getId(), 1).orElseThrow().getFilePath());
-        Files.writeString(signedVersion, "CONTRACT, QUIETLY ALTERED");
+            versionService.findVersion(document.getId(), 2).orElseThrow().getFilePath());
+        byte[] bytes = Files.readAllBytes(signedVersion);
+        bytes[200] = (byte) (bytes[200] ^ 0xFF);
+        Files.write(signedVersion, bytes);
 
         mockMvc.perform(post("/api/signatures/{id}/verify", signatureId))
             .andExpect(status().isOk())
@@ -167,6 +199,21 @@ class SignatureVersioningTest {
         mockMvc.perform(post("/api/signatures/document/{id}/sign", document.getId())
                 .contentType("application/json").content(body))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.version").value(2));
+            // v2 was the first signature, v3 the OCR run, so this one is v4.
+            .andExpect(jsonPath("$.version").value(4));
+    }
+
+    @Test
+    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @DisplayName("the signature is written into the document, not only recorded beside it")
+    void signatureIsEmbeddedInTheFile() throws Exception {
+        sign();
+
+        // What a recipient outside this system would find.
+        Path signed = Path.of(
+            versionService.findVersion(document.getId(), 2).orElseThrow().getFilePath());
+        try (PDDocument pdf = Loader.loadPDF(signed.toFile())) {
+            assertThat(pdf.getSignatureDictionaries()).hasSize(1);
+        }
     }
 }
