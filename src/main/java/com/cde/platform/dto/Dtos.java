@@ -96,6 +96,25 @@ public class Dtos {
         }
     }
 
+    // ── Form design ───────────────────────────────────────────────────────────
+    /** Reply from placing or removing form fields. */
+    public record FormChangeResponse(
+        boolean success,
+        Long documentId,
+        Integer version,
+        String summary,
+        List<String> fields
+    ) {
+        public static FormChangeResponse from(
+            Long documentId,
+            com.cde.platform.service.FormDesignService.FormChange change
+        ) {
+            DocumentVersion version = change.version();
+            return new FormChangeResponse(true, documentId, version.getVersionNumber(),
+                version.getSummary(), change.fields());
+        }
+    }
+
     // ── Page manipulation ─────────────────────────────────────────────────────
     /** Reply from an in-place page change: the version it committed. */
     public record PageArrangementResponse(
