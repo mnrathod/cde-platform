@@ -96,6 +96,13 @@ public class DocumentVersion {
         OCR,
         FLATTEN,
         FORM_FILL,
+        /**
+         * Any change to the page tree — reorder, delete, rotate, duplicate,
+         * insert. One value rather than five because they arrive together
+         * from the page organiser as a single rearrangement; which of them
+         * happened is described in the version summary.
+         */
+        PAGES,
         RESTORE
     }
 }
