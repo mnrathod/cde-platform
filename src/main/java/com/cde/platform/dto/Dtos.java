@@ -96,6 +96,45 @@ public class Dtos {
         }
     }
 
+    // ── Page manipulation ─────────────────────────────────────────────────────
+    /** Reply from an in-place page change: the version it committed. */
+    public record PageArrangementResponse(
+        boolean success,
+        Long documentId,
+        Integer version,
+        String summary,
+        int pageCount,
+        LocalDateTime createdAt
+    ) {
+        public static PageArrangementResponse from(
+            Long documentId,
+            com.cde.platform.service.PageManipulationService.ArrangementResult result
+        ) {
+            DocumentVersion version = result.version();
+            return new PageArrangementResponse(
+                true, documentId, version.getVersionNumber(),
+                version.getSummary(), result.pageCount(), version.getCreatedAt());
+        }
+    }
+
+    /** Reply from extracting pages: the document that was created. */
+    public record PageExtractionResponse(
+        boolean success,
+        Long documentId,
+        String name,
+        int pageCount,
+        Long fileSize
+    ) {
+        public static PageExtractionResponse from(
+            com.cde.platform.service.PageManipulationService.ExtractionResult result
+        ) {
+            Document created = result.document();
+            return new PageExtractionResponse(
+                true, created.getId(), created.getName(),
+                result.pageCount(), created.getFileSize());
+        }
+    }
+
     /**
      * Reply from any operation that rewrites a document. These used to stream
      * the new PDF back as a download; they now report the version they

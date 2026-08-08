@@ -52,17 +52,10 @@ public class DocumentVersionController {
 
     @GetMapping
     public ResponseEntity<List<DocumentVersionResponse>> listVersions(@PathVariable Long documentId) {
-        Optional<Document> documentOpt = documentRepo.findById(documentId);
+        Optional<Document> documentOpt = ensureHistory(documentId);
         if (documentOpt.isEmpty()) return ResponseEntity.notFound().build();
 
-        // A document that has never been processed has no rows yet; report its
-        // upload as version 1 so the history is never misleadingly empty.
-        Document document = documentOpt.get();
-        if (document.getFilePath() != null) {
-            versionService.currentVersion(document, null);
-        }
-
-        Integer head = document.getCurrentVersion();
+        Integer head = documentOpt.get().getCurrentVersion();
         return ResponseEntity.ok(versionService.listVersions(documentId).stream()
             .map(version -> DocumentVersionResponse.from(version, head))
             .toList());
@@ -71,6 +64,11 @@ public class DocumentVersionController {
     @GetMapping("/{versionNumber}/file")
     public ResponseEntity<byte[]> downloadVersion(@PathVariable Long documentId,
                                                   @PathVariable int versionNumber) throws IOException {
+        // Backfill first: on a document nothing has processed yet, version 1
+        // exists as a file but not yet as a row, and downloading it would 404
+        // purely because nobody had opened the history panel.
+        ensureHistory(documentId);
+
         Optional<DocumentVersion> versionOpt = versionService.findVersion(documentId, versionNumber);
         if (versionOpt.isEmpty()) return ResponseEntity.notFound().build();
 
@@ -101,6 +99,24 @@ public class DocumentVersionController {
             .map(restored -> ResponseEntity.ok(
                 DocumentVersionResponse.from(restored, restored.getVersionNumber())))
             .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Loads the document, recording its upload as version 1 if it has no
+     * history yet.
+     *
+     * <p>A document that has never been processed has a file but no rows, so
+     * without this its history reads as empty and its original is not
+     * downloadable — both wrong, and both dependent on which endpoint the
+     * client happened to call first.
+     *
+     * @return empty if no such document exists
+     */
+    private Optional<Document> ensureHistory(Long documentId) {
+        Optional<Document> documentOpt = documentRepo.findById(documentId);
+        documentOpt.filter(document -> document.getFilePath() != null)
+                   .ifPresent(document -> versionService.currentVersion(document, null));
+        return documentOpt;
     }
 
     /** {@code plan_v3.pdf} — the document's own name, tagged with the version. */
