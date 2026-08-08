@@ -35,6 +35,12 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // The WebSocket handshake is a plain GET with no Authorization
+                // header — a browser cannot set one. It is authenticated on
+                // the STOMP CONNECT frame instead, by
+                // StompAuthChannelInterceptor, which rejects the session
+                // outright without a valid token.
+                .requestMatchers("/ws/**").permitAll()
                 .requestMatchers("/api/auth/**", "/h2-console/**",
                                  "/", "/index.html", "/viewer.html",
                                  "/favicon.ico", "/favicon.png",
