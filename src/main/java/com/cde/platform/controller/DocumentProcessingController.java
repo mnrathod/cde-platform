@@ -4,6 +4,11 @@ import com.cde.platform.dto.Dtos.ProcessingResponse;
 import com.cde.platform.service.DocumentProcessingService;
 import com.cde.platform.service.DocumentProcessingService.ProcessingResult;
 import com.cde.platform.service.DocumentProcessingService.TextSearch;
+import com.cde.platform.dto.Dtos.FormChangeResponse;
+import com.cde.platform.service.FormDesignService;
+import com.cde.platform.service.FormDesignService.FormChange;
+import com.cde.platform.service.FormFieldBuilder.FieldKind;
+import com.cde.platform.service.FormFieldBuilder.FieldPlacement;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -38,9 +43,12 @@ public class DocumentProcessingController {
     private static final int MAX_OCR_DPI = 600;   // above this, memory use is not worth it
 
     private final DocumentProcessingService processing;
+    private final FormDesignService         formDesign;
 
-    public DocumentProcessingController(DocumentProcessingService processing) {
+    public DocumentProcessingController(DocumentProcessingService processing,
+                                        FormDesignService formDesign) {
         this.processing = processing;
+        this.formDesign = formDesign;
     }
 
     // ── Flatten annotations into the page ────────────────────────
@@ -159,6 +167,74 @@ public class DocumentProcessingController {
     public ResponseEntity<JsonNode> getFormFields(@PathVariable Long documentId) {
         return ResponseEntity.ok(processing.inspectForm(documentId));
     }
+
+    // ── Design the form ──────────────────────────────────────────
+    /**
+     * Places new fields on the document, making a flat PDF fillable.
+     *
+     * <p>Coordinates are PDF points with a bottom-left origin, the same space
+     * every other geometry endpoint uses.
+     */
+    @PostMapping("/api/documents/{documentId}/form-fields")
+    public ResponseEntity<FormChangeResponse> addFormFields(
+        @PathVariable Long documentId,
+        @RequestBody AddFieldsRequest request,
+        @AuthenticationPrincipal UserDetails principal
+    ) {
+        FormChange change = formDesign.addFields(
+            documentId, request.toPlacements(), usernameOf(principal));
+        return ResponseEntity.ok(FormChangeResponse.from(documentId, change));
+    }
+
+    @DeleteMapping("/api/documents/{documentId}/form-fields")
+    public ResponseEntity<FormChangeResponse> removeFormFields(
+        @PathVariable Long documentId,
+        @RequestBody RemoveFieldsRequest request,
+        @AuthenticationPrincipal UserDetails principal
+    ) {
+        FormChange change = formDesign.removeFields(
+            documentId, request.names(), usernameOf(principal));
+        return ResponseEntity.ok(FormChangeResponse.from(documentId, change));
+    }
+
+    public record AddFieldsRequest(List<FieldRequest> fields) {
+        List<FieldPlacement> toPlacements() {
+            if (fields == null) return List.of();
+            return fields.stream().map(FieldRequest::toPlacement).toList();
+        }
+    }
+
+    /** @param kind one of TEXT, TEXTAREA, CHECKBOX, DROPDOWN */
+    public record FieldRequest(
+        String name, String kind, Integer page,
+        Float x, Float y, Float width, Float height,
+        Boolean required, List<String> options
+    ) {
+        FieldPlacement toPlacement() {
+            return new FieldPlacement(
+                name, parseKind(kind),
+                page != null ? page : 1,
+                orZero(x), orZero(y), orZero(width), orZero(height),
+                Boolean.TRUE.equals(required),
+                options != null ? options : List.of());
+        }
+
+        private static FieldKind parseKind(String kind) {
+            try {
+                return FieldKind.valueOf(kind == null ? "TEXT" : kind.trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                    "'%s' is not a field kind. Use TEXT, TEXTAREA, CHECKBOX or DROPDOWN."
+                        .formatted(kind));
+            }
+        }
+
+        private static float orZero(Float value) {
+            return value != null ? value : 0f;
+        }
+    }
+
+    public record RemoveFieldsRequest(List<String> names) {}
 
     // ── Fill form ────────────────────────────────────────────────
     @PostMapping("/api/documents/{documentId}/form-fill")
