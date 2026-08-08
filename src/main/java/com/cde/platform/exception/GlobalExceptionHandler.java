@@ -48,6 +48,21 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, detail);
     }
 
+    @ExceptionHandler(ConverterOfflineException.class)
+    public ResponseEntity<Map<String, Object>> handleConverterOffline(ConverterOfflineException ex) {
+        // Logged at warn, not error: the service is down, the request was fine.
+        log.warn("Converter unavailable: {}", ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE,
+            "The document conversion service is unavailable. Please try again shortly.");
+    }
+
+    @ExceptionHandler(DocumentProcessingException.class)
+    public ResponseEntity<Map<String, Object>> handleProcessingFailure(DocumentProcessingException ex) {
+        log.error("Document processing failed", ex);
+        // This message is authored by us for the user, so it is safe to echo.
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("Rejected request: {}", ex.getMessage());

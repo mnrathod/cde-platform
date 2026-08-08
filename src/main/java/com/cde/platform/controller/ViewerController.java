@@ -108,12 +108,18 @@ public class ViewerController {
             // pdf.js. Returning raw bytes from this endpoint breaks the
             // frontend, which always expects a JSON envelope from it.
             if (ext.equals("pdf") || ct.contains("pdf")) {
+                // Processing operations advance the document to a new version
+                // in place, so the bytes behind a fixed URL change over time.
+                // The version travels in the URL to keep the browser and
+                // pdf.js from serving a cached copy of the previous one.
+                int version = doc.getCurrentVersion() != null ? doc.getCurrentVersion() : 1;
                 return ResponseEntity.ok(Map.of(
                     "type","pdf","name",doc.getName(),
                     "fileName",s(doc.getFileName()),
                     "drawingNumber",s(doc.getDrawingNumber()),
                     "revision",s(doc.getRevision()),
-                    "pdfUrl","/api/viewer/" + documentId + "/pdf"));
+                    "version",version,
+                    "pdfUrl","/api/viewer/" + documentId + "/pdf?v=" + version));
             }
 
             // ── Office -> PDF via LibreOffice ───────────────────
@@ -208,6 +214,9 @@ public class ViewerController {
             .contentType(MediaType.APPLICATION_PDF)
             .contentLength(bytes.length)
             .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+            // The bytes at this URL are replaced whenever a new version is
+            // committed, so a cached response would show a stale document.
+            .header(HttpHeaders.CACHE_CONTROL, "no-cache, must-revalidate")
             .header("X-Source-Type", "pdf")
             .body(bytes);
     }

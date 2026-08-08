@@ -68,4 +68,63 @@ public class Dtos {
         String comment, Annotation.AnnotationStatus status,
         Integer pageNumber, LocalDateTime createdAt
     ) {}
+
+    // ── Document version ──────────────────────────────────────────────────────
+    public record DocumentVersionResponse(
+        Integer version,
+        DocumentVersion.DocumentOperation operation,
+        String summary,
+        String fileName,
+        Long fileSize,
+        String contentHash,
+        String createdBy,
+        LocalDateTime createdAt,
+        boolean current
+    ) {
+        public static DocumentVersionResponse from(DocumentVersion version, Integer headVersion) {
+            return new DocumentVersionResponse(
+                version.getVersionNumber(),
+                version.getOperation(),
+                version.getSummary(),
+                version.getFileName(),
+                version.getFileSize(),
+                version.getContentHash(),
+                version.getCreatedBy() != null ? version.getCreatedBy().getUsername() : null,
+                version.getCreatedAt(),
+                version.getVersionNumber().equals(headVersion)
+            );
+        }
+    }
+
+    /**
+     * Reply from any operation that rewrites a document. These used to stream
+     * the new PDF back as a download; they now report the version they
+     * committed, so the client reloads the document instead of collecting a
+     * detached copy.
+     */
+    public record ProcessingResponse(
+        boolean success,
+        Long documentId,
+        Integer version,
+        DocumentVersion.DocumentOperation operation,
+        String summary,
+        Long fileSize,
+        LocalDateTime createdAt,
+        java.util.Map<String, Object> details
+    ) {
+        public static ProcessingResponse from(Long documentId,
+                                              DocumentVersion version,
+                                              java.util.Map<String, Object> details) {
+            return new ProcessingResponse(
+                true,
+                documentId,
+                version.getVersionNumber(),
+                version.getOperation(),
+                version.getSummary(),
+                version.getFileSize(),
+                version.getCreatedAt(),
+                details
+            );
+        }
+    }
 }

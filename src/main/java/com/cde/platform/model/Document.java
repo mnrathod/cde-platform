@@ -33,6 +33,15 @@ public class Document {
     @Column(name = "file_size")
     private Long fileSize;
 
+    /**
+     * Version number that {@link #filePath} currently points at. Denormalised
+     * from document_versions so the viewer can cache-bust its PDF request
+     * without a second query; {@code null} for documents uploaded before
+     * versioning existed, which are backfilled on their first processing run.
+     */
+    @Column(name = "current_version")
+    private Integer currentVersion;
+
     @Enumerated(EnumType.STRING)
     private DocumentType documentType;
 

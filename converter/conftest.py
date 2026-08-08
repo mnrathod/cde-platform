@@ -146,3 +146,48 @@ def page_sizes(path):
                 for i in range(len(document))]
     finally:
         document.close()
+
+
+@pytest.fixture
+def scanned_form_pdf(tmp_path):
+    """
+    A document that needs all three rewriting operations at once: page 1 is an
+    image with no text layer (OCR), page 2 carries text to redact plus an
+    AcroForm field to fill and a second field placed where a redaction can
+    land on top of it.
+    """
+    path = tmp_path / "scanned_form.pdf"
+    width, height = A4
+
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((70, 200), "SCANNED SHEET", fill="black", font=_font(64, True))
+    draw.text((70, 300), "Marker ALPHA", fill="black", font=_font(52, True))
+    buffer = io.BytesIO()
+    image.save(buffer, "PDF", resolution=150)
+    buffer.seek(0)
+
+    pdf = rl_canvas.Canvas(str(path), pagesize=A4)
+    pdf.drawInlineImage(image, 0, 0, width=width, height=height)
+    pdf.showPage()
+
+    form = pdf.acroForm
+    common = dict(borderColor=black, fillColor=white, textColor=black, forceBorder=True)
+    pdf.setFont("Helvetica", 14)
+    pdf.drawString(70, height - 90,  "CONTRACT SUMMARY")
+    pdf.drawString(70, height - 140, "CONFIDENTIAL RATE: 12345 GBP")
+    form.textfield(name="contractor", x=200, y=height - 200, width=250, height=20, **common)
+    form.textfield(name="under_redaction", x=200, y=height - 145, width=200, height=20, **common)
+    pdf.showPage()
+    pdf.save()
+    return str(path)
+
+
+def acroform_field_names(path):
+    """Field names still reachable from the document catalog."""
+    return sorted((pypdf.PdfReader(path).get_fields() or {}).keys())
+
+
+def page_annotation_count(path, page_index):
+    annots = pypdf.PdfReader(path).pages[page_index].get("/Annots")
+    return len(annots) if annots else 0

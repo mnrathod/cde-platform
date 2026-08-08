@@ -20,6 +20,21 @@ public class DocumentSignature {
     @JoinColumn(name = "document_id", nullable = false)
     private Document document;
 
+    /**
+     * The exact version whose bytes were signed.
+     *
+     * <p>Verification hashes this version rather than the document's current
+     * file. Without it, any later processing run — an OCR pass, a redaction —
+     * would change the head's bytes and flip every existing signature to
+     * TAMPERED, even though nobody had touched what was actually signed.
+     *
+     * <p>Null for signatures taken before versioning existed; those fall back
+     * to the document head, which is the file they were signed against.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "document_version_id")
+    private DocumentVersion documentVersion;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "signer_id")
     private User signer;
