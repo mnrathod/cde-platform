@@ -3,6 +3,7 @@ package com.cde.platform.controller;
 import com.cde.platform.dto.Dtos.ProcessingResponse;
 import com.cde.platform.service.DocumentProcessingService;
 import com.cde.platform.service.DocumentProcessingService.ProcessingResult;
+import com.cde.platform.service.DocumentProcessingService.TextSearch;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -73,6 +74,50 @@ public class DocumentProcessingController {
     }
 
     public record RedactRequest(List<Map<String, Object>> regions) {}
+
+    // ── Find text, and redact everything that matches ────────────
+    @PostMapping("/api/documents/{documentId}/find-text")
+    public ResponseEntity<JsonNode> findText(
+        @PathVariable Long documentId,
+        @RequestBody TextSearchRequest request
+    ) {
+        return ResponseEntity.ok(processing.findText(documentId, request.toSearch()));
+    }
+
+    /**
+     * Redacts every occurrence of a term, pattern or expression.
+     *
+     * <p>Separate from region redaction because it is a different act: one
+     * blacks out places a person pointed at, the other blacks out everything
+     * matching a rule, wherever it turns out to be.
+     */
+    @PostMapping("/api/documents/{documentId}/redact-matching")
+    public ResponseEntity<ProcessingResponse> redactMatching(
+        @PathVariable Long documentId,
+        @RequestBody TextSearchRequest request,
+        @AuthenticationPrincipal UserDetails principal
+    ) {
+        ProcessingResult result = processing.redactMatching(
+            documentId, request.toSearch(), usernameOf(principal));
+        return respond(documentId, result);
+    }
+
+    /**
+     * @param presets named categories — email, phone, creditCard, ssn,
+     *                niNumber, postcode, iban
+     */
+    public record TextSearchRequest(
+        List<String> terms,
+        List<String> presets,
+        List<String> regexes,
+        Boolean matchCase,
+        Boolean wholeWord
+    ) {
+        TextSearch toSearch() {
+            return new TextSearch(terms, presets, regexes,
+                Boolean.TRUE.equals(matchCase), Boolean.TRUE.equals(wholeWord));
+        }
+    }
 
     // ── OCR ──────────────────────────────────────────────────────
     @PostMapping("/api/documents/{documentId}/ocr")

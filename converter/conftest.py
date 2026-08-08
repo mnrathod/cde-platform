@@ -191,3 +191,33 @@ def acroform_field_names(path):
 def page_annotation_count(path, page_index):
     annots = pypdf.PdfReader(path).pages[page_index].get("/Annots")
     return len(annots) if annots else 0
+
+
+@pytest.fixture
+def pii_pdf(tmp_path):
+    """
+    A page carrying each category the redaction presets recognise, plus
+    dimensions that superficially resemble a phone number — over-matching is
+    the failure that costs real content, so the negative case is in the
+    fixture rather than left to chance.
+    """
+    path = tmp_path / "pii.pdf"
+    width, height = A4
+    pdf = rl_canvas.Canvas(str(path), pagesize=A4)
+    pdf.setFont("Helvetica", 12)
+    lines = [
+        "Site contact: a.turing@example.co.uk",
+        "Telephone: +44 20 7946 0958",
+        "Mobile: 07700 900123",
+        "Card on file: 4111 1111 1111 1111",
+        "NI number: AB 12 34 56 C",
+        "Site postcode: SW1A 1AA",
+        "Bank: GB29NWBK60161331926819",
+        "Concrete cover 42mm, slab depth 250mm, grid 6000 x 7200",
+    ]
+    y = height - 90
+    for line in lines:
+        pdf.drawString(60, y, line)
+        y -= 28
+    pdf.save()
+    return str(path)

@@ -138,6 +138,18 @@ class TestInspectPdfForm:
         assert converter_app.inspect_pdf_form("/nope/missing.pdf")["success"] is False
 
 
+def _extracted_text(path):
+    """All extractable text in a document, for searchability assertions."""
+    import pypdfium2 as pdfium
+    document = pdfium.PdfDocument(path)
+    try:
+        return " ".join(
+            (document[i].get_textpage().get_text_range() or "")
+            for i in range(len(document)))
+    finally:
+        document.close()
+
+
 # ── Form filling ─────────────────────────────────────────────────────
 def _written_values(path):
     return {name: str(field.get("/V"))
@@ -230,11 +242,14 @@ class TestRedactPdf:
         # Regression: every page was rasterised, so redacting one region
         # destroyed the text layer of the whole document.
         out = str(tmp_path / "red.pdf")
-        result = converter_app.redact_pdf(text_pdf, self.REGION, out, burn=True)
+        result = converter_app.redact_pdf(
+            text_pdf, self.REGION, out, burn=True, restore_text_layer=False)
         assert result["redactedPages"] == 1
 
         before, after = page_text_lengths(text_pdf), page_text_lengths(out)
-        assert after[1] == 0, "redacted page should lose its text"
+        # Rasterising costs the page its text; restoration is tested
+        # separately, and is disabled here to isolate which pages were touched.
+        assert after[1] == 0, "redacted page should be rasterised"
         assert after[0] == before[0], "untouched page must keep its text"
         assert after[2] == before[2], "untouched page must keep its text"
 
@@ -551,3 +566,154 @@ class TestRearrangePdfPages:
     def test_missing_file_is_an_error_not_a_crash(self, converter_app, tmp_path):
         assert converter_app.rearrange_pdf_pages(
             "/nope/x.pdf", [{"page": 1}], str(tmp_path / "o.pdf"))["success"] is False
+
+
+# ── Finding text to redact ───────────────────────────────────────────
+class TestFindTextMatches:
+    """
+    Redaction cannot be undone from inside the file, so a pattern that
+    over-matches destroys content nobody asked to remove. The negative
+    assertions here matter as much as the positive ones.
+    """
+
+    def _texts(self, converter_app, path, **kwargs):
+        result = converter_app.find_text_matches(path, **kwargs)
+        assert result["success"], result.get("error")
+        return [match["text"] for match in result["matches"]]
+
+    def test_finds_a_literal_term(self, converter_app, text_pdf):
+        assert self._texts(converter_app, text_pdf, terms=["BRAVO"]) == ["BRAVO"]
+
+    def test_matching_ignores_case_by_default(self, converter_app, text_pdf):
+        assert self._texts(converter_app, text_pdf, terms=["bravo"]) == ["BRAVO"]
+
+    def test_case_sensitive_search_respects_case(self, converter_app, text_pdf):
+        assert self._texts(converter_app, text_pdf, terms=["bravo"], match_case=True) == []
+
+    def test_whole_word_does_not_match_a_fragment(self, converter_app, text_pdf):
+        assert self._texts(converter_app, text_pdf, terms=["BRAV"], whole_word=True) == []
+        assert self._texts(converter_app, text_pdf, terms=["BRAVO"], whole_word=True) == ["BRAVO"]
+
+    def test_supports_regular_expressions(self, converter_app, pii_pdf):
+        assert self._texts(converter_app, pii_pdf, regexes=[r"\b\d{5} \d{6}\b"]) == ["07700 900123"]
+
+    def test_reports_one_rectangle_per_match(self, converter_app, pii_pdf):
+        # Regression: glyphs on one line sit at different heights, and
+        # splitting on baseline distance reported a single phone number three
+        # times, each with its own box.
+        result = converter_app.find_text_matches(pii_pdf, presets=["email"])
+        assert result["matchCount"] == 1
+
+    def test_rectangles_are_in_pdf_points_from_the_bottom_left(self, converter_app, pii_pdf):
+        # Same space redact_pdf takes, so a match can be redacted without
+        # any coordinate conversion.
+        match = converter_app.find_text_matches(pii_pdf, presets=["email"])["matches"][0]
+        assert 0 < match["x"] < match["pageHeight"]
+        assert 0 < match["y"] < match["pageHeight"]
+        assert match["width"] > 0 and match["height"] > 0
+
+    @pytest.mark.parametrize("preset,expected", [
+        ("email",      ["a.turing@example.co.uk"]),
+        ("creditCard", ["4111 1111 1111 1111"]),
+        ("niNumber",   ["AB 12 34 56 C"]),
+        ("postcode",   ["SW1A 1AA"]),
+        ("iban",       ["GB29NWBK60161331926819"]),
+    ])
+    def test_presets_match_their_own_category(self, converter_app, pii_pdf, preset, expected):
+        assert self._texts(converter_app, pii_pdf, presets=[preset]) == expected
+
+    def test_phone_finds_both_numbers(self, converter_app, pii_pdf):
+        assert self._texts(converter_app, pii_pdf, presets=["phone"]) == [
+            "+44 20 7946 0958", "07700 900123"]
+
+    def test_phone_does_not_eat_card_iban_or_ni_digits(self, converter_app, pii_pdf):
+        # The original pattern matched all three, which would have destroyed
+        # a card number while claiming to redact a phone number.
+        found = " ".join(self._texts(converter_app, pii_pdf, presets=["phone"]))
+        assert "4111" not in found
+        assert "NWBK" not in found and "60161331926819" not in found
+
+    def test_no_preset_matches_dimensions(self, converter_app, pii_pdf):
+        found = " ".join(self._texts(
+            converter_app, pii_pdf,
+            presets=["email", "phone", "creditCard", "niNumber", "postcode", "iban"]))
+        for dimension in ("42mm", "250mm", "6000", "7200"):
+            assert dimension not in found
+
+    def test_reports_pages_with_no_text_layer(self, converter_app, scanned_pdf):
+        # A scan yields nothing, which is not the same as "this document is
+        # clean" — the caller has to be able to tell those apart.
+        result = converter_app.find_text_matches(scanned_pdf, terms=["anything"])
+        assert result["matchCount"] == 0
+        assert result["pagesWithoutText"] == 1
+
+    def test_an_unknown_preset_is_rejected_by_name(self, converter_app, text_pdf):
+        result = converter_app.find_text_matches(text_pdf, presets=["nope"])
+        assert result["success"] is False
+        assert "nope" in result["error"]
+
+    def test_an_invalid_expression_is_rejected(self, converter_app, text_pdf):
+        result = converter_app.find_text_matches(text_pdf, regexes=["[unclosed"])
+        assert result["success"] is False
+
+    def test_searching_for_nothing_is_rejected(self, converter_app, text_pdf):
+        assert converter_app.find_text_matches(text_pdf)["success"] is False
+
+    def test_missing_file_is_an_error_not_a_crash(self, converter_app):
+        assert converter_app.find_text_matches("/nope/x.pdf", terms=["a"])["success"] is False
+
+
+class TestRedactionRestoresSearchability:
+    """
+    Rasterizing to destroy content destroys the whole page's text layer with
+    it, so redacting one email address made an entire report unsearchable —
+    a document you searched to find something became unusable by removing it.
+    """
+
+    def _pii_rects(self, converter_app, path, presets):
+        return converter_app.find_text_matches(path, presets=presets)["matches"]
+
+    @needs_tesseract
+    def test_surviving_text_stays_searchable(self, converter_app, pii_pdf, tmp_path):
+        out = str(tmp_path / "red.pdf")
+        matches = self._pii_rects(converter_app, pii_pdf, ["email", "creditCard", "iban"])
+        assert converter_app.redact_pdf(pii_pdf, matches, out, burn=True)["success"]
+
+        text = _extracted_text(out)
+        assert "Concrete cover" in text
+        assert "Telephone" in text
+
+    @needs_tesseract
+    def test_redacted_content_is_not_recovered_by_the_restored_layer(
+        self, converter_app, pii_pdf, tmp_path
+    ):
+        # The restored layer is OCR of the redacted image, and the redacted
+        # areas are solid black — so this must not hand the content back.
+        out = str(tmp_path / "red.pdf")
+        matches = self._pii_rects(converter_app, pii_pdf, ["email", "creditCard", "iban"])
+        converter_app.redact_pdf(pii_pdf, matches, out, burn=True)
+
+        text = _extracted_text(out)
+        assert "a.turing@example.co.uk" not in text
+        assert "4111" not in text
+        assert "GB29NWBK60161331926819" not in text
+
+    def test_restoration_can_be_turned_off(self, converter_app, pii_pdf, tmp_path):
+        out = str(tmp_path / "red.pdf")
+        matches = self._pii_rects(converter_app, pii_pdf, ["email"])
+        converter_app.redact_pdf(pii_pdf, matches, out, burn=True, restore_text_layer=False)
+
+        assert page_text_lengths(out)[0] == 0
+
+    @needs_tesseract
+    def test_a_page_that_never_had_text_is_left_alone(
+        self, converter_app, scanned_pdf, tmp_path
+    ):
+        # Restoring only applies to pages that lost a text layer; OCR'ing a
+        # scan as a side effect of redaction would be a surprise.
+        out = str(tmp_path / "red.pdf")
+        converter_app.redact_pdf(
+            scanned_pdf, [{"page": 1, "x": 10, "y": 10, "width": 50, "height": 20}],
+            out, burn=True)
+
+        assert page_text_lengths(out)[0] == 0
