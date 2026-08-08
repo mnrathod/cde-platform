@@ -100,6 +100,92 @@ public class DocumentProcessingService {
         });
     }
 
+    /**
+     * Finds text without changing anything, so the client can show what would
+     * be destroyed before it is.
+     *
+     * <p>A preview matters more here than elsewhere: redaction is the one
+     * operation whose result cannot be recovered from inside the file, and a
+     * pattern that over-matches removes content nobody asked to remove.
+     */
+    public JsonNode findText(Long documentId, TextSearch search) {
+        Document document = requireDocumentWithFile(documentId);
+        return converter.callJson("/find-text", searchRequest(document, search), INSPECT_TIMEOUT);
+    }
+
+    /**
+     * Redacts every occurrence of the given terms, patterns or expressions.
+     *
+     * <p>The search runs server-side immediately before the redaction rather
+     * than trusting rectangles from a client preview: between previewing and
+     * applying, another user may have committed a version that moves the
+     * text, and stale coordinates would black out the wrong part of the page
+     * while leaving the sensitive content readable.
+     */
+    public ProcessingResult redactMatching(Long documentId, TextSearch search, String username) {
+        Document document = requireDocumentWithFile(documentId);
+
+        JsonNode found = converter.callJson(
+            "/find-text", searchRequest(document, search), INSPECT_TIMEOUT);
+        if (!found.path("success").asBoolean(false)) {
+            throw new DocumentProcessingException(
+                found.path("error").asText("The document could not be searched."));
+        }
+
+        JsonNode regions = found.path("matches");
+        if (regions.isEmpty()) {
+            throw new DocumentProcessingException(
+                found.path("pagesWithoutText").asInt(0) > 0
+                    ? "No matches found. Pages without a text layer cannot be searched — run OCR first."
+                    : "No matches found, so there is nothing to redact.");
+        }
+
+        return run(document, username, DocumentOperation.REDACT, "redacted", output -> {
+            ObjectNode request = baseRequest(document, output);
+            request.put("burn", true);
+            request.set("regions", regions);
+            return converter.callJson("/redact", request, REWRITE_TIMEOUT);
+        }, (result, details) -> {
+            int pages = result.path("redactedPages").asInt(0);
+            details.put("redactedPages", pages);
+            details.put("totalRegions",  regions.size());
+            return "Redacted %d match(es) of %s across %d page(s)"
+                .formatted(regions.size(), search.describe(), pages);
+        });
+    }
+
+    /** What to look for: literal terms, named presets, or regular expressions. */
+    public record TextSearch(
+        List<String> terms,
+        List<String> presets,
+        List<String> regexes,
+        boolean matchCase,
+        boolean wholeWord
+    ) {
+        /** Short description of the request, for the version summary. */
+        public String describe() {
+            List<String> parts = new java.util.ArrayList<>();
+            if (terms   != null && !terms.isEmpty())   parts.add(String.join(", ", terms));
+            if (presets != null && !presets.isEmpty()) parts.add(String.join(", ", presets));
+            if (regexes != null && !regexes.isEmpty()) {
+                parts.add(regexes.size() == 1 ? "1 expression"
+                                              : regexes.size() + " expressions");
+            }
+            return parts.isEmpty() ? "the search" : String.join(" and ", parts);
+        }
+    }
+
+    private ObjectNode searchRequest(Document document, TextSearch search) {
+        ObjectNode request = mapper.createObjectNode();
+        request.put("path", absolutePath(document).toString());
+        request.set("terms",   mapper.valueToTree(search.terms()   != null ? search.terms()   : List.of()));
+        request.set("presets", mapper.valueToTree(search.presets() != null ? search.presets() : List.of()));
+        request.set("regexes", mapper.valueToTree(search.regexes() != null ? search.regexes() : List.of()));
+        request.put("matchCase", search.matchCase());
+        request.put("wholeWord", search.wholeWord());
+        return request;
+    }
+
     // ── OCR ──────────────────────────────────────────────────────
 
     /**
