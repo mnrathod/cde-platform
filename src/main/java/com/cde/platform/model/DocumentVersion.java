@@ -103,6 +103,8 @@ public class DocumentVersion {
          * happened is described in the version summary.
          */
         PAGES,
+        /** A digital signature was embedded into the document. */
+        SIGN,
         RESTORE
     }
 }

@@ -37,9 +37,10 @@ dependencies {
 
     // File handling
     implementation 'commons-io:commons-io:2.15.1'
-    // Digital signatures (PKI)
+    // Digital signatures (PKI) and embedding them into the PDF itself
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
     implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+    implementation 'org.apache.pdfbox:pdfbox:3.0.3'
     implementation 'org.apache.tika:tika-core:2.9.1'
 
     // Lombok
@@ -92,3 +93,4 @@ tasks.register('converterTest', Exec) {
 tasks.named('check') {
     dependsOn 'converterTest'
 }
+
