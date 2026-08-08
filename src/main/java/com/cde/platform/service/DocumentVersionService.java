@@ -1,5 +1,6 @@
 package com.cde.platform.service;
 
+import com.cde.platform.collaboration.CollaborationBroadcaster;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.DocumentVersion;
 import com.cde.platform.model.DocumentVersion.DocumentOperation;
@@ -50,13 +51,16 @@ public class DocumentVersionService {
     /** Subdirectory holding converter output that has not been committed yet. */
     private static final String WORK_DIR = ".work";
 
-    private final DocumentVersionRepository versionRepo;
-    private final DocumentRepository        documentRepo;
+    private final DocumentVersionRepository  versionRepo;
+    private final DocumentRepository         documentRepo;
+    private final CollaborationBroadcaster   broadcaster;
 
     public DocumentVersionService(DocumentVersionRepository versionRepo,
-                                  DocumentRepository documentRepo) {
+                                  DocumentRepository documentRepo,
+                                  CollaborationBroadcaster broadcaster) {
         this.versionRepo  = versionRepo;
         this.documentRepo = documentRepo;
+        this.broadcaster  = broadcaster;
     }
 
     // ── Queries ──────────────────────────────────────────────────
@@ -229,6 +233,16 @@ public class DocumentVersionService {
         document.setFileSize(version.getFileSize());
         document.setCurrentVersion(version.getVersionNumber());
         documentRepo.save(document);
+
+        // Anyone else viewing this document is now looking at bytes that no
+        // longer exist. Announcing it here rather than at each call site
+        // covers every operation that moves the head, including ones added
+        // later.
+        broadcaster.versionCommitted(
+            document.getId(),
+            version.getCreatedBy() != null ? version.getCreatedBy().getUsername() : null,
+            version.getVersionNumber(),
+            version.getSummary());
     }
 
     private int nextVersionNumber(Long documentId) {

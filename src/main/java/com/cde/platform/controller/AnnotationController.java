@@ -1,5 +1,7 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.collaboration.CollaborationBroadcaster;
+import com.cde.platform.collaboration.CollaborationEvent;
 import com.cde.platform.dto.Dtos.*;
 import com.cde.platform.model.*;
 import com.cde.platform.repository.*;
@@ -25,19 +27,22 @@ public class AnnotationController {
     private final DocumentRepository        documentRepo;
     private final UserRepository            userRepo;
     private final XfdfService              xfdfService;
+    private final CollaborationBroadcaster broadcaster;
 
     public AnnotationController(
         AnnotationRepository     annotationRepo,
         AnnotationReplyRepository replyRepo,
         DocumentRepository        documentRepo,
         UserRepository            userRepo,
-        XfdfService              xfdfService
+        XfdfService              xfdfService,
+        CollaborationBroadcaster broadcaster
     ) {
         this.annotationRepo = annotationRepo;
         this.replyRepo       = replyRepo;
         this.documentRepo    = documentRepo;
         this.userRepo        = userRepo;
         this.xfdfService     = xfdfService;
+        this.broadcaster     = broadcaster;
     }
 
     // ── Annotations CRUD ─────────────────────────────────────────
@@ -61,7 +66,9 @@ public class AnnotationController {
             .status(Annotation.AnnotationStatus.OPEN)
             .createdAt(LocalDateTime.now())
             .build();
-        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(annotationRepo.save(ann)));
+        AnnotationResponse saved = toResponse(annotationRepo.save(ann));
+        broadcaster.annotationCreated(doc.getId(), author.getUsername(), saved);
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
     @PutMapping("/{id}")
@@ -72,7 +79,9 @@ public class AnnotationController {
         return annotationRepo.findById(id).map(ann -> {
             ann.setShapeData(req.shapeData());
             ann.setComment(req.comment());
-            return ResponseEntity.ok(toResponse(annotationRepo.save(ann)));
+            AnnotationResponse saved = toResponse(annotationRepo.save(ann));
+            broadcaster.annotationUpdated(documentIdOf(ann), authorNameOf(ann), saved);
+            return ResponseEntity.ok(saved);
         }).orElse(ResponseEntity.notFound().build());
     }
 
@@ -80,14 +89,23 @@ public class AnnotationController {
     public ResponseEntity<AnnotationResponse> resolve(@PathVariable Long id) {
         return annotationRepo.findById(id).map(ann -> {
             ann.setStatus(Annotation.AnnotationStatus.RESOLVED);
-            return ResponseEntity.ok(toResponse(annotationRepo.save(ann)));
+            AnnotationResponse saved = toResponse(annotationRepo.save(ann));
+            broadcaster.annotationResolved(documentIdOf(ann), authorNameOf(ann), saved);
+            return ResponseEntity.ok(saved);
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!annotationRepo.existsById(id)) return ResponseEntity.notFound().build();
+    public ResponseEntity<Void> delete(@PathVariable Long id,
+                                       @AuthenticationPrincipal UserDetails principal) {
+        var existing = annotationRepo.findById(id).orElse(null);
+        if (existing == null) return ResponseEntity.notFound().build();
+
+        // Read the document before deleting: afterwards there is nothing left
+        // to say which document's viewers should hear about it.
+        Long documentId = documentIdOf(existing);
         annotationRepo.deleteById(id);
+        broadcaster.annotationDeleted(documentId, usernameOf(principal), id);
         return ResponseEntity.noContent().build();
     }
 
@@ -113,7 +131,11 @@ public class AnnotationController {
             .content(body.getOrDefault("content", ""))
             .createdAt(LocalDateTime.now())
             .build();
-        return ResponseEntity.status(HttpStatus.CREATED).body(toReplyResponse(replyRepo.save(reply)));
+        ReplyResponse saved = toReplyResponse(replyRepo.save(reply));
+        broadcaster.replyAdded(documentIdOf(ann), author.getUsername(),
+            new CollaborationEvent.ReplyPayload(
+                saved.id(), annotationId, saved.authorName(), saved.content()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
     @DeleteMapping("/replies/{replyId}")
@@ -184,6 +206,19 @@ public class AnnotationController {
     }
 
     // ── Helpers ───────────────────────────────────────────────────
+    /** Which document's viewers should hear about a change to this annotation. */
+    private Long documentIdOf(Annotation annotation) {
+        return annotation.getDocument() != null ? annotation.getDocument().getId() : null;
+    }
+
+    private String authorNameOf(Annotation annotation) {
+        return annotation.getAuthor() != null ? annotation.getAuthor().getUsername() : null;
+    }
+
+    private String usernameOf(UserDetails principal) {
+        return principal != null ? principal.getUsername() : null;
+    }
+
     private AnnotationResponse toResponse(Annotation a) {
         return new AnnotationResponse(
             a.getId(),
