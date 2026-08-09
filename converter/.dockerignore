@@ -1,0 +1,14 @@
+# The converter image is built with ./converter as its context, so the
+# repository-root .dockerignore does not apply here.
+
+__pycache__/
+.pytest_cache/
+**/*.pyc
+
+# Tests are run in CI against the source tree, not shipped in the image.
+test_app.py
+conftest.py
+requirements-dev.txt
+
+Dockerfile
+.dockerignore
