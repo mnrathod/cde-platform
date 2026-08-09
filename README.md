@@ -19,6 +19,32 @@ A full-stack Spring Boot application providing a Common Data Environment (CDE) f
 
 ## Quick Start
 
+### Docker (recommended — brings the full toolchain with it)
+
+```bash
+export CDE_JWT_SECRET='<a long random string>'
+docker compose up --build
+```
+
+Then open **http://localhost:8080**.
+
+`CDE_JWT_SECRET` is required and compose refuses to start without it — the
+value in `application.yml` is a placeholder, not a default.
+
+This runs two containers:
+
+| Service | Contains |
+|---|---|
+| `cde-app` | Spring Boot API |
+| `converter` | Python service **plus LibreOffice, LibreDWG and Tesseract** |
+
+The toolchain lives in the converter image because `converter/app.py` shells
+out to those three binaries. Running the app without them is what made DWG
+and Office silently fail in a container while working on a developer machine.
+`GET http://localhost:5001/health` reports which were found; the compose
+healthcheck uses it, so a bad image is caught at startup rather than on a
+user's first upload.
+
 ### Windows (recommended — starts both services)
 
 ```cmd
@@ -48,13 +74,32 @@ Then open: **http://localhost:8080**
 | File type | Behaviour |
 |---|---|
 | `.dxf` | Rendered via **ezdxf** Python service (full fidelity) |
-| `.dwg` | Binary DWG detected — version shown + conversion guide |
+| `.dwg` | Converted to DXF, then rendered — **LibreDWG** by default, **ODA File Converter** when available (higher fidelity, tried first) |
 | `.svg` | Rendered inline |
 | `.png` / `.jpg` | Displayed as image |
 | `.pdf` | Rendered in iframe |
 
 The ezdxf converter runs as a lightweight Python HTTP service on port 5001.
 If it's not running, the app falls back to the built-in Java DXF parser automatically.
+
+**Running outside Docker?** Binary DWG needs `dwg2dxf` on `PATH`, and LibreDWG
+is in no Debian or Ubuntu archive — build it from source, or use the Docker
+setup above, which does that for you.
+
+**ODA File Converter** is optional and cannot be bundled: its download is
+registration-gated and its licence forbids redistribution. To use it, mount
+the extracted install and set `ODA_PATH`:
+
+```yaml
+converter:
+  volumes:
+    - ./vendor/oda:/opt/oda:ro
+  environment:
+    ODA_PATH: /opt/oda/ODAFileConverter
+```
+
+ODA is a Qt application and needs a display even in console mode, so wrap it
+with `xvfb-run -a`. Without `ODA_PATH`, DWG falls back to LibreDWG.
 
 ---
 

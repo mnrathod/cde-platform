@@ -1,15 +1,63 @@
-version: '3.9'
 services:
+  converter:
+    build:
+      context: ./converter
+    # Not published on the host by default — only cde-app needs to reach
+    # it, and the converter has no authentication of its own.
+    expose:
+      - "5001"
+    environment:
+      CONVERTER_PORT: 5001
+      # Point this at a mounted ODA File Converter to get higher-fidelity
+      # DWG conversion; unset, DWG falls back to the bundled LibreDWG.
+      ODA_PATH: ${ODA_PATH:-}
+    volumes:
+      - uploads:/app/uploads
+    healthcheck:
+      # /health reports whether LibreOffice, LibreDWG and Tesseract were
+      # actually found, so a bad image is caught here rather than on a
+      # user's first upload.
+      test: ["CMD", "curl", "-fsS", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
   cde-app:
     build: .
     ports:
       - "8080:8080"
     volumes:
-      - ./uploads:/app/uploads
+      # Shared with the converter: the app sends absolute paths over HTTP
+      # and the converter opens them directly, so both containers must see
+      # the same files at the same paths. Both images also run as uid 10001
+      # so each can read what the other wrote — changing either uid alone
+      # breaks every conversion with EACCES.
+      - uploads:/app/uploads
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      CDE_CONVERTER_URL: http://converter:5001
+      CDE_STORAGE_UPLOAD_DIR: /app/uploads
+      # Override in deployment. The application.yml default is a shipped
+      # placeholder and must not be used anywhere real.
+      CDE_JWT_SECRET: ${CDE_JWT_SECRET:?set CDE_JWT_SECRET before starting}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      converter:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  # A named volume rather than a bind mount: Docker seeds a named volume's
+  # ownership from the image, where /app/uploads is already owned by uid
+  # 10001. A bind mount takes the host directory's ownership instead —
+  # usually root — and both containers then fail every write with EACCES.
+  # To use a host directory anyway, chown it to 10001:10001 first.
+  uploads:
