@@ -95,7 +95,14 @@ public class DocumentVersion {
         REDACT,
         OCR,
         FLATTEN,
+        /** Values were entered into existing fields. */
         FORM_FILL,
+        /**
+         * Fields were added to or removed from the form itself. Distinct from
+         * FORM_FILL because the audit trail should not report adding and
+         * removing fields as though someone had filled them in.
+         */
+        FORM_DESIGN,
         /**
          * Any change to the page tree — reorder, delete, rotate, duplicate,
          * insert. One value rather than five because they arrive together

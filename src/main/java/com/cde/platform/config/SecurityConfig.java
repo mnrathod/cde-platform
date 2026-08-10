@@ -41,6 +41,13 @@ public class SecurityConfig {
                 // StompAuthChannelInterceptor, which rejects the session
                 // outright without a valid token.
                 .requestMatchers("/ws/**").permitAll()
+                // Spring forwards unhandled errors to /error as a fresh
+                // dispatch that carries no authentication. Requiring auth
+                // there replaced the real status with an empty 403, so a 404
+                // and a malformed body both reported themselves as a
+                // permissions failure. The error body itself exposes no
+                // detail: stack traces stay off by Boot's default.
+                .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/auth/**", "/h2-console/**",
                                  "/", "/index.html", "/viewer.html",
                                  "/favicon.ico", "/favicon.png",
