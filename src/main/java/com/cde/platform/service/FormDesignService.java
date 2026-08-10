@@ -83,7 +83,7 @@ public class FormDesignService {
             List<String> affected = operation.run(Paths.get(document.getFilePath()), output);
 
             DocumentVersion version = versionService.commit(document, output,
-                DocumentOperation.FORM_FILL, summary.of(affected), resolveActor(username));
+                DocumentOperation.FORM_DESIGN, summary.of(affected), resolveActor(username));
             output = null;   // ownership passed to the version chain
 
             log.info("Document {} form updated: {}", documentId, summary.of(affected));
