@@ -16,8 +16,8 @@ vectors on both platforms.
 
 | | Compiled | Tests | How |
 |---|---|---|---|
-| **iOS** | Everything except the UIKit layer | 17/17 | `swift build && swift test`, Swift 6.0.3 on Linux |
-| **Android** | Every source file, against the real framework | 17/17 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.1.0 |
+| **iOS** | Everything except the UIKit layer | 17/17 | `swift build && swift test`, Swift 6.3.3, Swift 6 language mode |
+| **Android** | Every source file, against the real framework | 17/17 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.4.10, API 37 |
 
 **What that does not cover.** No device, no simulator, no emulator has run any
 of this. Specifically still unverified:
@@ -26,11 +26,21 @@ of this. Specifically still unverified:
   `#if canImport(UIKit)`, so on Linux they compile to nothing. The whole iOS
   view layer — PDFKit, the coordinate mapping, touch handling — is unchecked.
   This is the largest gap.
+- **The Android Gradle Plugin build itself.** Sources are type-checked, but the
+  AGP 9 configuration in `android/build.gradle.kts` has never been executed —
+  AGP is published only to Google's Maven repository, which was unreachable
+  here. AGP 9 is a breaking major release: it removed the `kotlin-android`
+  plugin in favour of built-in Kotlin, and removed `kotlinOptions`. Both are
+  accounted for, neither has been proven. **Expect this file, specifically, to
+  need adjusting on the first real build.**
 - **The Android UI and renderer** type-check against the real framework, which
   catches a wrong signature but says nothing about what appears on screen.
 - **Nothing has talked to a real server.** The contract was read from a running
   one, but no SDK code has made a request against it.
 - **`PdfRenderer` and `PDFKit`** have never opened an actual PDF here.
+- **`TokenStore`'s encryption.** It type-checks against the real framework, but
+  no keystore has issued a key. Confirm a token survives a restart, and that a
+  restore onto a new device signs the user out rather than crashing.
 
 So: the geometry, the wire format, the measurement maths and every API
 signature are checked by a compiler and a test run. Rendering, gestures and
@@ -57,11 +67,11 @@ cd ios && swift test
 
 # Android — every source file type-checked against the real framework
 # classes, plus the parity suite. Needs only a JDK; no Android SDK.
-cd tools/jvm-verify && gradle test
+cd tools/jvm-verify && ./gradlew test
 ```
 
-`tools/jvm-verify` exists because AndroidX and the Android Gradle Plugin are
-published only to Google's Maven repository, which some networks block. It
+`tools/jvm-verify` exists because the Android Gradle Plugin is published only
+to Google's Maven repository, which some networks block. It
 compiles the SDK's own sources — not a copy — against Robolectric's
 `android-all` from Maven Central, which carries the real AOSP framework
 classes. It is a checking harness, not a second way to build the library: the
@@ -132,13 +142,30 @@ viewer.onShapeCompleted = { shape ->
 }
 ```
 
-`minSdk` is 21 — where `PdfRenderer` arrives. Below that there is no native PDF
-rendering at all, and shipping a JavaScript fallback for a handful of devices
-would cost every user the bundle size.
+`minSdk` is 23 — where the keystore can hold an AES key, which is what
+`TokenStore` needs to encrypt the session token at rest. `PdfRenderer` itself
+arrives at 21, but shipping an SDK that keeps a bearer token in cleartext to
+reach two releases from 2014 is not a trade worth making. Raise it freely;
+nothing here assumes 23.
 
 **Build:** `cd android && ./gradlew :cde-sdk:assembleRelease`
 **Test:** `./gradlew :cde-sdk:test` — the parity suite runs on the JVM, no
 device needed.
+
+### Dependencies
+
+There are three, all on the runtime path, and no AndroidX at all:
+
+| | | |
+|---|---|---|
+| `kotlinx-coroutines-android` | 1.11.0 | structured concurrency for the sync engine |
+| `kotlinx-serialization-json` | 1.11.0 | the `shapeData` codec and every payload |
+| `okhttp` | 5.5.0 | HTTP |
+
+Credential storage uses the Android keystore directly rather than
+`androidx.security:security-crypto`, which Google deprecated in April 2025 in
+favour of exactly that. It never left alpha, and an SDK should not hand host
+apps a dependency that is no longer maintained.
 
 ## iOS
 
@@ -157,9 +184,14 @@ viewer.onShapeCompleted = { shape in
 }
 ```
 
-iOS 13+, no third-party dependencies: `PDFKit`, `URLSession`, the keychain and
-the file system are all system frameworks. An SDK that drags in a dependency
-tree is an SDK that host apps fight with.
+iOS 13+, **no third-party dependencies at all**: `PDFKit`, `URLSession`,
+`CryptoKit`, the keychain and the file system are all system frameworks. An SDK
+that drags in a dependency tree is an SDK that host apps fight with.
+
+The package is `swift-tools-version: 6.2`, so targets build in Swift 6 language
+mode with strict concurrency checking on. It compiles clean under it — the
+actor and `Sendable` boundaries are checked by the compiler, not asserted in a
+comment.
 
 **Build:** `cd ios && swift build`
 **Test:** `swift test`

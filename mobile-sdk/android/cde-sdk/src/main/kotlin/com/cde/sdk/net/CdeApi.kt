@@ -142,7 +142,7 @@ class CdeApi(
 
     /** Raw PDF bytes. Streamed to a file by the cache rather than held whole. */
     suspend fun pdfBytes(path: String): ByteArray = withContext(Dispatchers.IO) {
-        execute(request(path).build()) { it.body?.bytes() ?: ByteArray(0) }
+        execute(request(path).build()) { it.body.bytes() }
     }
 
     // ── Annotations ──────────────────────────────────────────────
@@ -178,7 +178,7 @@ class CdeApi(
     }
 
     private suspend fun get(path: String): String = withContext(Dispatchers.IO) {
-        execute(request(path).build()) { it.body?.string().orEmpty() }
+        execute(request(path).build()) { it.body.string() }
     }
 
     private suspend fun post(path: String, body: String, authenticated: Boolean = true): String =
@@ -193,7 +193,7 @@ class CdeApi(
         val builder = if (authenticated) request(path)
                       else Request.Builder().url(configuration.baseUrl.trimEnd('/') + path)
         val payload = body?.toRequestBody("application/json".toMediaType())
-        execute(builder.method(method, payload).build()) { it.body?.string().orEmpty() }
+        execute(builder.method(method, payload).build()) { it.body.string() }
     }
 
     private fun <T> execute(request: Request, read: (okhttp3.Response) -> T): T {
