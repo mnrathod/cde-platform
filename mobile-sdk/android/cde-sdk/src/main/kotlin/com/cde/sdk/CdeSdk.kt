@@ -3,6 +3,7 @@ package com.cde.sdk
 import android.content.Context
 import com.cde.sdk.auth.TokenStore
 import com.cde.sdk.model.*
+import com.cde.sdk.net.AuthResult
 import com.cde.sdk.net.CdeApi
 import com.cde.sdk.net.CdeConfiguration
 import com.cde.sdk.net.CdeError
@@ -120,7 +121,7 @@ class CdeSdk(
 
     // ── Annotations ──────────────────────────────────────────────
 
-    suspend fun annotations(documentId: Long): List<Annotation> = sync.annotations(documentId)
+    suspend fun annotations(documentId: Long): List<CdeAnnotation> = sync.annotations(documentId)
 
     /**
      * Records markup.
@@ -136,7 +137,7 @@ class CdeSdk(
         shape: ShapeData,
         type: AnnotationType = AnnotationType.MARKUP,
         comment: String? = null,
-    ): Annotation {
+    ): CdeAnnotation {
         val request = AnnotationRequest(
             documentId = documentId,
             type = type,
@@ -146,7 +147,7 @@ class CdeSdk(
         )
         store.enqueue(PendingChange.Create(localId = shape.id, request = request))
         sync.sync()
-        return Annotation(
+        return CdeAnnotation(
             id = -1, documentId = documentId, type = type,
             shapeData = request.shapeData, comment = comment,
             pageNumber = shape.pageNumber,

@@ -9,29 +9,63 @@ rendering engine of its own, and neither uses a WebView for PDF.
 
 ---
 
-## Status: written, not built
+## Status: compiled and tested off-device, never run on a device
 
-**Neither SDK has been compiled or run.** They were written in an environment
-with no Swift toolchain, no Xcode, no Android SDK and no emulator, so nothing
-here has been through a compiler, let alone a device.
+Both SDKs compile and both parity suites pass — 17 tests each, the same
+vectors on both platforms.
 
-What *has* been verified is the thing an SDK most often gets wrong: the API
-contract. Every endpoint, payload shape, enum value and field name in
-[API-CONTRACT.md](API-CONTRACT.md) was read from a running server rather than
-inferred from the backend source. Both SDKs bind to that document.
+| | Compiled | Tests | How |
+|---|---|---|---|
+| **iOS** | Everything except the UIKit layer | 17/17 | `swift build && swift test`, Swift 6.0.3 on Linux |
+| **Android** | Every source file, against the real framework | 17/17 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.1.0 |
 
-Expect the first build to surface ordinary compile errors — an import, a
-signature, a nullability annotation. Treat this as a reviewed first draft
-against a verified contract, not as shipped code. In particular, before
-trusting it:
+**What that does not cover.** No device, no simulator, no emulator has run any
+of this. Specifically still unverified:
 
-1. Run the parity test suites. They encode the same vectors as the web
-   viewer's `markup-engine.service.spec.ts`, so passing them means markup
-   drawn on a phone measures the same as markup drawn in a browser.
+- **`CdeViewerController`, `CdeViewer`, `MarkupOverlayView` (iOS)** are behind
+  `#if canImport(UIKit)`, so on Linux they compile to nothing. The whole iOS
+  view layer — PDFKit, the coordinate mapping, touch handling — is unchecked.
+  This is the largest gap.
+- **The Android UI and renderer** type-check against the real framework, which
+  catches a wrong signature but says nothing about what appears on screen.
+- **Nothing has talked to a real server.** The contract was read from a running
+  one, but no SDK code has made a request against it.
+- **`PdfRenderer` and `PDFKit`** have never opened an actual PDF here.
+
+So: the geometry, the wire format, the measurement maths and every API
+signature are checked by a compiler and a test run. Rendering, gestures and
+networking are reviewed code that has not executed.
+
+The API contract remains the other verified piece: every endpoint, payload
+shape, enum value and field name in [API-CONTRACT.md](API-CONTRACT.md) was read
+from a running server rather than inferred from the backend source.
+
+Before trusting this on a device:
+
+1. Build both properly — `./gradlew :cde-sdk:assembleRelease` with an Android
+   SDK present, and the Xcode toolchain for the UIKit layer.
 2. Check `shapeData` round-trips against a real annotation created by the web
    viewer. Nothing on the wire enforces that format — see below.
 3. Exercise the offline queue with the network genuinely off, not just with
    the server stopped.
+
+### Running the checks that do work without a device
+
+```bash
+# iOS — logic layers and the parity suite. Needs any Swift 6 toolchain.
+cd ios && swift test
+
+# Android — every source file type-checked against the real framework
+# classes, plus the parity suite. Needs only a JDK; no Android SDK.
+cd tools/jvm-verify && gradle test
+```
+
+`tools/jvm-verify` exists because AndroidX and the Android Gradle Plugin are
+published only to Google's Maven repository, which some networks block. It
+compiles the SDK's own sources — not a copy — against Robolectric's
+`android-all` from Maven Central, which carries the real AOSP framework
+classes. It is a checking harness, not a second way to build the library: the
+shipping artefact comes from `./gradlew :cde-sdk:assembleRelease`.
 
 ---
 

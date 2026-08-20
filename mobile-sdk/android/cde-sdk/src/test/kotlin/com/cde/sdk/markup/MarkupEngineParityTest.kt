@@ -1,10 +1,13 @@
 package com.cde.sdk.markup
 
+import com.cde.sdk.model.MarkupCodec
 import com.cde.sdk.model.MarkupTool
 import com.cde.sdk.model.Point
 import com.cde.sdk.model.ShapeData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -151,5 +154,61 @@ class MarkupEngineParityTest {
         val ids = (1..500).map { MarkupEngine.newId() }.toSet()
         assertEquals(500, ids.size)
         assertTrue(ids.all { it.startsWith("s-") })
+    }
+
+    // ── the wire format ───────────────────────────────────────────
+
+    /**
+     * The whole point of the shared format: what one client writes, another
+     * must read. This asserts the encoder emits the field names the web viewer
+     * looks for, not merely that it round-trips through itself — a codec that
+     * only agrees with itself would pass a round-trip test and still produce
+     * markup no browser could draw.
+     */
+    @Test
+    fun `shapeData encodes the field names the web viewer reads`() {
+        val shape = ShapeData(
+            id = "s-1", tool = MarkupTool.AREA, pageNumber = 1, color = "#FF0000",
+            strokeWidth = 2.0, opacity = 0.15, points = square,
+            measurement = "15300 px²", measurementDetail = "1051.5 px")
+
+        val encoded = MarkupCodec.encode(shape)
+        for (key in listOf(
+            "\"id\"", "\"tool\"", "\"pageNumber\"", "\"color\"", "\"strokeWidth\"",
+            "\"opacity\"", "\"points\"", "\"measurement\"", "\"measurementDetail\"",
+        )) {
+            assertTrue("missing $key in $encoded", encoded.contains(key))
+        }
+        assertTrue("tool must serialise as its web name", encoded.contains("\"area\""))
+
+        val decoded = MarkupCodec.decode(encoded)
+        assertEquals(MarkupTool.AREA, decoded?.tool)
+        assertEquals(3, decoded?.points?.size)
+    }
+
+    @Test
+    fun `unreadable markup is skipped rather than throwing`() {
+        // One annotation written by a future client must not hide every other
+        // annotation on the document.
+        assertNull(MarkupCodec.decode("not json"))
+        assertNull(MarkupCodec.decode(""))
+    }
+
+    // ── measurement ───────────────────────────────────────────────
+
+    @Test
+    fun `area scales with the square of the linear factor`() {
+        // The failure this guards is a number that looks plausible and is out
+        // by the scale itself — the worst kind of wrong on a take-off.
+        val scale = MeasurementScale(unitsPerPixel = 0.5, unit = MeasurementUnit.METRE)
+        assertEquals("25 m²", Measurement.formatArea(100.0, scale))
+        assertEquals("50 m", Measurement.formatLength(100.0, scale))
+    }
+
+    @Test
+    fun `calibration refuses input that cannot define a scale`() {
+        assertNull(Measurement.calibrate(0.0, 5.0, MeasurementUnit.METRE))
+        assertNull(Measurement.calibrate(100.0, 0.0, MeasurementUnit.METRE))
+        assertNotNull(Measurement.calibrate(100.0, 5.0, MeasurementUnit.METRE))
     }
 }

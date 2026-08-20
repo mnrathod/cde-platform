@@ -1,5 +1,10 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#endif
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// A change made on this device that the server has not accepted yet.
 ///
@@ -166,9 +171,9 @@ public final class OfflineStore: @unchecked Sendable {
     /// they are small, and the queue holds work that exists nowhere else.
     public func trim(to limit: Int64) {
         guard var total = Optional(cacheSizeBytes()), total > limit else { return }
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
         guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: files, includingPropertiesForKeys: keys)
+            at: files, includingPropertiesForKeys: Array(keys))
         else { return }
 
         let oldestFirst = contents.sorted { left, right in
@@ -207,8 +212,25 @@ public final class OfflineStore: @unchecked Sendable {
         return try? decoder.decode(type, from: data)
     }
 
+    /// A stable, filesystem-safe name for a cache key.
+    ///
+    /// Must be deterministic across launches — it is how a cached file is
+    /// found again on the next run. `Swift.hashValue` is not: its seed is
+    /// randomised per process, so using it would silently orphan every cached
+    /// file at each launch and quietly turn the cache off.
     private func digest(_ key: String) -> String {
-        SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        #if canImport(CryptoKit)
+        return SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        #else
+        // Non-Apple platforms build only for off-device testing; FNV-1a is
+        // deterministic, which is the property that matters here.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in Data(key.utf8) {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(format: "%016lx", hash)
+        #endif
     }
 
     private func excludeFromBackup(_ url: URL) {

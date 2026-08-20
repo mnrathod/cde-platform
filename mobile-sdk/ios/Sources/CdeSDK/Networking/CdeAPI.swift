@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Everything that can go wrong talking to the CDE, as one type.
 ///
@@ -80,7 +83,12 @@ public actor CdeAPI {
         // The SDK caches deliberately and by version; letting URLSession also
         // cache would produce two policies that disagree about staleness.
         sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        #if canImport(Darwin)
+        // Fail fast when there is no route, so the caller falls through to the
+        // cache instead of hanging. The property is read-only in
+        // swift-corelibs-foundation, which only affects off-device test runs.
         sessionConfiguration.waitsForConnectivity = false
+        #endif
         self.session = URLSession(configuration: sessionConfiguration)
     }
 

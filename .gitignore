@@ -44,3 +44,8 @@ uploads/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+### SwiftPM ###
+.build/
+.swiftpm/
+Package.resolved

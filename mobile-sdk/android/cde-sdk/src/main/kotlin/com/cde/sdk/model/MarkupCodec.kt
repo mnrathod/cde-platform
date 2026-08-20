@@ -31,6 +31,6 @@ object MarkupCodec {
         runCatching { json.decodeFromString(ShapeData.serializer(), shapeData) }.getOrNull()
 
     /** Decodes a list, dropping any entry that cannot be read. */
-    fun decodeAll(annotations: List<Annotation>): List<ShapeData> =
+    fun decodeAll(annotations: List<CdeAnnotation>): List<ShapeData> =
         annotations.mapNotNull { decode(it.shapeData)?.copy(savedId = it.id) }
 }
