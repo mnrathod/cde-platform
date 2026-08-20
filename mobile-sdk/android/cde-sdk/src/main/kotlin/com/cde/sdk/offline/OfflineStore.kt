@@ -1,13 +1,14 @@
 package com.cde.sdk.offline
 
 import android.content.Context
-import com.cde.sdk.model.Annotation
 import com.cde.sdk.model.AnnotationRequest
+import com.cde.sdk.model.CdeAnnotation
 import com.cde.sdk.model.CdeDocument
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * A change made on this device that the server has not accepted yet.
@@ -100,15 +101,15 @@ class OfflineStore(context: Context) {
             ?.let { runCatching { json.decodeFromString<List<CdeDocument>>(it.readText()) }.getOrNull() }
             ?: emptyList()
 
-    fun storeAnnotations(documentId: Long, annotations: List<Annotation>) {
+    fun storeAnnotations(documentId: Long, annotations: List<CdeAnnotation>) {
         File(metadata, "annotations-$documentId.json")
             .writeText(json.encodeToString(annotations))
     }
 
-    fun cachedAnnotations(documentId: Long): List<Annotation> =
+    fun cachedAnnotations(documentId: Long): List<CdeAnnotation> =
         File(metadata, "annotations-$documentId.json")
             .takeIf { it.exists() }
-            ?.let { runCatching { json.decodeFromString<List<Annotation>>(it.readText()) }.getOrNull() }
+            ?.let { runCatching { json.decodeFromString<List<CdeAnnotation>>(it.readText()) }.getOrNull() }
             ?: emptyList()
 
     // ── The outbound queue ───────────────────────────────────────

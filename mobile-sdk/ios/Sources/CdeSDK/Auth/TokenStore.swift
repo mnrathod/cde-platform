@@ -1,4 +1,5 @@
 import Foundation
+#if canImport(Security)
 import Security
 
 /// Holds the session token between launches.
@@ -83,3 +84,37 @@ public final class TokenStore: @unchecked Sendable {
         SecItemDelete(query(key) as CFDictionary)
     }
 }
+
+#else
+
+/// Stand-in used when the Security framework is absent — that is, only when
+/// the platform-independent layers are compiled off-device for testing. iOS
+/// always takes the keychain implementation above; nothing here ships.
+public final class TokenStore: @unchecked Sendable {
+
+    private var values: [String: String] = [:]
+    private let lock = NSLock()
+
+    public init(service: String = "com.cde.sdk.session") {}
+
+    public var token: String? { value(for: "token") }
+    public var username: String? { value(for: "username") }
+    public var role: String? { value(for: "role") }
+
+    public func store(token: String, username: String, role: String) {
+        lock.lock(); defer { lock.unlock() }
+        values = ["token": token, "username": username, "role": role]
+    }
+
+    public func clear() {
+        lock.lock(); defer { lock.unlock() }
+        values.removeAll()
+    }
+
+    private func value(for key: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return values[key]
+    }
+}
+
+#endif

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// A document ready to render, with the branch already taken.
 public enum OpenedDocument: Sendable {

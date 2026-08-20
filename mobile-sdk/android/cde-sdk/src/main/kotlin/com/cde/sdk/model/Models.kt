@@ -94,7 +94,7 @@ enum class AnnotationType {
 enum class AnnotationStatus { OPEN, RESOLVED, CLOSED }
 
 @Serializable
-data class Annotation(
+data class CdeAnnotation(
     val id: Long,
     val documentId: Long,
     val author: String? = null,

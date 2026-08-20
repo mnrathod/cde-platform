@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// What the host app shows about sync state.
 public struct SyncState: Sendable, Equatable {

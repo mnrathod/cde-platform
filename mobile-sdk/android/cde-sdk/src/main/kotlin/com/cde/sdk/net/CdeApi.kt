@@ -147,20 +147,20 @@ class CdeApi(
 
     // ── Annotations ──────────────────────────────────────────────
 
-    suspend fun annotations(documentId: Long): List<Annotation> =
+    suspend fun annotations(documentId: Long): List<CdeAnnotation> =
         json.decodeFromString(get("/api/annotations/document/$documentId"))
 
-    suspend fun createAnnotation(request: AnnotationRequest): Annotation {
+    suspend fun createAnnotation(request: AnnotationRequest): CdeAnnotation {
         val body = json.encodeToString(AnnotationRequest.serializer(), request)
         return json.decodeFromString(post("/api/annotations", body))
     }
 
-    suspend fun updateAnnotation(id: Long, request: AnnotationRequest): Annotation {
+    suspend fun updateAnnotation(id: Long, request: AnnotationRequest): CdeAnnotation {
         val body = json.encodeToString(AnnotationRequest.serializer(), request)
         return json.decodeFromString(send("PUT", "/api/annotations/$id", body))
     }
 
-    suspend fun resolveAnnotation(id: Long): Annotation =
+    suspend fun resolveAnnotation(id: Long): CdeAnnotation =
         json.decodeFromString(send("PATCH", "/api/annotations/$id/resolve", "{}"))
 
     suspend fun deleteAnnotation(id: Long) {

@@ -1,6 +1,6 @@
 package com.cde.sdk.offline
 
-import com.cde.sdk.model.Annotation
+import com.cde.sdk.model.CdeAnnotation
 import com.cde.sdk.net.CdeApi
 import com.cde.sdk.net.CdeError
 import kotlinx.coroutines.delay
@@ -174,7 +174,7 @@ class SyncEngine(
      * when there is no connection — plus anything still queued, so markup made
      * offline is visible immediately instead of disappearing until it syncs.
      */
-    suspend fun annotations(documentId: Long): List<Annotation> {
+    suspend fun annotations(documentId: Long): List<CdeAnnotation> {
         val remote = try {
             api.annotations(documentId).also { store.storeAnnotations(documentId, it) }
         } catch (e: CdeError.Offline) {
