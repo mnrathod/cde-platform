@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -196,7 +197,10 @@ class MarkupOverlayView @JvmOverloads constructor(
     // ── Drawing ──────────────────────────────────────────────────
 
     override fun onDraw(canvas: Canvas) {
-        shapes.forEach { draw(canvas, it, inProgressShape = false) }
+        // Only this page's markup. Coordinates are page-relative, so another
+        // page's shapes would not look obviously wrong — they would land at
+        // plausible positions on the wrong drawing, which is worse.
+        shapes.forEach { if (it.pageNumber == pageNumber) draw(canvas, it, inProgressShape = false) }
         inProgress?.let { draw(canvas, it, inProgressShape = true) }
     }
 
@@ -227,18 +231,41 @@ class MarkupOverlayView @JvmOverloads constructor(
             MarkupTool.CLOUD, MarkupTool.AREA, MarkupTool.DIMENSION,
             MarkupTool.RADIUS, MarkupTool.CALIBRATE -> drawPath(canvas, shape, inProgressShape)
 
+            // An ellipse is given a bounding box by the engine, like a rect.
+            // Without its own branch it fell through below and drew as a
+            // rectangle — the wrong shape, and silently so.
+            MarkupTool.ELLIPSE -> {
+                val box = boundingBox(shape)
+                if (fillPaint.alpha > 0) canvas.drawOval(box, fillPaint)
+                canvas.drawOval(box, strokePaint)
+            }
+
             else -> {
-                val origin = pageToView(Point(shape.x ?: 0.0, shape.y ?: 0.0))
-                val far = pageToView(Point(
-                    (shape.x ?: 0.0) + (shape.width ?: 0.0),
-                    (shape.y ?: 0.0) + (shape.height ?: 0.0)))
-                if (fillPaint.alpha > 0)
-                    canvas.drawRect(origin.x.toFloat(), origin.y.toFloat(),
-                        far.x.toFloat(), far.y.toFloat(), fillPaint)
-                canvas.drawRect(origin.x.toFloat(), origin.y.toFloat(),
-                    far.x.toFloat(), far.y.toFloat(), strokePaint)
+                val box = boundingBox(shape)
+                if (fillPaint.alpha > 0) canvas.drawRect(box, fillPaint)
+                canvas.drawRect(box, strokePaint)
             }
         }
+    }
+
+    /**
+     * A shape's x/y/width/height in view coordinates.
+     *
+     * Sorted because the page's y axis runs opposite to the view's: converting
+     * both corners can leave the far corner above the origin, and Canvas draws
+     * nothing for a rect whose top is below its bottom.
+     */
+    private fun boundingBox(shape: ShapeData): RectF {
+        val origin = pageToView(Point(shape.x ?: 0.0, shape.y ?: 0.0))
+        val far = pageToView(Point(
+            (shape.x ?: 0.0) + (shape.width ?: 0.0),
+            (shape.y ?: 0.0) + (shape.height ?: 0.0)))
+        return RectF(
+            minOf(origin.x, far.x).toFloat(),
+            minOf(origin.y, far.y).toFloat(),
+            maxOf(origin.x, far.x).toFloat(),
+            maxOf(origin.y, far.y).toFloat(),
+        )
     }
 
     private fun drawPath(canvas: Canvas, shape: ShapeData, inProgressShape: Boolean) {

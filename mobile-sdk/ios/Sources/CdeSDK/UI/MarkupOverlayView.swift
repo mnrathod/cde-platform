@@ -26,7 +26,10 @@ public final class MarkupOverlayView: UIView {
         }
     }
 
-    public var strokeColor: UIColor = .systemRed
+    /// An explicit sRGB red rather than `.systemRed`. Markup colour is
+    /// *stored*, not merely displayed, and a dynamic colour has no components
+    /// to store until it is resolved against a trait collection.
+    public var strokeColor: UIColor = UIColor(red: 1, green: 0.23, blue: 0.19, alpha: 1)
     public var strokeWidth: CGFloat = 2
     public var fillOpacity: CGFloat = 0.15
     public var pageNumber: Int = 1
@@ -100,7 +103,7 @@ public final class MarkupOverlayView: UIView {
         isDragging = true
         inProgress = MarkupEngine.startShape(
             tool: activeTool, at: at, pageNumber: pageNumber,
-            color: strokeColor.hexString,
+            color: strokeHex(),
             strokeWidth: Double(strokeWidth / zoom),
             opacity: Double(fillOpacity))
         onShapeChanged?(inProgress)
@@ -127,7 +130,7 @@ public final class MarkupOverlayView: UIView {
         } else {
             shape = MarkupEngine.startShape(
                 tool: activeTool, at: at, pageNumber: pageNumber,
-                color: strokeColor.hexString,
+                color: strokeHex(),
                 strokeWidth: Double(strokeWidth / zoom),
                 opacity: Double(fillOpacity))
         }
@@ -173,18 +176,37 @@ public final class MarkupOverlayView: UIView {
         setNeedsDisplay()
     }
 
+    /// The stroke colour as it will be stored.
+    ///
+    /// Falls back to the default red rather than to black: a host that hands
+    /// in an unresolvable colour should get a visible shape in a sensible
+    /// colour, not markup that reads as deliberately black in the browser.
+    private func strokeHex() -> String {
+        strokeColor.hexString(in: traitCollection) ?? Self.defaultStrokeHex
+    }
+
+    private static let defaultStrokeHex = "#FF3B30"
+
     // MARK: - Drawing
 
     public override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        for shape in shapes { draw(shape, in: context, inProgress: false) }
+        // Only this page's markup. Coordinates are page-relative, so another
+        // page's shapes would not look obviously wrong — they would land at
+        // plausible positions on the wrong drawing, which is worse.
+        for shape in shapes where shape.pageNumber == pageNumber {
+            draw(shape, in: context, inProgress: false)
+        }
         if let current = inProgress { draw(current, in: context, inProgress: true) }
     }
 
     private func draw(_ shape: ShapeData, in context: CGContext, inProgress isBuilding: Bool) {
         let colour = UIColor(hex: shape.color) ?? .systemRed
+        // Kept in a local: CGContext can be told a line width but never asked
+        // for one, so the arrow head has to be handed the same value.
+        let lineWidth = max(1, CGFloat(shape.strokeWidth) * zoom)
         context.setStrokeColor(colour.cgColor)
-        context.setLineWidth(max(1, CGFloat(shape.strokeWidth) * zoom))
+        context.setLineWidth(lineWidth)
         context.setLineCap(.round)
         context.setLineJoin(.round)
         context.setFillColor(colour.withAlphaComponent(CGFloat(shape.opacity)).cgColor)
@@ -196,7 +218,17 @@ public final class MarkupOverlayView: UIView {
             context.move(to: from)
             context.addLine(to: to)
             context.strokePath()
-            if shape.tool == .arrow { drawArrowHead(from: from, to: to, in: context) }
+            if shape.tool == .arrow {
+                drawArrowHead(from: from, to: to, lineWidth: lineWidth, in: context)
+            }
+
+        case .ellipse:
+            // The engine gives an ellipse a bounding box, like a rect. Without
+            // its own case it fell to the default branch and drew as a
+            // rectangle — the wrong shape, silently.
+            let box = boundingBox(of: shape)
+            if shape.opacity > 0 { context.fillEllipse(in: box) }
+            context.strokeEllipse(in: box)
 
         case .circle:
             let centre = pageToView(CdePoint(x: shape.cx ?? 0, y: shape.cy ?? 0))
@@ -211,15 +243,25 @@ public final class MarkupOverlayView: UIView {
             drawPath(shape, in: context, inProgress: isBuilding)
 
         default:
-            let origin = pageToView(CdePoint(x: shape.x ?? 0, y: shape.y ?? 0))
-            let far = pageToView(CdePoint(
-                x: (shape.x ?? 0) + (shape.width ?? 0),
-                y: (shape.y ?? 0) + (shape.height ?? 0)))
-            let box = CGRect(x: origin.x, y: origin.y,
-                             width: far.x - origin.x, height: far.y - origin.y)
+            let box = boundingBox(of: shape)
             if shape.opacity > 0 { context.fill(box) }
             context.stroke(box)
         }
+    }
+
+    /// A shape's x/y/width/height in view coordinates.
+    ///
+    /// Standardised because the page's y axis runs opposite to the view's:
+    /// converting both corners can put the far corner above the origin, and a
+    /// CGRect with a negative height strokes nothing at all.
+    private func boundingBox(of shape: ShapeData) -> CGRect {
+        let origin = pageToView(CdePoint(x: shape.x ?? 0, y: shape.y ?? 0))
+        let far = pageToView(CdePoint(
+            x: (shape.x ?? 0) + (shape.width ?? 0),
+            y: (shape.y ?? 0) + (shape.height ?? 0)))
+        return CGRect(x: origin.x, y: origin.y,
+                      width: far.x - origin.x, height: far.y - origin.y)
+            .standardized
     }
 
     private func drawPath(_ shape: ShapeData, in context: CGContext, inProgress isBuilding: Bool) {
@@ -251,7 +293,9 @@ public final class MarkupOverlayView: UIView {
         }
     }
 
-    private func drawArrowHead(from: CGPoint, to: CGPoint, in context: CGContext) {
+    private func drawArrowHead(
+        from: CGPoint, to: CGPoint, lineWidth: CGFloat, in context: CGContext
+    ) {
         let dx = to.x - from.x
         let dy = to.y - from.y
         let length = hypot(dx, dy)
@@ -259,7 +303,7 @@ public final class MarkupOverlayView: UIView {
 
         let ux = dx / length
         let uy = dy / length
-        let size = context.lineWidth * 4
+        let size = lineWidth * 4
         let base = CGPoint(x: to.x - ux * size, y: to.y - uy * size)
         let offset = CGPoint(x: -uy * size * 0.5, y: ux * size * 0.5)
 
@@ -285,11 +329,23 @@ extension UIColor {
             alpha: 1)
     }
 
-    var hexString: String {
+    /// `#RRGGBB` for storage, resolved against the current traits first.
+    ///
+    /// A dynamic colour — `.systemRed` and friends — has no fixed components
+    /// until it is resolved, and `getRed` refuses to answer for one. Ignoring
+    /// that return value writes `#000000` into the markup, which is not a
+    /// crash and not a warning: the shape simply comes back black in the
+    /// browser. Resolving first, and refusing to guess if it still fails, is
+    /// what keeps the stored colour the colour the user picked.
+    func hexString(in traits: UITraitCollection) -> String? {
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        guard resolvedColor(with: traits)
+            .getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        else { return nil }
         return String(format: "#%02X%02X%02X",
-                      Int(red * 255), Int(green * 255), Int(blue * 255))
+                      Int((red * 255).rounded()),
+                      Int((green * 255).rounded()),
+                      Int((blue * 255).rounded()))
     }
 }
 #endif
