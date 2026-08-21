@@ -14,7 +14,6 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.FrameLayout
 import com.cde.sdk.OpenedDocument
-import com.cde.sdk.markup.MarkupEngine
 import com.cde.sdk.model.MarkupTool
 import com.cde.sdk.model.Point
 import com.cde.sdk.model.ShapeData
@@ -22,7 +21,10 @@ import com.cde.sdk.render.PdfPageRenderer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The drop-in viewer: a document, pan and zoom, and markup over it.
@@ -38,6 +40,9 @@ import kotlinx.coroutines.launch
  * markup redraw at 60fps while a page is only re-rasterised when the zoom
  * settles — re-rendering a PDF page on every frame of a pinch is the usual
  * cause of a viewer that feels heavy.
+ *
+ * All three coordinate systems involved live in [ViewportTransform], which is
+ * plain arithmetic and covered by tests that need no device.
  */
 class CdeViewerView @JvmOverloads constructor(
     context: Context,
@@ -47,18 +52,19 @@ class CdeViewerView @JvmOverloads constructor(
 
     private val pageView = PageCanvasView(context)
     private val overlay = MarkupOverlayView(context)
-    private val scope = CoroutineScope(Dispatchers.Main)
+
+    // SupervisorJob: a page that fails to render must not cancel the scope and
+    // leave the viewer permanently unable to render anything else.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var renderer: PdfPageRenderer? = null
     private var renderJob: Job? = null
     private var pageIndex = 0
 
-    /** Pan and zoom, as a transform from page space to view space. */
-    private var scale = 1f
-    private var offsetX = 0f
-    private var offsetY = 0f
-    /** Scale at which the current bitmap was rasterised. */
-    private var rasterisedAt = 0f
+    /** Kept so the view can reopen the document if it is reattached. */
+    private var openFile: File? = null
+
+    private var transform = ViewportTransform()
     private var pageWidth = 0f
     private var pageHeight = 0f
 
@@ -77,18 +83,26 @@ class CdeViewerView @JvmOverloads constructor(
 
     var onPageChanged: ((Int, Int) -> Unit)? = null
 
+    /**
+     * Reports a document that could not be opened or rendered.
+     *
+     * Without this the failure is silent: a blank grey view, and no way for
+     * the host to tell that apart from a page still loading.
+     */
+    var onError: ((Throwable) -> Unit)? = null
+
     /** True while a click-built shape is waiting to be closed. */
     val hasUnfinishedShape: Boolean get() = overlay.hasUnfinishedShape
+
+    val pageCount: Int get() = renderer?.pageCount ?: 0
 
     init {
         addView(pageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        setBackgroundColor(Color.parseColor("#1A1D27"))
+        setBackgroundColor(BACKGROUND)
 
-        overlay.pageToView = { Point(
-            (it.x * scale + offsetX), (it.y * scale + offsetY)) }
-        overlay.viewToPage = { Point(
-            ((it.x - offsetX) / scale), ((it.y - offsetY) / scale)) }
+        overlay.pageToView = { transform.pageToView(it) }
+        overlay.viewToPage = { transform.viewToPage(it) }
     }
 
     // ── Loading ──────────────────────────────────────────────────
@@ -100,16 +114,26 @@ class CdeViewerView @JvmOverloads constructor(
      *        reader sees existing comments without waiting for a round trip
      */
     fun show(document: OpenedDocument, shapes: List<ShapeData> = emptyList()) {
-        overlay.shapes = shapes
+        // Cancel before closing: a render still in flight against the outgoing
+        // renderer throws once the document underneath it is closed.
+        renderJob?.cancel()
         renderer?.close()
         renderer = null
+        openFile = null
+
+        // The previous document's page would otherwise stay on screen beneath
+        // the new document's markup.
+        pageView.bitmap = null
+        pageIndex = 0
+        overlay.pageNumber = 1
+        overlay.shapes = shapes
+        transform = ViewportTransform()
 
         when (document) {
             is OpenedDocument.Pdf -> {
                 val file = document.file ?: return
-                renderer = PdfPageRenderer.open(file)
-                pageIndex = 0
-                loadPage(0, resetView = true)
+                openFile = file
+                open(file)
             }
             // A drawing arrives as SVG. Rendering it is the host's job — see
             // CdeDrawingView — because an SVG needs a very different surface
@@ -119,71 +143,79 @@ class CdeViewerView @JvmOverloads constructor(
         }
     }
 
+    private fun open(file: File) {
+        val opened = runCatching { PdfPageRenderer.open(file) }
+            .onFailure { onError?.invoke(it) }
+            .getOrNull() ?: return
+        renderer = opened
+        loadPage(0, resetView = true)
+    }
+
     fun showPage(index: Int) {
         val total = renderer?.pageCount ?: return
         if (index !in 0 until total) return
-        pageIndex = index
-        overlay.pageNumber = index + 1
         loadPage(index, resetView = true)
     }
 
-    val pageCount: Int get() = renderer?.pageCount ?: 0
-
+    /**
+     * Measures and rasterises a page.
+     *
+     * Both steps happen off the main thread. `pageSize` opens a page in the
+     * native renderer and takes the same lock a render holds, so calling it
+     * inline would block the main thread behind whatever is currently being
+     * rasterised — an ANR on exactly the large drawings that take longest.
+     */
     private fun loadPage(index: Int, resetView: Boolean) {
         val active = renderer ?: return
         renderJob?.cancel()
 
-        val size = active.pageSize(index)
-        pageWidth = size.width
-        pageHeight = size.height
-
-        if (resetView) post { fitToWidth() }
-
         renderJob = scope.launch {
-            val target = renderScale()
-            val bitmap = active.renderPage(index, target)
-            rasterisedAt = target
-            pageView.bitmap = bitmap
-            overlay.pageNumber = index + 1
-            onPageChanged?.invoke(index + 1, active.pageCount)
-            invalidateTransform()
+            try {
+                val size = withContext(Dispatchers.IO) { active.pageSize(index) }
+                pageWidth = size.width
+                pageHeight = size.height
+                pageIndex = index
+
+                if (resetView || transform.scale == 0f) {
+                    transform = transform.fitToWidth(width, pageWidth)
+                }
+
+                val target = transform.renderScale(MAX_RENDER_SCALE)
+                val bitmap = active.renderPage(index, target)
+
+                transform = transform.copy(rasterisedAt = target)
+                pageView.bitmap = bitmap
+                overlay.pageNumber = index + 1
+                onPageChanged?.invoke(index + 1, active.pageCount)
+                applyTransform()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                // A corrupt page must not take the host app down with it.
+                onError?.invoke(failure)
+            }
         }
     }
-
-    /**
-     * Rasterise at the zoom actually being viewed, capped.
-     *
-     * Rendering at 1x and letting the bitmap stretch is what makes a PDF look
-     * soft when zoomed; rendering at arbitrary zoom is what makes it run out
-     * of memory. The cap is the compromise, and the bitmap is stretched only
-     * beyond it.
-     */
-    private fun renderScale(): Float =
-        (scale * resources.displayMetrics.density).coerceIn(1f, MAX_RENDER_SCALE)
 
     // ── Gestures ─────────────────────────────────────────────────
 
     private val scaleDetector = ScaleGestureDetector(context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val previous = scale
-                scale = (scale * detector.scaleFactor).coerceIn(MIN_ZOOM, MAX_ZOOM)
-
-                // Keep the point under the fingers still. Without this the
-                // page slides away from the pinch and feels unanchored.
-                val focusX = detector.focusX
-                val focusY = detector.focusY
-                offsetX = focusX - (focusX - offsetX) * (scale / previous)
-                offsetY = focusY - (focusY - offsetY) * (scale / previous)
-
-                invalidateTransform()
+                transform = transform.scaledBy(
+                    detector.scaleFactor, detector.focusX, detector.focusY,
+                    MIN_ZOOM, MAX_ZOOM)
+                applyTransform()
                 return true
             }
 
             override fun onScaleEnd(detector: ScaleGestureDetector) {
                 // Re-rasterise once the pinch settles rather than on every
                 // frame of it.
-                if (kotlin.math.abs(renderScale() - rasterisedAt) > 0.1f) loadPage(pageIndex, false)
+                val wanted = transform.renderScale(MAX_RENDER_SCALE)
+                if (kotlin.math.abs(wanted - transform.rasterisedAt) > RERENDER_THRESHOLD) {
+                    loadPage(pageIndex, resetView = false)
+                }
             }
         })
 
@@ -193,9 +225,8 @@ class CdeViewerView @JvmOverloads constructor(
                 e1: MotionEvent?, e2: MotionEvent,
                 distanceX: Float, distanceY: Float,
             ): Boolean {
-                offsetX -= distanceX
-                offsetY -= distanceY
-                invalidateTransform()
+                transform = transform.pannedBy(-distanceX, -distanceY)
+                applyTransform()
                 return true
             }
         })
@@ -219,26 +250,37 @@ class CdeViewerView @JvmOverloads constructor(
     // ── Layout ───────────────────────────────────────────────────
 
     fun fitToWidth() {
-        if (pageWidth <= 0f || width == 0) return
-        scale = width / pageWidth
-        offsetX = 0f
-        offsetY = 0f
-        invalidateTransform()
+        transform = transform.fitToWidth(width, pageWidth)
+        applyTransform()
     }
 
-    private fun invalidateTransform() {
-        overlay.zoom = scale
-        pageView.setTransform(scale / rasterisedAtOrOne(), offsetX, offsetY)
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // The first layout is usually where the view finally has a width, so
+        // a document shown before then has nothing to fit to.
+        if (transform.scale == 1f && pageWidth > 0f) fitToWidth()
+    }
+
+    private fun applyTransform() {
+        overlay.zoom = transform.scale
+        pageView.setTransform(transform.bitmapScale, transform.offsetX, transform.offsetY)
         overlay.invalidate()
     }
 
-    private fun rasterisedAtOrOne(): Float =
-        if (rasterisedAt > 0f) rasterisedAt / resources.displayMetrics.density else 1f
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // Reopened rather than kept open across a detach: a file descriptor
+        // held by an off-screen view is a leak, but losing the document on a
+        // recycle would be a bug the host cannot work around.
+        val file = openFile
+        if (renderer == null && file != null) open(file)
+    }
 
     override fun onDetachedFromWindow() {
         renderJob?.cancel()
         renderer?.close()
         renderer = null
+        pageView.bitmap = null
         super.onDetachedFromWindow()
     }
 
@@ -255,24 +297,28 @@ class CdeViewerView @JvmOverloads constructor(
         const val MAX_ZOOM = 8f
         /** Beyond this the bitmap is stretched rather than re-rasterised. */
         const val MAX_RENDER_SCALE = 4f
+        /** Below this a re-render would not be visible but would still cost. */
+        const val RERENDER_THRESHOLD = 0.1f
+        const val BACKGROUND = 0xFF1A1D27.toInt()
     }
 }
 
 /** Draws the rasterised page. Split out so markup can redraw without it. */
 private class PageCanvasView(context: Context) : View(context) {
+
     var bitmap: Bitmap? = null
         set(value) { field = value; invalidate() }
 
-    private val matrix = Matrix()
+    private val pageMatrix = Matrix()
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
 
     fun setTransform(scale: Float, offsetX: Float, offsetY: Float) {
-        matrix.setScale(scale, scale)
-        matrix.postTranslate(offsetX, offsetY)
+        pageMatrix.setScale(scale, scale)
+        pageMatrix.postTranslate(offsetX, offsetY)
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
-        bitmap?.takeIf { !it.isRecycled }?.let { canvas.drawBitmap(it, matrix, paint) }
+        bitmap?.takeIf { !it.isRecycled }?.let { canvas.drawBitmap(it, pageMatrix, paint) }
     }
 }

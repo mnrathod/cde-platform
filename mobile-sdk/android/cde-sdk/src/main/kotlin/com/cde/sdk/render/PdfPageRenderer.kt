@@ -51,9 +51,14 @@ class PdfPageRenderer private constructor(
      */
     private val bitmaps = object : LruCache<String, Bitmap>(memoryBudgetBytes()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
-        override fun entryRemoved(evicted: Boolean, key: String, old: Bitmap, new: Bitmap?) {
-            if (evicted && !old.isRecycled) old.recycle()
-        }
+
+        // Deliberately no recycle() on eviction. A bitmap handed out by
+        // renderPage is held and drawn by a view, and eviction happens on
+        // whichever thread renders next — so recycling here frees a bitmap
+        // that is still on screen. The visible result is a page that goes
+        // blank after a few zooms, with no exception to explain it. Letting
+        // the collector take them costs a little memory for a little longer
+        // and cannot pull a page out from under the view drawing it.
     }
 
     /** Intrinsic size, for laying out before anything is rasterised. */
@@ -75,8 +80,13 @@ class PdfPageRenderer private constructor(
 
         val bitmap = synchronized(this@PdfPageRenderer) {
             renderer.openPage(index).use { page ->
-                val width = (page.width * scale).toInt().coerceAtLeast(1)
-                val height = (page.height * scale).toInt().coerceAtLeast(1)
+                // Bounded before allocating, not after. A large sheet at high
+                // zoom asks for a bitmap of hundreds of megabytes, and
+                // Bitmap.createBitmap answers that with OutOfMemoryError —
+                // which kills the host app rather than degrading the page.
+                val safe = scaleWithin(page.width, page.height, scale)
+                val width = (page.width * safe).toInt().coerceAtLeast(1)
+                val height = (page.height * safe).toInt().coerceAtLeast(1)
 
                 // ARGB_8888 rather than RGB_565: markup is drawn over this and
                 // 565 banding shows badly on the flat greys of a drawing.
@@ -90,15 +100,35 @@ class PdfPageRenderer private constructor(
                 page.render(
                     output,
                     Rect(0, 0, width, height),
-                    Matrix().apply { setScale(scale, scale) },
+                    Matrix().apply { setScale(safe, safe) },
                     PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
                 )
                 output
             }
         }
 
-        bitmaps.put(key, bitmap)
+        // Only cached if it fits. LruCache trims on insert, so a bitmap larger
+        // than the whole budget would be evicted the instant it was added —
+        // pointless work, and previously it took the page being displayed with
+        // it. Returning it uncached shows the page and simply does not keep it.
+        if (bitmap.byteCount <= bitmaps.maxSize()) bitmaps.put(key, bitmap)
         bitmap
+    }
+
+    /**
+     * Caps the render scale so one page cannot exhaust the heap.
+     *
+     * Past the cap the bitmap is stretched, which is soft but survivable — the
+     * alternative is an OutOfMemoryError on precisely the large-format sheets
+     * this viewer exists to show.
+     */
+    private fun scaleWithin(pageWidth: Int, pageHeight: Int, scale: Float): Float {
+        if (pageWidth <= 0 || pageHeight <= 0) return scale
+        val requested = pageWidth.toLong() * pageHeight.toLong() *
+            scale.toDouble() * scale.toDouble() * BYTES_PER_PIXEL
+        val budget = memoryBudgetBytes().toDouble()
+        if (requested <= budget) return scale
+        return (scale * kotlin.math.sqrt(budget / requested)).toFloat().coerceAtLeast(MIN_SCALE)
     }
 
     /** Frees rasterised pages without closing the document. */
@@ -111,6 +141,11 @@ class PdfPageRenderer private constructor(
     }
 
     companion object {
+        /** ARGB_8888, the config every page is rasterised into. */
+        private const val BYTES_PER_PIXEL = 4
+        /** Never render smaller than this, however tight memory is. */
+        private const val MIN_SCALE = 0.1f
+
         /**
          * A quarter of what the app is allowed. Bitmaps are the largest thing
          * a viewer holds, and a cache that competes with the rest of the app

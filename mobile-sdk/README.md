@@ -17,7 +17,14 @@ vectors on both platforms.
 | | Compiled | Tests | How |
 |---|---|---|---|
 | **iOS** | Everything except the UIKit layer | 17/17 | `swift build && swift test`, Swift 6.3.3, Swift 6 language mode |
-| **Android** | Every source file, against the real framework | 17/17 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.4.10, API 37 |
+| **Android** | Every source file, against the real framework | 26/26 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.4.10, API 37 |
+
+The extra nine on Android cover [`ViewportTransform`](android/cde-sdk/src/main/kotlin/com/cde/sdk/ui/ViewportTransform.kt),
+which holds the arithmetic relating page, view and bitmap coordinates. It was
+pulled out of the view precisely so it could be tested without a device: the
+page and the markup over it being drawn at different scales is the one viewer
+fault that produces no error and no visual glitch, only markup that sits in the
+wrong place.
 
 **What that does not cover.** No device, no simulator, no emulator has run any
 of this. Specifically still unverified:
@@ -42,8 +49,16 @@ of this. Specifically still unverified:
   plugin in favour of built-in Kotlin, and removed `kotlinOptions`. Both are
   accounted for, neither has been proven. **Expect this file, specifically, to
   need adjusting on the first real build.**
-- **The Android UI and renderer** type-check against the real framework, which
-  catches a wrong signature but says nothing about what appears on screen.
+- **The Android UI and renderer** type-check against the real framework, and
+  their coordinate arithmetic is tested, but nothing has drawn a frame.
+  Robolectric would execute these views on the JVM and is the obvious next
+  step; it depends on `androidx.test:monitor`, which lives on Google's Maven
+  repository, so it could not be run from here either.
+  Worth exercising first, because each fails quietly rather than loudly:
+  a second finger landing mid-stroke should **abandon** the shape, not record
+  it; a page larger than the memory budget should render soft rather than
+  crash; and the page should still be there after a dozen zooms — a blank one
+  means a cached bitmap is being recycled while a view still holds it.
 - **Nothing has talked to a real server.** The contract was read from a running
   one, but no SDK code has made a request against it.
 - **`PdfRenderer` and `PDFKit`** have never opened an actual PDF here.
