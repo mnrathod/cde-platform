@@ -25,7 +25,16 @@ of this. Specifically still unverified:
 - **`CdeViewerController`, `CdeViewer`, `MarkupOverlayView` (iOS)** are behind
   `#if canImport(UIKit)`, so on Linux they compile to nothing. The whole iOS
   view layer — PDFKit, the coordinate mapping, touch handling — is unchecked.
-  This is the largest gap.
+  This is the largest gap. Every PDFKit, UIKit and CoreGraphics symbol they use
+  has been checked against Apple's own symbol tables, which is not the same as
+  compiling them.
+  Two things to watch on the first run, both of which would look like a working
+  viewer that puts markup in the wrong place:
+  **(a)** whether a shape drawn on a page lands where the browser draws it —
+  the y-flip between shape data and PDF page space is the thing being tested;
+  **(b)** whether strokes stay crisp through a pinch, or blur. Blurring means
+  PDFKit is scaling the overlay as an image rather than resizing it, and the
+  repaint on `layoutSubviews` is not being reached.
 - **The Android Gradle Plugin build itself.** Sources are type-checked, but the
   AGP 9 configuration in `android/build.gradle.kts` has never been executed —
   AGP is published only to Google's Maven repository, which was unreachable
@@ -184,9 +193,23 @@ viewer.onShapeCompleted = { shape in
 }
 ```
 
-iOS 13+, **no third-party dependencies at all**: `PDFKit`, `URLSession`,
+iOS 16+, **no third-party dependencies at all**: `PDFKit`, `URLSession`,
 `CryptoKit`, the keychain and the file system are all system frameworks. An SDK
 that drags in a dependency tree is an SDK that host apps fight with.
+
+16 is where `PDFPageOverlayViewProvider` arrives. Markup is drawn into a
+**per-page overlay** that PDFKit positions itself, which is what allows the
+viewer to scroll continuously: each page carries its own markup, so nothing has
+to work out which page a shape belongs to from the scroll position. One overlay
+across the whole view cannot do that — it has to map every shape through
+whichever page is currently "current", and draws the wrong page's markup during
+a scroll. Supporting iOS 13 would mean shipping that second, worse viewer
+alongside this one.
+
+Each overlay measures its own scale by asking the same coordinate mapping the
+shapes use, rather than reading `PDFView.scaleFactor`. PDFKit does not document
+what transform it gives an overlay, and a scale taken from anywhere else can
+disagree with where the shapes actually land.
 
 The package is `swift-tools-version: 6.2`, so targets build in Swift 6 language
 mode with strict concurrency checking on. It compiles clean under it — the

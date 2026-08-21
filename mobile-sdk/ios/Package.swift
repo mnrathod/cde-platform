@@ -3,11 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "CdeSDK",
-    // PDFKit is available on iOS 11+, but async/await and the concurrency
-    // model the SDK is written against need 13. Below that a host app would
-    // get a very different API surface, so the floor is stated rather than
-    // worked around.
-    platforms: [.iOS(.v13)],
+    // 16 is where PDFPageOverlayViewProvider arrives, which is how the viewer
+    // gives each PDF page its own markup overlay. The alternative — one
+    // overlay for the whole view — cannot tell which page a shape belongs to
+    // during a scroll, so supporting 13 would mean shipping a second, worse
+    // viewer alongside this one rather than the same viewer with less.
+    platforms: [.iOS(.v16)],
     products: [
         .library(name: "CdeSDK", targets: ["CdeSDK"])
     ],

@@ -17,46 +17,59 @@ import WebKit
 /// PDFs are rendered by `PDFKit`, not by a bundled engine. `PDFView` is the
 /// same component Files and Mail use: tiled, Metal-backed, and it already
 /// handles scrolling, pinch-zoom, page layout and text selection to the
-/// standard people expect. Reimplementing that on a canvas would be slower and
-/// would still feel foreign.
+/// standard people expect.
 ///
-/// Markup lives in an overlay pinned to the page, kept in page coordinates, so
-/// PDFKit owns navigation and the SDK owns only what it adds.
+/// Markup is drawn into a **per-page overlay** supplied through
+/// ``PDFKit/PDFPageOverlayViewProvider``. PDFKit owns each overlay's placement,
+/// which is what allows continuous scrolling: every page carries its own
+/// markup, so nothing has to guess which page a shape belongs to from the
+/// scroll position. A single overlay across the whole view cannot do this — it
+/// would have to map every shape through whichever page happened to be
+/// "current", and quietly draw the wrong page's markup during a scroll.
 public final class CdeViewerController: UIViewController {
 
     private let pdfView = PDFView()
-    private let overlay = MarkupOverlayView(frame: .zero)
     private let drawingView = WKWebView()
     private let statusLabel = UILabel()
 
-    private var currentPage: PDFPage?
+    /// The overlay for a converted drawing, which has no PDF pages to hang
+    /// overlays from. PDFs never use this one.
+    private let drawingOverlay = MarkupOverlayView(frame: .zero)
 
-    public var activeTool: MarkupTool {
-        get { overlay.activeTool }
-        set {
-            overlay.activeTool = newValue
-            // PDFKit's own gestures must yield while a drawing tool is in
-            // hand, or a stroke turns into a scroll.
-            let drawing = newValue != .pan && newValue != .select
-            pdfView.isUserInteractionEnabled = !drawing
-        }
+    /// Live page overlays, keyed by page identity.
+    ///
+    /// Keyed by `ObjectIdentifier` rather than the page itself so this map
+    /// never keeps a `PDFPage` alive; entries are dropped as PDFKit stops
+    /// displaying them, which is what keeps a thousand-page document from
+    /// accumulating a thousand views.
+    private var pageOverlays: [ObjectIdentifier: MarkupOverlayView] = [:]
+
+    /// Every shape for the document, handed to each page overlay, which draws
+    /// only its own page's.
+    private var shapes: [ShapeData] = []
+
+    public var activeTool: MarkupTool = .pan {
+        didSet { liveOverlays.forEach { $0.activeTool = activeTool } }
     }
 
-    public var onShapeCompleted: ((ShapeData) -> Void)? {
-        get { overlay.onShapeCompleted }
-        set { overlay.onShapeCompleted = newValue }
+    /// Stroke colour for new markup.
+    public var strokeColor: UIColor = UIColor(red: 1, green: 0.23, blue: 0.19, alpha: 1) {
+        didSet { liveOverlays.forEach { $0.strokeColor = strokeColor } }
     }
+
+    public var onShapeCompleted: ((ShapeData) -> Void)?
 
     /// Fires while a shape is being drawn, for a live measurement readout.
-    public var onShapeChanged: ((ShapeData?) -> Void)? {
-        get { overlay.onShapeChanged }
-        set { overlay.onShapeChanged = newValue }
-    }
+    public var onShapeChanged: ((ShapeData?) -> Void)?
 
     public var onPageChanged: ((Int, Int) -> Void)?
 
-    /// True while a click-built shape is waiting to be closed.
-    public var hasUnfinishedShape: Bool { overlay.hasUnfinishedShape }
+    /// True while a click-built shape is waiting to be closed, on any page.
+    public var hasUnfinishedShape: Bool { liveOverlays.contains { $0.hasUnfinishedShape } }
+
+    private var liveOverlays: [MarkupOverlayView] {
+        Array(pageOverlays.values) + [drawingOverlay]
+    }
 
     // MARK: - Lifecycle
 
@@ -65,19 +78,14 @@ public final class CdeViewerController: UIViewController {
         view.backgroundColor = UIColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
 
         pdfView.autoScales = true
-        // One page at a time, swiped horizontally, rather than a continuous
-        // scroll. The overlay is a single view that maps every shape through
-        // `currentPage`, so in a continuous scroll the markup on any other
-        // visible page would be drawn against the wrong page's coordinates.
-        // Paging keeps exactly one page under the overlay at any moment.
-        //
-        // The alternative is PDFKit's `pageOverlayViewProvider`, which hands
-        // each page its own overlay view and would allow continuous scrolling
-        // — the better long-term shape, and iOS 16+.
-        pdfView.displayMode = .singlePage
-        pdfView.displayDirection = .horizontal
-        pdfView.usePageViewController(true, withViewOptions: nil)
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
         pdfView.backgroundColor = view.backgroundColor ?? .black
+        pdfView.pageOverlayViewProvider = self
+        // Without this the overlays are laid out but never hit-tested, so
+        // markup draws and touches do nothing — the failure looks like a
+        // broken gesture recogniser rather than a missing flag.
+        pdfView.isInMarkupMode = true
         add(pdfView)
 
         drawingView.isOpaque = false
@@ -86,9 +94,9 @@ public final class CdeViewerController: UIViewController {
         drawingView.isHidden = true
         add(drawingView)
 
-        overlay.frame = view.bounds
-        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(overlay)
+        drawingOverlay.isHidden = true
+        configure(drawingOverlay, pageNumber: 1)
+        add(drawingOverlay)
 
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
@@ -96,8 +104,6 @@ public final class CdeViewerController: UIViewController {
         statusLabel.font = .preferredFont(forTextStyle: .callout)
         statusLabel.isHidden = true
         add(statusLabel)
-
-        wireCoordinateMapping()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(pageChanged),
@@ -126,9 +132,14 @@ public final class CdeViewerController: UIViewController {
     ///   immediately so a reader sees existing comments without waiting for a
     ///   round trip.
     public func show(_ document: OpenedDocument, shapes: [ShapeData] = []) {
-        overlay.shapes = shapes
+        self.shapes = shapes
+        // Overlays belong to the outgoing document's pages. Keeping them would
+        // show the previous document's markup over the new one.
+        pageOverlays.removeAll()
+
         statusLabel.isHidden = true
         drawingView.isHidden = true
+        drawingOverlay.isHidden = true
         pdfView.isHidden = false
 
         switch document {
@@ -138,24 +149,19 @@ public final class CdeViewerController: UIViewController {
                 return
             }
             pdfView.document = pdf
-            currentPage = pdf.page(at: 0)
-            overlay.pageNumber = 1
-            // `autoScales` picks a scale to fit, and does so without posting
-            // PDFViewScaleChanged. Reading it here stops the first shape being
-            // drawn against a zoom of 1 that was never true.
-            overlay.zoom = pdfView.scaleFactor
             onPageChanged?(1, pdf.pageCount)
-            overlay.setNeedsDisplay()
 
         case .drawing(let source):
             // A converted drawing is SVG. WKWebView renders it with the
             // system's own vector engine — the same one Safari uses — rather
-            // than the SDK reimplementing SVG. Markup still sits in the
-            // overlay above it, in the drawing's own coordinates.
+            // than the SDK reimplementing SVG. Markup sits in a single overlay
+            // above it: there are no PDF pages here to hang one from.
             pdfView.isHidden = true
+            pdfView.document = nil
             drawingView.isHidden = false
+            drawingOverlay.isHidden = false
+            drawingOverlay.shapes = shapes
             drawingView.loadHTMLString(wrap(svg: source.svg), baseURL: nil)
-            overlay.pageNumber = 1
             onPageChanged?(1, 1)
 
         case .image:
@@ -169,6 +175,7 @@ public final class CdeViewerController: UIViewController {
     private func report(_ message: String) {
         pdfView.isHidden = true
         drawingView.isHidden = true
+        drawingOverlay.isHidden = true
         statusLabel.text = message
         statusLabel.isHidden = false
     }
@@ -188,62 +195,87 @@ public final class CdeViewerController: UIViewController {
         """
     }
 
-    // MARK: - Coordinate mapping
+    // MARK: - Overlays
 
-    /// Ties the overlay to the page's coordinate space.
+    /// Prepares an overlay: appearance, callbacks, and which page it draws.
+    private func configure(_ overlay: MarkupOverlayView, pageNumber: Int) {
+        overlay.pageNumber = pageNumber
+        overlay.activeTool = activeTool
+        overlay.strokeColor = strokeColor
+        overlay.shapes = shapes
+        overlay.onShapeCompleted = { [weak self] shape in
+            guard let self else { return }
+            // Held here as well as sent on, so a page scrolled away and back
+            // redraws the shape instead of losing it until the next fetch.
+            self.shapes.append(shape)
+            self.onShapeCompleted?(shape)
+        }
+        overlay.onShapeChanged = { [weak self] shape in self?.onShapeChanged?(shape) }
+    }
+
+    /// Ties an overlay to one page's coordinate space.
     ///
-    /// PDFKit gives an exact conversion between a page and the view, so the
-    /// overlay never has to track pan and zoom itself — which is what keeps
-    /// markup pinned to the drawing rather than drifting during a pinch.
-    private func wireCoordinateMapping() {
-        overlay.pageToView = { [weak self] point in
-            guard let self, let page = self.currentPage else {
+    /// Two conversions, both documented API. `PDFView.convert(_:from:)` gives
+    /// the point in the PDF view; `UIView.convert(_:from:)` then takes it into
+    /// the overlay, whatever frame and transform PDFKit has given it. Going
+    /// through the view hierarchy this way means the mapping does not depend on
+    /// what PDFKit does with the overlay — which Apple does not document.
+    private func wireCoordinates(
+        _ overlay: MarkupOverlayView, to page: PDFPage
+    ) {
+        overlay.pageToView = { [weak self, weak overlay, weak page] point in
+            guard let self, let overlay, let page else {
                 return CGPoint(x: point.x, y: point.y)
             }
-            // PDF pages are y-up from the bottom left; UIKit is y-down from
-            // the top left. Flipping here, once, is why every shape lands in
-            // the same place as it does in the browser.
-            let bounds = page.bounds(for: .mediaBox)
-            let pagePoint = CGPoint(x: point.x, y: bounds.height - point.y)
-            return self.pdfView.convert(pagePoint, from: page)
+            // Shape data is y-down from the top left; a PDF page is y-up from
+            // the bottom left. The flip happens here, once, and is the reason
+            // markup drawn on a phone lands where the browser puts it.
+            let height = page.bounds(for: .mediaBox).height
+            let onPage = CGPoint(x: point.x, y: height - point.y)
+            return overlay.convert(self.pdfView.convert(onPage, from: page), from: self.pdfView)
         }
 
-        overlay.viewToPage = { [weak self] location in
-            guard let self, let page = self.currentPage else {
+        overlay.viewToPage = { [weak self, weak overlay, weak page] location in
+            guard let self, let overlay, let page else {
                 return CdePoint(x: location.x, y: location.y)
             }
-            let bounds = page.bounds(for: .mediaBox)
-            let pagePoint = self.pdfView.convert(location, to: page)
-            return CdePoint(x: Double(pagePoint.x),
-                            y: Double(bounds.height - pagePoint.y))
+            let inPDFView = overlay.convert(location, to: self.pdfView)
+            let onPage = self.pdfView.convert(inPDFView, to: page)
+            let height = page.bounds(for: .mediaBox).height
+            return CdePoint(x: Double(onPage.x), y: Double(height - onPage.y))
         }
     }
 
     @objc private func pageChanged() {
         guard let page = pdfView.currentPage, let document = pdfView.document else { return }
-        currentPage = page
-        let index = document.index(for: page)
-        overlay.pageNumber = index + 1
-        // Markup belongs to a page; showing another page's shapes over this
-        // one would be worse than showing none.
-        overlay.setNeedsDisplay()
-        onPageChanged?(index + 1, document.pageCount)
+        onPageChanged?(document.index(for: page) + 1, document.pageCount)
     }
 
+    /// Redraws markup at the new zoom.
+    ///
+    /// Nothing here recomputes a scale — each overlay measures its own. This
+    /// only asks for a repaint, so strokes are re-rendered at the size they
+    /// are now being viewed at instead of being magnified as an image.
     @objc private func scaleChanged() {
-        overlay.zoom = pdfView.scaleFactor
-        overlay.setNeedsDisplay()
+        liveOverlays.forEach { $0.setNeedsDisplay() }
     }
 
     // MARK: - Controls
 
     /// Completes a shape being built by taps. Wire to a Done control.
-    public func finishShape() { overlay.finish() }
+    public func finishShape() {
+        liveOverlays.first { $0.hasUnfinishedShape }?.finish()
+    }
 
-    /// Abandons a shape being built.
-    public func cancelShape() { overlay.cancelInProgress() }
+    /// Abandons any shape being built.
+    public func cancelShape() {
+        liveOverlays.forEach { $0.cancelInProgress() }
+    }
 
-    public func setShapes(_ shapes: [ShapeData]) { overlay.shapes = shapes }
+    public func setShapes(_ shapes: [ShapeData]) {
+        self.shapes = shapes
+        liveOverlays.forEach { $0.shapes = shapes }
+    }
 
     public func goToPage(_ index: Int) {
         guard let document = pdfView.document, let page = document.page(at: index) else { return }
@@ -251,5 +283,36 @@ public final class CdeViewerController: UIViewController {
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
+}
+
+/// Supplies each page its own markup overlay.
+///
+/// `@preconcurrency`: PDFKit's protocol is an Objective-C one, and whether the
+/// SDK in use isolates it to the main actor varies by version. The attribute
+/// keeps this compiling either way — PDFKit only ever calls these on the main
+/// thread. Drop it once the deployed SDK annotates the protocol.
+extension CdeViewerController: @preconcurrency PDFPageOverlayViewProvider {
+
+    public func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
+        let key = ObjectIdentifier(page)
+        if let existing = pageOverlays[key] { return existing }
+
+        let overlay = MarkupOverlayView(frame: .zero)
+        let pageNumber = (view.document?.index(for: page) ?? 0) + 1
+        configure(overlay, pageNumber: pageNumber)
+        wireCoordinates(overlay, to: page)
+        pageOverlays[key] = overlay
+        return overlay
+    }
+
+    public func pdfView(
+        _ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage
+    ) {
+        // A shape half-built on a page being scrolled away has no home to
+        // return to; dropping it is better than committing something the user
+        // stopped drawing.
+        (overlayView as? MarkupOverlayView)?.cancelInProgress()
+        pageOverlays.removeValue(forKey: ObjectIdentifier(page))
+    }
 }
 #endif
