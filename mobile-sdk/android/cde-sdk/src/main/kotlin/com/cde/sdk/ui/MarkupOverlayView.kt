@@ -101,8 +101,19 @@ class MarkupOverlayView @JvmOverloads constructor(
                 true
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 if (dragging) { dragging = false; commitIfWorthwhile() }
+                true
+            }
+
+            // A cancel is not a finished stroke. It arrives when the parent
+            // takes the gesture over — a second finger starting a pinch, most
+            // often — and committing there records a shape the user was still
+            // drawing and then stopped. iOS abandons it on touchesCancelled;
+            // this used to commit, so the same gesture produced markup on one
+            // platform and none on the other.
+            MotionEvent.ACTION_CANCEL -> {
+                cancelInProgress()
                 true
             }
 
