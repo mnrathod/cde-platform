@@ -65,8 +65,18 @@ public final class CdeViewerController: UIViewController {
         view.backgroundColor = UIColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
 
         pdfView.autoScales = true
-        pdfView.displayMode = .singlePageContinuous
-        pdfView.displayDirection = .vertical
+        // One page at a time, swiped horizontally, rather than a continuous
+        // scroll. The overlay is a single view that maps every shape through
+        // `currentPage`, so in a continuous scroll the markup on any other
+        // visible page would be drawn against the wrong page's coordinates.
+        // Paging keeps exactly one page under the overlay at any moment.
+        //
+        // The alternative is PDFKit's `pageOverlayViewProvider`, which hands
+        // each page its own overlay view and would allow continuous scrolling
+        // — the better long-term shape, and iOS 16+.
+        pdfView.displayMode = .singlePage
+        pdfView.displayDirection = .horizontal
+        pdfView.usePageViewController(true, withViewOptions: nil)
         pdfView.backgroundColor = view.backgroundColor ?? .black
         add(pdfView)
 
@@ -130,6 +140,10 @@ public final class CdeViewerController: UIViewController {
             pdfView.document = pdf
             currentPage = pdf.page(at: 0)
             overlay.pageNumber = 1
+            // `autoScales` picks a scale to fit, and does so without posting
+            // PDFViewScaleChanged. Reading it here stops the first shape being
+            // drawn against a zoom of 1 that was never true.
+            overlay.zoom = pdfView.scaleFactor
             onPageChanged?(1, pdf.pageCount)
             overlay.setNeedsDisplay()
 

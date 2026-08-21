@@ -48,6 +48,13 @@ public struct CdeViewer: UIViewControllerRepresentable {
         // Only the parts that can change from the outside. Re-showing the
         // document on every update would reset the reader's scroll position
         // every time an unrelated piece of state moved.
+        //
+        // The callbacks are re-assigned rather than left as wired in `make`:
+        // SwiftUI rebuilds the struct on every state change, and the closure
+        // captured at creation keeps the values it closed over then. Leaving
+        // it would send new markup to a callback holding stale state.
+        controller.onShapeCompleted = onShapeCompleted
+        controller.onPageChanged = onPageChanged
         if controller.activeTool != tool { controller.activeTool = tool }
         controller.setShapes(shapes)
     }
