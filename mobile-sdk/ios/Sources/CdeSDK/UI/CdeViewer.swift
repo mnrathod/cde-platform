@@ -11,7 +11,6 @@ import SwiftUI
 ///
 /// The controller does the work; this exists so a SwiftUI host does not have
 /// to wire `UIViewControllerRepresentable` itself for the common case.
-@available(iOS 14.0, *)
 public struct CdeViewer: UIViewControllerRepresentable {
 
     private let document: OpenedDocument

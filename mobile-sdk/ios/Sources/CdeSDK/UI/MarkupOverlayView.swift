@@ -37,8 +37,25 @@ public final class MarkupOverlayView: UIView {
     /// Maps page space to view space. Set by the host as it pans and zooms.
     public var pageToView: (CdePoint) -> CGPoint = { CGPoint(x: $0.x, y: $0.y) }
     public var viewToPage: (CGPoint) -> CdePoint = { CdePoint(x: $0.x, y: $0.y) }
-    /// Current zoom, so hit tolerances stay a constant size on screen.
-    public var zoom: CGFloat = 1
+    /// How many of this view's units one page unit spans.
+    ///
+    /// Measured through `pageToView` rather than read from the PDF view's
+    /// `scaleFactor`. PDFKit places a page overlay under a transform of its
+    /// own, and it does not document what that transform is — so a scale taken
+    /// from anywhere else could disagree with where the shapes actually land.
+    /// Asking the same mapping the shapes use makes that impossible, and
+    /// removes the need for anyone to remember to keep a `zoom` property in
+    /// step with the view.
+    private var effectiveScale: CGFloat {
+        let origin = pageToView(CdePoint(x: 0, y: 0))
+        let unit = pageToView(CdePoint(x: Double(scaleProbeLength), y: 0))
+        let spanned = hypot(unit.x - origin.x, unit.y - origin.y)
+        guard spanned > 0 else { return 1 }
+        return spanned / scaleProbeLength
+    }
+
+    /// Long enough that rounding in the mapping does not dominate the result.
+    private let scaleProbeLength: CGFloat = 100
 
     /// Called when a shape is completed and should be recorded.
     public var onShapeCompleted: ((ShapeData) -> Void)?
@@ -64,6 +81,17 @@ public final class MarkupOverlayView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+
+    /// Repaints whenever the overlay is resized.
+    ///
+    /// PDFKit resizes a page overlay as the page is zoomed. Without this the
+    /// existing drawing is stretched to the new size — strokes go soft and
+    /// thicken, in the way a magnified screenshot does — instead of being
+    /// redrawn as vectors at the size now on screen.
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        setNeedsDisplay()
+    }
 
     // MARK: - Touch
 
@@ -104,7 +132,7 @@ public final class MarkupOverlayView: UIView {
         inProgress = MarkupEngine.startShape(
             tool: activeTool, at: at, pageNumber: pageNumber,
             color: strokeHex(),
-            strokeWidth: Double(strokeWidth / zoom),
+            strokeWidth: Double(strokeWidth / effectiveScale),
             opacity: Double(fillOpacity))
         onShapeChanged?(inProgress)
         setNeedsDisplay()
@@ -116,7 +144,7 @@ public final class MarkupOverlayView: UIView {
     /// double-tapping: a double tap fights the platform's own zoom gesture and
     /// demands two precise touches in one spot. `finish()` covers the rest.
     private func handleVertexTap(_ at: CdePoint) {
-        let tolerance = Double(vertexTarget / zoom)
+        let tolerance = Double(vertexTarget / effectiveScale)
 
         if let current = inProgress, current.tool == activeTool,
            MarkupEngine.finishesShape(current, at: at, tolerance: tolerance) {
@@ -131,7 +159,7 @@ public final class MarkupOverlayView: UIView {
             shape = MarkupEngine.startShape(
                 tool: activeTool, at: at, pageNumber: pageNumber,
                 color: strokeHex(),
-                strokeWidth: Double(strokeWidth / zoom),
+                strokeWidth: Double(strokeWidth / effectiveScale),
                 opacity: Double(fillOpacity))
         }
         inProgress = shape
@@ -202,9 +230,10 @@ public final class MarkupOverlayView: UIView {
 
     private func draw(_ shape: ShapeData, in context: CGContext, inProgress isBuilding: Bool) {
         let colour = UIColor(hex: shape.color) ?? .systemRed
+        let scale = effectiveScale
         // Kept in a local: CGContext can be told a line width but never asked
         // for one, so the arrow head has to be handed the same value.
-        let lineWidth = max(1, CGFloat(shape.strokeWidth) * zoom)
+        let lineWidth = max(1, CGFloat(shape.strokeWidth) * scale)
         context.setStrokeColor(colour.cgColor)
         context.setLineWidth(lineWidth)
         context.setLineCap(.round)
@@ -232,7 +261,7 @@ public final class MarkupOverlayView: UIView {
 
         case .circle:
             let centre = pageToView(CdePoint(x: shape.cx ?? 0, y: shape.cy ?? 0))
-            let radius = CGFloat(shape.r ?? 0) * zoom
+            let radius = CGFloat(shape.r ?? 0) * scale
             let box = CGRect(x: centre.x - radius, y: centre.y - radius,
                              width: radius * 2, height: radius * 2)
             if shape.opacity > 0 { context.fillEllipse(in: box) }
