@@ -58,7 +58,10 @@ public class SecurityConfig {
                 // metrics reveal traffic shape and the Prometheus endpoint
                 // enumerates every route. Admin only.
                 .requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("ADMIN")
-                .requestMatchers("/api/auth/**", "/h2-console/**",
+                // /h2-console is gone with H2 itself. It was permitAll, which
+                // meant an unauthenticated SQL console on any deployment where
+                // the console was enabled — and it was enabled unconditionally.
+                .requestMatchers("/api/auth/**",
                                  "/", "/index.html", "/viewer.html",
                                  "/favicon.ico", "/favicon.png",
                                  "/api/ai/**",
@@ -66,7 +69,10 @@ public class SecurityConfig {
                                  "/js/**", "/css/**", "/img/**").permitAll()
                 .anyRequest().authenticated()
             )
-            .headers(h -> h.frameOptions(fo -> fo.disable())) // allow H2 console
+            // frameOptions stays on: it was disabled only so the H2 console
+            // could render in a frame, and leaving it off invites clickjacking
+            // of the viewer.
+            .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

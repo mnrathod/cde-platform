@@ -13,6 +13,15 @@ springBoot {
     buildInfo()
 }
 
+ext {
+    // Spring Boot 3.3 manages Testcontainers 1.19.x, whose bundled docker-java
+    // negotiates Docker API 1.32. Engines from 25 onward refuse anything below
+    // 1.40, so the managed version cannot talk to a current daemon at all —
+    // it reports "could not find a valid Docker environment", which reads like
+    // a missing daemon rather than a version mismatch.
+    set('testcontainers.version', '1.21.4')
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -36,8 +45,12 @@ dependencies {
 
     // JPA / Database
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // PostgreSQL in every real environment; H2 stays for the fast test suite.
+    runtimeOnly 'org.postgresql:postgresql'
     runtimeOnly 'com.h2database:h2'
-    // runtimeOnly 'org.postgresql:postgresql'
+    // Schema is owned by migrations, not by Hibernate.
+    implementation 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
 
     // Security + JWT
     implementation 'org.springframework.boot:spring-boot-starter-security'
@@ -60,11 +73,26 @@ dependencies {
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    // Runs the real migrations against a real PostgreSQL. The rest of the
+    // suite uses H2 for speed, which cannot prove the migrations are correct.
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+
+    // Activates application-test.yml for every test, so no test class has to
+    // remember @ActiveProfiles. Without it the suite would pick up the real
+    // datasource and try to reach a PostgreSQL that is not there.
+    systemProperty 'spring.profiles.active', 'test'
+
+    // FlywayMigrationIntegrationTest needs a Docker daemon. Opt in rather than
+    // fail a checkout that has none; CI should set -Pdocker so the migrations
+    // are actually exercised.
+    systemProperty 'cde.testcontainers', findProperty('docker') ?: System.getenv('CDE_TESTCONTAINERS') ?: 'false'
 }
 
 /**

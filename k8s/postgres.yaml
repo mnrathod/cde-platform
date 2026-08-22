@@ -1,0 +1,117 @@
+# PostgreSQL for evaluation and small deployments.
+#
+# A managed database is the better answer anywhere that matters: backups,
+# point-in-time recovery, failover and version upgrades are the hard parts,
+# and none of them are here. To use one, delete this file, drop it from
+# kustomization.yaml, and point SPRING_DATASOURCE_URL at the managed instance.
+#
+# A StatefulSet rather than a Deployment because the volume is the database.
+# A Deployment's rolling update would start a second pod against the same
+# claim, and two postmasters on one data directory is corruption.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cde-postgres
+  labels:
+    app.kubernetes.io/name: cde-postgres
+    app.kubernetes.io/component: database
+spec:
+  # Headless: the StatefulSet addresses the pod directly and there is exactly
+  # one, so there is nothing for a virtual IP to balance across.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: cde-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cde-postgres
+  labels:
+    app.kubernetes.io/name: cde-postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: cde-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cde-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cde-postgres
+        app.kubernetes.io/component: database
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        # The uid the postgres image runs as.
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: cdedb
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: cde-platform-secrets
+                  key: db-username
+                  optional: false
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cde-platform-secrets
+                  key: db-password
+                  optional: false
+            # The image only initialises a data directory it created itself,
+            # and a mounted volume has a lost+found in it. Without a subdirectory
+            # initdb refuses to run and the pod crash-loops on first start.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d cdedb"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d cdedb"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            # Slower to give up than readiness: a database busy with a long
+            # query should stop taking traffic, not be restarted mid-write.
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 1Gi
+              cpu: "1000m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

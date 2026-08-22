@@ -1,0 +1,33 @@
+# Test overrides, activated for every test by the `test` task in build.gradle.
+#
+# The suite runs against H2 rather than PostgreSQL so it stays fast and needs
+# no Docker. That trade has one hole: it does not exercise the migrations. It
+# is covered by FlywayMigrationIntegrationTest, which runs the real migrations
+# against a real PostgreSQL and checks Hibernate accepts the result — so a
+# migration that has drifted from the entities fails there rather than on
+# somebody's deployment.
+spring:
+  datasource:
+    url: jdbc:h2:mem:cdetest;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      # Hibernate builds the schema here, because Flyway is off — see below.
+      ddl-auto: create-drop
+
+  flyway:
+    # The migrations are PostgreSQL. Running them against H2 would test the
+    # compatibility mode rather than the database anything is deployed on.
+    enabled: false
+
+cde:
+  jwt:
+    # Tests need a signing key and must not depend on the environment
+    # supplying one. Only ever loaded from the test classpath.
+    secret: test-only-signing-key-not-used-outside-the-test-suite-0123456789
+  storage:
+    upload-dir: ./build/test-uploads

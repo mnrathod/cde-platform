@@ -16,6 +16,10 @@ data:
   # them directly, so the two must agree exactly.
   CDE_STORAGE_UPLOAD_DIR: "/app/uploads"
 
+  # Host is the headless Service in postgres.yaml. Credentials come from the
+  # Secret, not from here.
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://cde-postgres:5432/cdedb"
+
   SPRING_PROFILES_ACTIVE: "kubernetes"
 
   # Heap tracks the container memory limit rather than the node's, which is

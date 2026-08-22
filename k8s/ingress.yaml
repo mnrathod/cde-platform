@@ -14,11 +14,11 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
 
-    # Defence in depth, not a fix. Both of these are also restricted in the
-    # application: /actuator exposes only health, info, metrics and prometheus,
-    # with everything but the probes requiring an administrator. /h2-console is
-    # permitAll in SecurityConfig, which is the actual problem and should be
-    # profile-gated in the application rather than papered over here.
+    # Defence in depth. /actuator exposes only health, info, metrics and
+    # prometheus, with everything but the probes requiring an administrator.
+    # /h2-console no longer exists — H2 went with the migration to PostgreSQL —
+    # but the rule stays: it costs nothing, and it covers an older image being
+    # rolled back into place with the console still in it.
     #
     # server-snippet is disabled by default in some hardened ingress-nginx
     # installations. Check it took effect rather than assuming it did.

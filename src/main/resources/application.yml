@@ -10,24 +10,51 @@ spring:
     name: cde-platform
 
   datasource:
-    url: jdbc:h2:mem:cdedb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: ""
+    # Every value is overridable by environment variable, which is how the
+    # container and the cluster supply theirs. The defaults point at a local
+    # PostgreSQL so that running the application without any environment set
+    # fails to connect, rather than silently succeeding against an in-memory
+    # database that discards everything on exit.
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cdedb}
+    driver-class-name: org.postgresql.Driver
+    username: ${SPRING_DATASOURCE_USERNAME:cde}
+    password: ${SPRING_DATASOURCE_PASSWORD:cde}
+    hikari:
+      # A pool per replica. The default of 10 is fine for one; raising replicas
+      # multiplies this against PostgreSQL's max_connections, which is where a
+      # scaled-out deployment usually runs out first.
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: 2
 
   jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
-      ddl-auto: create-drop
+      # The schema belongs to Flyway. `validate` means a mapping that has
+      # drifted from the migrations stops the application at startup instead
+      # of being discovered as a missing column mid-request.
+      ddl-auto: validate
+    # Left at Spring's default of true, deliberately.
+    #
+    # Turning it off is the right destination — it is what keeps a lazy
+    # association from being fetched one row at a time during serialisation —
+    # but the entities are not ready for it: Project.documents is lazy and is
+    # serialised outside the transaction, so GET /api/projects fails with a
+    # LazyInitializationException the moment it is disabled. Fixing that means
+    # fetch joins or DTO projections across the repositories, which is its own
+    # change with its own testing. Bundling it into a database migration would
+    # have shipped a migration that broke listing documents.
+    open-in-view: true
     show-sql: false
     properties:
       hibernate:
         format_sql: true
 
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Left off deliberately. Baselining would stamp an existing database as
+    # migrated without running V1, and `validate` would then fail against a
+    # schema Flyway believes it created.
+    baseline-on-migrate: false
 
   servlet:
     multipart:
