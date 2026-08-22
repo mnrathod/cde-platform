@@ -1,5 +1,9 @@
 server:
   port: 8080
+  # In-flight requests finish before the process exits. Without this a rolling
+  # update cuts off whatever upload or conversion was running at the moment the
+  # pod was told to stop.
+  shutdown: graceful
 
 spring:
   application:
@@ -31,6 +35,11 @@ spring:
       max-file-size: 100MB
       max-request-size: 100MB
 
+  lifecycle:
+    # Long enough for an upload or a conversion to finish, short enough that a
+    # rolling update is not held open by one stuck request.
+    timeout-per-shutdown-phase: 25s
+
 cde:
   jwt:
     secret: cde-platform-super-secret-key-change-in-production-2024
@@ -41,3 +50,51 @@ cde:
     url: http://localhost:5001
   anthropic:
     api-key: ${ANTHROPIC_API_KEY:}   # set via env var or replace with your key here
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Named explicitly rather than "*". Actuator ships endpoints that dump
+        # the whole environment, every config property and a heap dump —
+        # exposing them and relying only on the security rules would mean one
+        # mistake there leaks credentials.
+        include: health,info,metrics,prometheus
+
+  endpoint:
+    health:
+      # Adds /actuator/health/liveness and /actuator/health/readiness. They are
+      # separate on purpose: liveness answers "should this pod be restarted",
+      # readiness answers "should it receive traffic". Pointing both at the
+      # aggregate health means any dependency outage restarts every pod, which
+      # turns a degraded system into an outage.
+      probes:
+        enabled: true
+      show-details: when-authorized
+      show-components: when-authorized
+      roles: ADMIN
+      group:
+        readiness:
+          # The database, because without it no request can be served. Not the
+          # converter — see ConverterHealthIndicator.
+          include: readinessState,db
+      status:
+        # DEGRADED sits between DOWN and UP, so an aggregate containing it
+        # reports DEGRADED rather than UP, but still answers 200: the service
+        # is worth routing traffic to, and worth telling someone about.
+        order: DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN
+        http-mapping:
+          DEGRADED: 200
+
+  metrics:
+    tags:
+      # Every series is labelled, so one Prometheus can hold more than one
+      # deployment without the numbers silently adding together.
+      application: ${spring.application.name}
+
+  info:
+    env:
+      # Would publish every cde.* property, the JWT secret among them.
+      enabled: false
+    build:
+      enabled: true

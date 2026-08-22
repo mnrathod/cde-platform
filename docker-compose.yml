@@ -47,7 +47,13 @@ services:
       converter:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      # The readiness probe, not "/". A static page answers 200 while the
+      # database is unreachable, so the old check reported a container that
+      # could not serve a single request as healthy. Readiness covers the
+      # database and deliberately excludes the converter — a converter outage
+      # must not mark this container unhealthy and have Docker restart it.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider",
+             "http://localhost:8080/actuator/health/readiness"]
       interval: 30s
       timeout: 5s
       retries: 3

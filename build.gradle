@@ -7,6 +7,12 @@ plugins {
 group = 'com.cde'
 version = '0.0.1-SNAPSHOT'
 
+// Generates build-info.properties so /actuator/info reports which build is
+// running. Without it, "which version is deployed?" is answered by guesswork.
+springBoot {
+    buildInfo()
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -20,6 +26,10 @@ repositories {
 dependencies {
     // Web
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // Health, metrics and the liveness/readiness probes Kubernetes needs
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Exposes those metrics in the format Prometheus scrapes
+    implementation 'io.micrometer:micrometer-registry-prometheus'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     // Real-time collaboration: STOMP over WebSocket
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
