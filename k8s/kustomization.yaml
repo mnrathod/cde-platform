@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - pvc.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml
+  - ingress.yaml
+
+# Deliberately absent:
+#
+#   secret.example.yaml — a template. Create the real Secret out of band so a
+#     signing key is never committed; the Deployment fails closed without it.
+#   hpa.yaml — scaling is broken until the database and the uploads volume are
+#     dealt with. See the file's own header.
+
+images:
+  - name: cde-platform
+    newName: ghcr.io/OWNER/cde-platform    # replace
+    newTag: "0.0.1"
+  - name: cde-converter
+    newName: ghcr.io/OWNER/cde-converter   # replace
+    newTag: "0.0.1"
+
+# Not commonLabels, which is deprecated and — more to the point — copies the
+# labels into spec.selector as well. A Deployment's selector is immutable, so
+# once applied, changing or removing the label here makes every later
+# `kubectl apply` fail with "field is immutable" until the Deployment is
+# deleted and recreated. includeSelectors: false keeps it a label.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: cde-platform
+    includeSelectors: false

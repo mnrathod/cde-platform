@@ -1,0 +1,53 @@
+# ⚠ NOT part of kustomization.yaml, and applying it today will break the
+# deployment rather than scale it. Two things have to change first.
+#
+#  1. The database. H2 runs in the pod's memory with ddl-auto: create-drop, so
+#     each replica gets its own empty database. A user who signs in against
+#     one pod is unknown to the next, and every document created on one is
+#     invisible from the other. Needs PostgreSQL.
+#
+#  2. The uploads volume. It is ReadWriteOnce, so a second pod cannot mount
+#     it and will sit Pending forever. Needs ReadWriteMany, or — better —
+#     uploads moved to object storage so that pods share nothing.
+#
+# Once both are done, remove the converter sidecar from the Deployment and
+# give it its own Deployment and HPA as well: it is the CPU-bound half, and
+# scaling the application to scale OCR is the wrong lever.
+#
+# Apply with:  kubectl apply -f k8s/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cde-platform
+  labels:
+    app.kubernetes.io/name: cde-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cde-platform
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Conversion and OCR are bursty and CPU-bound, so the average sits
+          # low between bursts. Scaling at 70% leaves room to absorb one
+          # without waiting for a new pod to finish starting.
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      # Slow to shrink: a pod removed mid-conversion loses that work, and the
+      # load that caused the scale-up is usually intermittent.
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 30

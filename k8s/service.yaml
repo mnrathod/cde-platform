@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cde-platform
+  labels:
+    app.kubernetes.io/name: cde-platform
+    app.kubernetes.io/component: app
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cde-platform
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  # Port 5001 is deliberately absent. The converter has no authentication of
+  # its own and accepts a filesystem path to read, so nothing outside the pod
+  # should be able to address it. Leaving it off the Service is not sufficient
+  # on its own — the pod IP is still routable — which is what networkpolicy.yaml
+  # is for.

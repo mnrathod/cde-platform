@@ -1,0 +1,37 @@
+# The converter accepts an absolute filesystem path over plain HTTP and reads
+# it, with no authentication of any kind. Inside the pod that is fine — only
+# the application can reach loopback. Cluster-wide it is not: a pod IP is
+# routable from anywhere in the cluster by default, so any workload could ask
+# the converter to open a file on the shared volume.
+#
+# Requires a CNI that enforces NetworkPolicy (Calico, Cilium, and most managed
+# offerings). Where none is installed this object is accepted and ignored,
+# which is worth knowing before relying on it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cde-platform
+  labels:
+    app.kubernetes.io/name: cde-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cde-platform
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only the HTTP port, and only from the ingress controller. Traffic
+    # between containers in the same pod goes over loopback and is not
+    # affected by this at all, so the converter keeps working.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Probes come from the kubelet on the node, not from a pod, so they are
+    # not matched by any selector above. Most CNIs allow node traffic
+    # implicitly; if yours does not, the probes will fail and the pod will
+    # restart in a loop — add the node CIDR here rather than widening the rule
+    # above.
