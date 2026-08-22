@@ -2,6 +2,8 @@ package com.cde.platform.config;
 
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.security.JwtFilter;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
+import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.context.annotation.*;
 import org.springframework.security.authentication.*;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -48,6 +50,14 @@ public class SecurityConfig {
                 // permissions failure. The error body itself exposes no
                 // detail: stack traces stay off by Boot's default.
                 .requestMatchers("/error").permitAll()
+                // Kubernetes sends no credentials, so the two probes must be
+                // open. They carry no detail — only UP or DOWN — because
+                // show-details is when-authorized.
+                .requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()
+                // Everything else Actuator exposes is operational data:
+                // metrics reveal traffic shape and the Prometheus endpoint
+                // enumerates every route. Admin only.
+                .requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("ADMIN")
                 .requestMatchers("/api/auth/**", "/h2-console/**",
                                  "/", "/index.html", "/viewer.html",
                                  "/favicon.ico", "/favicon.png",
