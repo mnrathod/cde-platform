@@ -1,0 +1,17 @@
+# For FlywayMigrationIntegrationTest only.
+#
+# That test replaces the `test` profile rather than adding to it, because it
+# needs the opposite datasource: real PostgreSQL with Flyway owning the schema,
+# where the rest of the suite uses H2 with Hibernate owning it. The datasource
+# itself is supplied by @DynamicPropertySource from the container; what is left
+# here is everything the application needs that has nothing to do with the
+# database.
+spring:
+  jpa:
+    show-sql: false
+
+cde:
+  jwt:
+    secret: test-only-signing-key-not-used-outside-the-test-suite-0123456789
+  storage:
+    upload-dir: ./build/test-uploads

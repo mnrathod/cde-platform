@@ -3,6 +3,8 @@
 ```bash
 kubectl create secret generic cde-platform-secrets \
   --from-literal=jwt-secret="$(openssl rand -base64 48)" \
+  --from-literal=db-username="cde" \
+  --from-literal=db-password="$(openssl rand -base64 32)" \
   --from-literal=anthropic-api-key=""
 
 kubectl apply -k k8s/
@@ -15,29 +17,30 @@ first; both carry placeholders.
 
 ## Read this before deploying anything real
 
-**Data does not survive a pod restart.** The database is H2, held in the pod's
-memory, with `ddl-auto: create-drop`. Every restart — a rolling update, a node
-drain, an eviction, an OOM kill — destroys every project, document and
-annotation. Nothing in these manifests can fix that; it is a property of the
-application's configuration.
+**Data survives a restart now.** PostgreSQL runs as a StatefulSet with its own
+volume, and Flyway owns the schema. That was not true before: the database used
+to be H2 held in the pod's memory, and every restart destroyed everything.
 
-Deploy this for a demo or an evaluation. Do not put work in it that anyone
-would mind losing, until PostgreSQL replaces H2.
+What is still missing is everything around the database rather than the
+database itself: **no backups, no point-in-time recovery, no failover, no
+tested restore.** A single PostgreSQL pod on a single volume is one lost
+PersistentVolume away from the same outcome as before, just less often. For
+anything that matters, delete `postgres.yaml`, drop it from
+`kustomization.yaml`, and point `SPRING_DATASOURCE_URL` at a managed database
+— backups and recovery are the hard parts and none of them are here.
 
 ## Why one replica
 
-`replicas: 1` is not a placeholder to raise when traffic grows. Two things
-break at two:
+`replicas: 1` is not a placeholder to raise when traffic grows. One reason
+remains, where there were two. PostgreSQL settled the database
+objection — every replica would now talk to the same one. What is left is the
+**uploads volume**: it is `ReadWriteOnce`, so a second pod cannot mount it and
+sits `Pending` indefinitely, which presents as a deployment that never
+finishes rather than as an error.
 
-| | |
-|---|---|
-| **The database** | H2 lives in each pod's memory. A second replica gets a second, empty database — sign in against one pod and the next request lands on the other as an unknown user. |
-| **The uploads volume** | `ReadWriteOnce`, so a second pod cannot mount it and sits `Pending` indefinitely. |
-
-Neither failure is loud. The first presents as users being logged out at
-random; the second as a deployment that never finishes. `hpa.yaml` exists and
-is deliberately left out of `kustomization.yaml` for this reason — its header
-lists what must change first.
+Moving uploads to object storage is what unblocks scaling. `hpa.yaml` exists
+and is deliberately left out of `kustomization.yaml` until then; its header
+says so.
 
 ## Why the converter is a sidecar
 
@@ -89,16 +92,32 @@ stopped arriving.
   application can reach it; a pod IP is routable cluster-wide by default. The
   policy needs a CNI that enforces it — where none is installed the object is
   accepted and ignored.
-- **The ingress blocks `/actuator` and `/h2-console`.** Defence in depth. The
-  real problem is that `/h2-console` is `permitAll` in `SecurityConfig` and
-  the console is enabled unconditionally in `application.yml`; that should be
-  profile-gated in the application rather than relied on here.
+- **The ingress blocks `/actuator`.** Defence in depth; the application already
+  restricts everything but the probes to an administrator. It also still
+  blocks `/h2-console`, which no longer exists — H2 went with the migration to
+  PostgreSQL, and with it an unauthenticated SQL console that was `permitAll`
+  in `SecurityConfig` and enabled unconditionally. The rule costs nothing and
+  covers an older image being rolled back into place.
+
+## The database
+
+A StatefulSet rather than a Deployment, deliberately: the volume *is* the
+database, and a Deployment's rolling update would start a second pod against
+the same claim. Two postmasters on one data directory is corruption, not
+contention.
+
+`PGDATA` points at a subdirectory of the mount rather than the mount itself.
+The image only initialises a directory it created, and a fresh volume already
+contains `lost+found` — without the subdirectory `initdb` refuses to run and
+the pod crash-loops on first start.
+
+The schema is applied by Flyway at application startup, and `ddl-auto` is
+`validate`: a mapping that has drifted from the migrations stops the
+application rather than being quietly patched at runtime.
 
 ## What is missing
 
-- **PostgreSQL** — no manifest, because the application is not yet configured
-  for it. This is the prerequisite for everything else on this list.
-- **Object storage for uploads** — the second prerequisite for more than one
-  replica.
+- **Backups.** Nothing here backs the database up, and an untested restore is
+  not a backup. This is the largest remaining gap.
+- **Object storage for uploads** — the one thing still holding replicas at 1.
 - **A PodDisruptionBudget** — meaningless at one replica; add it with the HPA.
-- **Backups** — nothing to back up while the database is in memory.

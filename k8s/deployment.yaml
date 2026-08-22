@@ -6,11 +6,11 @@ metadata:
     app.kubernetes.io/name: cde-platform
     app.kubernetes.io/component: app
 spec:
-  # One. Not a placeholder — see README.md. The database is H2 held in the
-  # pod's memory, so a second replica would serve a second, empty database:
-  # sign in against one pod and the next request lands on the other as an
-  # unknown user. Raising this without moving to PostgreSQL produces a system
-  # that appears to work and corrupts sessions at random.
+  # Still one, but for one reason now rather than two. PostgreSQL removed the
+  # database objection; what remains is the uploads volume, which is
+  # ReadWriteOnce — a second pod cannot mount it and would sit Pending
+  # indefinitely. Moving uploads to object storage is what unblocks scaling,
+  # and hpa.yaml says so.
   replicas: 1
 
   strategy:
@@ -87,6 +87,18 @@ spec:
                   # Only the AI endpoints need it; everything else works
                   # without, so a missing key must not stop the pod.
                   optional: true
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: cde-platform-secrets
+                  key: db-username
+                  optional: false
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cde-platform-secrets
+                  key: db-password
+                  optional: false
 
           # Separate probes on purpose. Liveness asks whether this pod should
           # be restarted and depends on nothing outside the process. Readiness

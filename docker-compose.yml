@@ -1,4 +1,29 @@
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cdedb}
+      POSTGRES_USER: ${POSTGRES_USER:-cde}
+      # No default. The database holds every project, document and
+      # annotation; starting it with a password baked into a committed file
+      # is how a demo instance ends up reachable in production.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before starting}
+    # Not published on the host. Only cde-app needs to reach it; exposing
+    # 5432 puts the database on the host's network for no benefit.
+    expose:
+      - "5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # cde-app waits for this. Without it the application starts first, finds
+      # no database, and Flyway fails on an empty connection.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cde} -d ${POSTGRES_DB:-cdedb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
   converter:
     build:
       context: ./converter
@@ -43,7 +68,12 @@ services:
       # placeholder and must not be used anywhere real.
       CDE_JWT_SECRET: ${CDE_JWT_SECRET:?set CDE_JWT_SECRET before starting}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-cdedb}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-cde}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before starting}
     depends_on:
+      db:
+        condition: service_healthy
       converter:
         condition: service_healthy
     healthcheck:
@@ -67,3 +97,7 @@ volumes:
   # usually root — and both containers then fail every write with EACCES.
   # To use a host directory anyway, chown it to 10001:10001 first.
   uploads:
+
+  # The database. Removing this volume destroys every project, document and
+  # annotation — `docker compose down -v` included.
+  pgdata:
