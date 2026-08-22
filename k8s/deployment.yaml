@@ -1,0 +1,209 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cde-platform
+  labels:
+    app.kubernetes.io/name: cde-platform
+    app.kubernetes.io/component: app
+spec:
+  # One. Not a placeholder — see README.md. The database is H2 held in the
+  # pod's memory, so a second replica would serve a second, empty database:
+  # sign in against one pod and the next request lands on the other as an
+  # unknown user. Raising this without moving to PostgreSQL produces a system
+  # that appears to work and corrupts sessions at random.
+  replicas: 1
+
+  strategy:
+    # Recreate, not RollingUpdate. The uploads volume is ReadWriteOnce, so a
+    # surge pod cannot mount it while the outgoing pod holds it, and the
+    # rollout would deadlock waiting for a volume that never detaches.
+    # This costs a short outage on every deploy, which is the honest price of
+    # the current storage design.
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cde-platform
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cde-platform
+        app.kubernetes.io/component: app
+    spec:
+      # Comfortably longer than the application's 25s graceful shutdown plus
+      # the preStop pause below, so Kubernetes never SIGKILLs a pod that was
+      # still finishing an upload.
+      terminationGracePeriodSeconds: 45
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Both images already run as uid 10001; fsGroup makes the mounted
+        # volume group-owned by it, which is what stops every write failing
+        # with EACCES the first time the claim is bound.
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: cde-platform-uploads
+        # The application's root filesystem is read-only, so the JVM needs
+        # somewhere to put its own temporary files.
+        - name: tmp
+          emptyDir: {}
+
+      containers:
+        # ── The application ──────────────────────────────────────
+        - name: app
+          image: cde-platform:latest   # overridden by kustomization.yaml
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          envFrom:
+            - configMapRef:
+                name: cde-platform-config
+
+          env:
+            - name: CDE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cde-platform-secrets
+                  key: jwt-secret
+                  # Fails the pod rather than letting the application fall
+                  # back to the signing secret published in application.yml.
+                  optional: false
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cde-platform-secrets
+                  key: anthropic-api-key
+                  # Only the AI endpoints need it; everything else works
+                  # without, so a missing key must not stop the pod.
+                  optional: true
+
+          # Separate probes on purpose. Liveness asks whether this pod should
+          # be restarted and depends on nothing outside the process. Readiness
+          # asks whether it should receive traffic and includes the database.
+          # Neither includes the converter: it can be down while every PDF and
+          # every markup operation still works.
+          startupProbe:
+            # Covers a slow first start — JVM, Hibernate schema creation, the
+            # WebSocket broker — without making liveness sluggish afterwards.
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30      # up to 150s to come up
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+
+          lifecycle:
+            preStop:
+              # Kubernetes removes the endpoint and sends SIGTERM at the same
+              # moment, and the two race. Pausing first lets the endpoint
+              # removal propagate so in-flight requests are not cut off by a
+              # shutdown that started before traffic stopped arriving.
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              # PDFBox holds whole documents in memory; 100MB uploads are
+              # allowed. Below roughly 1.5Gi a large signing or redaction job
+              # will be OOM-killed rather than merely slow.
+              memory: 1536Mi
+              cpu: "1500m"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+            - name: tmp
+              mountPath: /tmp
+
+        # ── The converter ────────────────────────────────────────
+        # A sidecar rather than its own Deployment, because the two share a
+        # filesystem by absolute path: the application sends the converter a
+        # path and the converter opens it. That coupling is what a pod is for.
+        # Separating them means ReadWriteMany storage or moving uploads to
+        # object storage — see README.md.
+        - name: converter
+          image: cde-converter:latest   # overridden by kustomization.yaml
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: converter
+              containerPort: 5001
+
+          env:
+            - name: CONVERTER_PORT
+              value: "5001"
+
+          # /health reports whether LibreOffice, LibreDWG and Tesseract were
+          # actually found, so a misbuilt image is caught here rather than on
+          # someone's first upload.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: converter
+            periodSeconds: 5
+            failureThreshold: 24      # LibreOffice's first start is slow
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: converter
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: converter
+            periodSeconds: 15
+            failureThreshold: 3
+
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              # LibreOffice and Tesseract are both memory-hungry on large
+              # sheets, and OCR is entirely CPU-bound.
+              memory: 2Gi
+              cpu: "2000m"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Not read-only: LibreOffice writes a user profile into the home
+            # directory on every start and fails outright without it.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads

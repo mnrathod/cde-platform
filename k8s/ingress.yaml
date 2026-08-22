@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cde-platform
+  labels:
+    app.kubernetes.io/name: cde-platform
+  annotations:
+    # Uploads are capped at 100MB by the application; the ingress must agree
+    # or large drawings fail with a 413 that never reaches the application's
+    # own error handling.
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    # Conversion of a large DWG can take a couple of minutes. The default 60s
+    # read timeout turns those into a 504 halfway through.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+
+    # Defence in depth, not a fix. Both of these are also restricted in the
+    # application: /actuator exposes only health, info, metrics and prometheus,
+    # with everything but the probes requiring an administrator. /h2-console is
+    # permitAll in SecurityConfig, which is the actual problem and should be
+    # profile-gated in the application rather than papered over here.
+    #
+    # server-snippet is disabled by default in some hardened ingress-nginx
+    # installations. Check it took effect rather than assuming it did.
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* ^/(actuator|h2-console) {
+        return 404;
+      }
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - cde.example.com
+      # Issued out of band, or by cert-manager. The session token is a bearer
+      # credential in an Authorization header, so plain HTTP hands it to
+      # anyone on the path.
+      secretName: cde-platform-tls
+  rules:
+    - host: cde.example.com     # replace
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cde-platform
+                port:
+                  name: http

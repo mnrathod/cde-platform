@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cde-platform-config
+  labels:
+    app.kubernetes.io/name: cde-platform
+    app.kubernetes.io/component: config
+data:
+  # The converter runs as a second container in the same pod, so it is
+  # reachable on the pod's own loopback address. Nothing else in the cluster
+  # should be able to reach it — see networkpolicy.yaml.
+  CDE_CONVERTER_URL: "http://localhost:5001"
+
+  # Must match the mount path of the uploads volume in both containers. The
+  # application sends the converter absolute paths and the converter opens
+  # them directly, so the two must agree exactly.
+  CDE_STORAGE_UPLOAD_DIR: "/app/uploads"
+
+  SPRING_PROFILES_ACTIVE: "kubernetes"
+
+  # Heap tracks the container memory limit rather than the node's, which is
+  # what makes the limit below actually bound the JVM instead of the kernel
+  # OOM-killing it. Already the image default; repeated here so changing the
+  # limit and the heap stays a single decision.
+  JAVA_OPTS: "-XX:MaxRAMPercentage=75.0"

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cde-platform-uploads
+  labels:
+    app.kubernetes.io/name: cde-platform
+    app.kubernetes.io/component: storage
+spec:
+  # ReadWriteOnce is enough only because the application and the converter
+  # share one pod. Splitting them into separate Deployments would need
+  # ReadWriteMany — which most default StorageClasses do not offer — or the
+  # uploads moved to object storage. See README.md.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Uploads are capped at 100MB each and nothing prunes them, so size this
+      # for the documents actually expected rather than for a demo.
+      storage: 20Gi
+  # Left unset so the cluster's default StorageClass is used. Name one here if
+  # the default is not durable — some clusters default to node-local storage,
+  # which loses the volume when the node goes away.
+  # storageClassName: standard
