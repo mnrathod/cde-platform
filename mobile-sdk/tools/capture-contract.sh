@@ -31,9 +31,16 @@ describe() {
   fi | python3 -c '
 import sys, json
 payload = json.load(sys.stdin)
-sample = payload[0] if isinstance(payload, list) and payload else payload
+# An empty list is the trap here. Reporting "(not an object)" for it reads
+# like a shape mismatch when it actually means there was nothing on the
+# server to describe — so the field list silently goes missing and the diff
+# against API-CONTRACT.md looks clean. Say which it is.
+if isinstance(payload, list) and not payload:
+    print("  (EMPTY — nothing on the server to describe; this endpoint was NOT verified)")
+    raise SystemExit
+sample = payload[0] if isinstance(payload, list) else payload
 if not isinstance(sample, dict):
-    print("  (not an object)"); raise SystemExit
+    print(f"  (not an object: {type(sample).__name__})"); raise SystemExit
 for key, value in sample.items():
     kind = type(value).__name__
     preview = str(value)[:48].replace("\n", " ")
@@ -48,7 +55,7 @@ describe "AuthResponse"       "/api/auth/login" "{\"username\":\"$USER\",\"passw
 describe "ProjectResponse"   "/api/projects"
 describe "DocumentResponse"  "/api/documents/project/1"
 describe "ViewerData"        "/api/viewer/1"
-describe "AnnotationResponse" "/api/annotations/document/1"
+describe "AnnotationResponse" "/api/annotations/document/${ANNOTATED_DOC:-1}"
 
 echo "=== enums (from the backend source)"
 grep -rhoE 'enum (AnnotationType|AnnotationStatus|DocumentType|DocumentStatus) \{' -A 4 \
