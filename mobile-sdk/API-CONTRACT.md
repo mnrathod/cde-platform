@@ -34,6 +34,18 @@ GET  /api/documents/{id}               -> DocumentResponse
 POST /api/documents/upload             (multipart: file, name, projectId)
 ```
 
+`ProjectResponse`
+
+| field | type | note |
+|---|---|---|
+| `id` | number | |
+| `name` | string | |
+| `description` | string? | |
+| `location` | string? | |
+| `phase` | string? | `CONCEPT`, `DESIGN`, `CONSTRUCTION`, `HANDOVER`, `OPERATION` |
+| `ownerUsername` | string? | the username, not the id |
+| `documentCount` | number | computed by the server, not a stored column |
+
 `DocumentResponse`
 
 | field | type | note |
@@ -124,6 +136,22 @@ POST   /api/annotations/document/{id}/xfdf         (multipart import)
 
 `type` is `COMMENT` `MARKUP` `DIMENSION` `CLOUD` `ARROW` `STAMP` `HIGHLIGHT`
 `UNDERLINE` `STRIKEOUT` `SQUIGGLY`.
+
+`AnnotationResponse` — what comes back, which is not the same shape as what
+goes out: the server adds an id, an author and a status the request never
+carries.
+
+| field | type | note |
+|---|---|---|
+| `id` | number | server-assigned; `shapeData.id` is the stable client-side one |
+| `documentId` | number | |
+| `author` | string? | username of whoever created it, not an id |
+| `type` | string | as above |
+| `shapeData` | string | JSON, stored verbatim and never parsed by the server |
+| `comment` | string? | |
+| `status` | string | `OPEN`, `RESOLVED`, `CLOSED` |
+| `pageNumber` | number? | absent for markup on a drawing |
+| `createdAt` | string | zone-less `LocalDateTime` — see above |
 `status` is `OPEN` `RESOLVED` `CLOSED`.
 
 ### shapeData is opaque to the server
