@@ -5,6 +5,7 @@ Cross-platform: Windows + Ubuntu/Linux/Mac
 """
 
 import os, sys, io, json, shutil, tempfile, subprocess, traceback, time, platform
+import re, html
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 from pathlib import Path
@@ -397,12 +398,181 @@ def _render_dxf_file(dxf_path: str) -> dict:
         svg = re.sub(r'([\d.]+)(mm|cm)', replace_dim, svg, count=4)
         svg = svg.replace("<svg ",
             '<svg style="max-width:100%;max-height:100%;display:block" ', 1)
+
+        # Added last, so a failure here costs the search layer and not the
+        # drawing: a viewer that renders without searchable text is a
+        # degraded feature, one that renders nothing is an outage.
+        try:
+            layer = build_text_layer(svg, layout_to_render, doc)
+            if layer:
+                svg = svg.replace("</svg>", layer + "</svg>", 1)
+        except Exception:
+            print(f"[ezdxf] text layer skipped:\n{traceback.format_exc()}", flush=True)
+
         return {"success": True, "svg": svg,
                 "entityCount": entity_count, "dxfVersion": doc.dxfversion}
     except Exception as e:
         print(f"[ezdxf] render error:\n{traceback.format_exc()}", flush=True)
         return {"success": False, "error": f"ezdxf render error: {e}"}
 
+
+
+# ══════════════════════════════════════════════════════════════
+#  Searchable text layer
+# ══════════════════════════════════════════════════════════════
+#
+#  ezdxf's SVG backend draws TEXT and MTEXT as filled vector paths. That is
+#  the right choice for fidelity — a CAD drawing's text is positioned to the
+#  millimetre and substituting a browser font moves it — but it means the SVG
+#  contains no <text> at all, so nothing downstream can find a word in a
+#  drawing. Searching a converted DXF returned "no matches" for text plainly
+#  visible on screen, which is a worse answer than an error.
+#
+#  So the glyphs stay as paths and an invisible <text> layer is laid over
+#  them, the same arrangement a PDF viewer uses for its text layer: the
+#  drawing renders exactly as before, and the words are in the DOM.
+
+TEXT_LAYER_CLASS = "cde-text-layer"
+
+
+def mtext_string(entity) -> str:
+    """
+    An MTEXT's content with its formatting codes stripped.
+
+    ezdxf renamed this method: it is `plain_text()` from 1.x, and was
+    `plain_mtext()` before. Both are tried because calling the wrong one
+    raises AttributeError, and every call site here sat inside a broad
+    `except` — so the rename did not fail loudly, it just meant no MTEXT
+    was ever read.
+    """
+    for name in ("plain_text", "plain_mtext"):
+        method = getattr(entity, name, None)
+        if callable(method):
+            return str(method())
+    return str(entity.dxf.get("text", "") or "")
+
+# TEXT halign codes map onto SVG's anchors. Anything else (aligned, fit)
+# positions by two points and is treated as left-aligned.
+_H_ALIGN_TO_ANCHOR = {0: "start", 1: "middle", 2: "end", 4: "middle"}
+
+
+def _rendered_extent(svg: str) -> tuple:
+    """Absolute min/max of every point the backend drew."""
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
+    found = False
+    for data in re.findall(r'<path[^>]*\sd="([^"]+)"', svg):
+        x = y = 0.0
+        # Only M/m and L/l appear in this backend's output; anything else is
+        # skipped rather than guessed at.
+        for cmd, args in re.findall(r'([MmLl])\s*([-\d.,eE\s]*)', data):
+            values = [float(v) for v in re.findall(r'-?\d+\.?\d*(?:[eE]-?\d+)?', args)]
+            for i in range(0, len(values) - 1, 2):
+                dx, dy = values[i], values[i + 1]
+                if cmd in "ML":
+                    x, y = dx, dy
+                else:
+                    x, y = x + dx, y + dy
+                min_x, min_y = min(min_x, x), min(min_y, y)
+                max_x, max_y = max(max_x, x), max(max_y, y)
+                found = True
+    return (min_x, min_y, max_x, max_y) if found else None
+
+
+def _text_entities(layout):
+    """Every TEXT/MTEXT in the layout, as (string, x, y, height, anchor)."""
+    out = []
+    for e in layout:
+        kind = e.dxftype()
+        if kind not in ("TEXT", "MTEXT"):
+            continue
+        try:
+            if kind == "TEXT":
+                content = e.dxf.text
+                height = float(e.dxf.height or 0)
+                halign = int(getattr(e.dxf, "halign", 0) or 0)
+                # With any alignment other than left, the insert point is not
+                # where the text starts — align_point is.
+                point = e.dxf.align_point if halign else e.dxf.insert
+                if point is None:
+                    point = e.dxf.insert
+                anchor = _H_ALIGN_TO_ANCHOR.get(halign, "start")
+            else:
+                content = mtext_string(e)
+                height = float(e.dxf.char_height or 0)
+                point = e.dxf.insert
+                anchor = "start"
+            content = " ".join(str(content).split())
+            if content and height > 0:
+                out.append((content, float(point[0]), float(point[1]), height, anchor))
+        except Exception as exc:
+            # One unreadable label must not cost the whole layer — but say so.
+            # Silently skipping is how a systematic failure, like a renamed
+            # ezdxf method, looks identical to a drawing with no text.
+            print(f"[text-layer] skipped {kind}: {exc}", flush=True)
+            continue
+    return out
+
+
+def build_text_layer(svg: str, layout, doc) -> str:
+    """
+    An invisible <text> element over each rendered label.
+
+    The transform is calibrated rather than assumed: the drawing's extent in
+    DXF units is matched against the extent the backend actually drew, which
+    gives the scale and offset whatever page size or fit ezdxf chose. A y flip
+    is included because DXF counts upwards from the bottom and SVG downwards
+    from the top.
+
+    Returns "" when there is nothing to add or the calibration cannot be
+    trusted — a text layer in the wrong place would be worse than none, since
+    the drawing would look right and every search result would point
+    somewhere else.
+    """
+    labels = _text_entities(layout)
+    if not labels:
+        return ""
+
+    drawn = _rendered_extent(svg)
+    if not drawn:
+        return ""
+    svg_min_x, svg_min_y, svg_max_x, svg_max_y = drawn
+
+    try:
+        from ezdxf import bbox
+        extents = bbox.extents(layout, fast=True)
+        dxf_min_x, dxf_min_y = extents.extmin.x, extents.extmin.y
+        dxf_max_x, dxf_max_y = extents.extmax.x, extents.extmax.y
+    except Exception:
+        return ""
+
+    dxf_w, dxf_h = dxf_max_x - dxf_min_x, dxf_max_y - dxf_min_y
+    svg_w, svg_h = svg_max_x - svg_min_x, svg_max_y - svg_min_y
+    if dxf_w <= 0 or dxf_h <= 0 or svg_w <= 0 or svg_h <= 0:
+        return ""
+
+    scale_x, scale_y = svg_w / dxf_w, svg_h / dxf_h
+    # ezdxf preserves aspect ratio. If these disagree, the assumption behind
+    # the whole mapping is wrong and the layer is dropped rather than placed
+    # somewhere plausible but incorrect.
+    if not (0.9 <= scale_x / scale_y <= 1.1):
+        return ""
+    scale = (scale_x + scale_y) / 2
+
+    parts = []
+    for content, x, y, height, anchor in labels:
+        sx = svg_min_x + (x - dxf_min_x) * scale
+        sy = svg_max_y - (y - dxf_min_y) * scale
+        size = max(height * scale, 1.0)
+        parts.append(
+            f'<text x="{sx:.2f}" y="{sy:.2f}" font-size="{size:.2f}" '
+            f'text-anchor="{anchor}">{html.escape(content)}</text>')
+
+    # fill:none keeps the layer invisible; the glyphs beneath it are already
+    # drawn. pointer-events:none keeps it from swallowing clicks meant for the
+    # drawing, and it stays selectable and searchable either way.
+    return (f'<g class="{TEXT_LAYER_CLASS}" fill="none" stroke="none" '
+            f'pointer-events="none">' + "".join(parts) + "</g>")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -963,10 +1133,11 @@ def _analyze_dxf(doc) -> dict:
 
         if t in ('TEXT', 'MTEXT'):
             try:
-                txt = e.dxf.text if t == 'TEXT' else e.plain_mtext()
+                txt = e.dxf.text if t == 'TEXT' else mtext_string(e)
                 if txt and txt.strip():
                     info['texts'].append(txt.strip()[:80])
-            except: pass
+            except Exception as exc:
+                print(f"[analyse] skipped {t}: {exc}", flush=True)
         elif t == 'INSERT':
             name = e.dxf.get('name', '?')
             info['blocks_used'][name] = info['blocks_used'].get(name, 0) + 1
