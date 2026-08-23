@@ -2,12 +2,15 @@ package com.cde.platform.config;
 
 import com.cde.platform.model.*;
 import com.cde.platform.repository.*;
+import com.cde.platform.tenancy.TenancyProperties;
+import com.cde.platform.tenancy.TenantContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,8 +25,28 @@ public class DataSeeder {
 
     @Bean
     CommandLineRunner seed(UserRepository userRepo, ProjectRepository projectRepo,
-                           DocumentRepository documentRepo, PasswordEncoder encoder) {
+                           DocumentRepository documentRepo, PasswordEncoder encoder,
+                           TenantRepository tenantRepo, TenancyProperties tenancyProperties) {
         return args -> {
+            // Seeding is background work, so it must establish tenant context
+            // explicitly (§5.6). Without it every read returns nothing — the
+            // count below would report zero on a populated database and seed a
+            // duplicate set — and every write is rejected by the RLS WITH CHECK
+            // clause.
+            Long defaultTenantId = tenantRepo.findBySlug(tenancyProperties.getDefaultTenantSlug())
+                .orElseThrow(() -> new IllegalStateException(
+                    "Default tenant '" + tenancyProperties.getDefaultTenantSlug()
+                    + "' is missing; V2__tenant_isolation.sql creates it"))
+                .getId();
+
+            TenantContext.runAsTenant(defaultTenantId, () -> seedDefaultTenant(
+                userRepo, projectRepo, documentRepo, encoder));
+        };
+    }
+
+    private void seedDefaultTenant(UserRepository userRepo, ProjectRepository projectRepo,
+                                   DocumentRepository documentRepo, PasswordEncoder encoder) {
+        try {
             if (userRepo.count() > 0) return;
 
             var admin = User.builder()
@@ -112,6 +135,13 @@ public class DataSeeder {
                 .vectorData(svgDrawing).project(proj1).uploadedBy(engineer).build();
 
             documentRepo.save(doc1);
-        };
+        } catch (IOException e) {
+            // Seeding runs inside a CommandLineRunner, so a checked exception
+            // cannot propagate from the Runnable. Failing loudly is right: a
+            // seeded document whose file never reached disk has no filePath,
+            // and every feature that reads the file — digital signing among
+            // them — breaks on it later, far from the cause.
+            throw new IllegalStateException("Failed to write the seed drawing to disk", e);
+        }
     }
 }

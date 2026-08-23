@@ -1,5 +1,7 @@
 package com.cde.platform.model;
 
+import com.cde.platform.tenancy.TenantAssigningListener;
+import com.cde.platform.tenancy.TenantScoped;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -21,6 +23,7 @@ import java.time.LocalDateTime;
  * which keeps signatures anchored to the bytes they actually signed.
  */
 @Entity
+@EntityListeners(TenantAssigningListener.class)
 @Table(
     name = "document_versions",
     uniqueConstraints = @UniqueConstraint(
@@ -33,11 +36,19 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class DocumentVersion {
+public class DocumentVersion implements TenantScoped {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /**
+     * The tenant this row belongs to. Populated by {@link TenantAssigningListener}
+     * on insert and never changed afterwards — a row does not move between
+     * tenants, and the RLS policy would reject the update if it tried.
+     */
+    @Column(name = "tenant_id", nullable = false, updatable = false)
+    private Long tenantId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "document_id", nullable = false)

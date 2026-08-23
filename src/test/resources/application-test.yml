@@ -1,33 +1,45 @@
 # Test overrides, activated for every test by the `test` task in build.gradle.
 #
-# The suite runs against H2 rather than PostgreSQL so it stays fast and needs
-# no Docker. That trade has one hole: it does not exercise the migrations. It
-# is covered by FlywayMigrationIntegrationTest, which runs the real migrations
-# against a real PostgreSQL and checks Hibernate accepts the result — so a
-# migration that has drifted from the entities fails there rather than on
-# somebody's deployment.
+# The suite runs against a real PostgreSQL, started once per JVM by
+# PostgresTestSessionListener. It used to run on H2 in PostgreSQL compatibility
+# mode, which was faster and needed no Docker, and that trade is no longer
+# available: Row-Level Security is the highest-severity control on the platform
+# and H2 does not implement it. Tests on H2 would report tenant isolation
+# passing while the mechanism under test was absent entirely.
+#
+# Migrations run here too, for the same reason — the RLS policies, the
+# restricted role and the SECURITY DEFINER login resolver are all created by
+# V2, so a schema built by Hibernate instead would be missing every part of
+# tenancy that matters.
 spring:
   datasource:
-    url: jdbc:h2:mem:cdetest;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: ""
+    url: ${test.datasource.url}
+    username: ${test.datasource.username}
+    password: ${test.datasource.password}
+    driver-class-name: org.postgresql.Driver
 
   jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
-      # Hibernate builds the schema here, because Flyway is off — see below.
-      ddl-auto: create-drop
+      # The schema belongs to the migrations here exactly as it does in
+      # production, so drift between the two fails the suite rather than being
+      # papered over by create-drop.
+      ddl-auto: validate
 
   flyway:
-    # The migrations are PostgreSQL. Running them against H2 would test the
-    # compatibility mode rather than the database anything is deployed on.
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
 
 cde:
   jwt:
-    # Tests need a signing key and must not depend on the environment
-    # supplying one. Only ever loaded from the test classpath.
+    # Tests need a signing key and must not depend on the environment supplying
+    # one. Only ever loaded from the test classpath, and long enough to satisfy
+    # the 32-byte minimum JwtProperties enforces.
     secret: test-only-signing-key-not-used-outside-the-test-suite-0123456789
+  security:
+    password:
+      # The production floor is 600,000 and is enforced by validation, so it
+      # cannot be lowered here — this is the real cost, deliberately. Roughly
+      # half a second per hash, which the seeder pays twice per context.
+      kdf: pbkdf2-sha256
   storage:
     upload-dir: ./build/test-uploads

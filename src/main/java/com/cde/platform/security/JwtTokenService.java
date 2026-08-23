@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.Optional;
 
 /**
  * Issues and verifies the bearer tokens that authenticate API and STOMP
@@ -21,6 +22,8 @@ import java.util.Date;
 @Service
 public class JwtTokenService {
 
+    static final String TENANT_CLAIM = "tid";
+
     private final SecretKey signingKey;
     private final long expirationMs;
 
@@ -29,13 +32,35 @@ public class JwtTokenService {
         this.expirationMs = properties.getExpirationMs();
     }
 
-    public String generateToken(String username) {
+    /**
+     * The tenant is carried in the token rather than looked up per request.
+     * That makes it part of the signed payload — a caller cannot change which
+     * tenant they are scoped to without invalidating the signature — and it
+     * removes a database round trip from the path of every single request,
+     * which would itself have to run before tenant context existed.
+     */
+    public String generateToken(String username, long tenantId) {
         return Jwts.builder()
             .subject(username)
+            .claim(TENANT_CLAIM, tenantId)
             .issuedAt(new Date())
             .expiration(new Date(System.currentTimeMillis() + expirationMs))
             .signWith(signingKey)
             .compact();
+    }
+
+    /**
+     * @return the tenant the token was issued for, or empty for a token minted
+     *         before the claim existed. Callers must treat empty as "no tenant
+     *         context", which fails closed, rather than substituting a default.
+     */
+    public Optional<Long> extractTenantId(String token) {
+        Object claim = Jwts.parser().verifyWith(signingKey).build()
+            .parseSignedClaims(token).getPayload().get(TENANT_CLAIM);
+        if (claim instanceof Number number) {
+            return Optional.of(number.longValue());
+        }
+        return Optional.empty();
     }
 
     public String extractUsername(String token) {

@@ -147,6 +147,68 @@ memory weakens the function rather than strengthening it.
 
 ---
 
+## Tenant isolation
+
+### `cde.tenancy.application-role`
+
+| | |
+|---|---|
+| Environment variable | `CDE_TENANCY_APPLICATION_ROLE` |
+| Type | SQL identifier |
+| Default | `cde_app` |
+| Secret | no |
+
+The restricted PostgreSQL role every application query runs as. It is assumed
+via `SET ROLE` on each pooled connection and released when the connection is
+returned.
+
+**This role, not the RLS flags, is what enforces tenant isolation.** PostgreSQL
+exempts superusers and any role holding `BYPASSRLS` from Row-Level Security
+unconditionally, and reports nothing when it does so. `FORCE ROW LEVEL SECURITY`
+does not help: it binds the table *owner* only. Measured directly against this
+schema — every policy present, both flags set — a superuser connection returned
+every tenant's rows, including with no tenant context set at all. A
+containerised PostgreSQL creates its `POSTGRES_USER` as a superuser, so that is
+the default configuration, not an exotic one.
+
+The role must therefore be:
+
+- not a superuser
+- not the owner of the tables
+- explicitly `NOBYPASSRLS`
+
+`V2__tenant_isolation.sql` creates it that way and grants the migration runner
+membership so `SET ROLE` is permitted. `TenantIsolationCoverageTest` asserts at
+build time that the role the application actually runs as satisfies all three.
+
+**Stronger deployment:** give the role its own password out of band and connect
+as it directly, so no session on that connection has the privilege to
+`RESET ROLE` at all:
+
+```
+ALTER ROLE cde_app WITH LOGIN PASSWORD '...';
+```
+
+Then point `SPRING_DATASOURCE_USERNAME` at it and give Flyway the owner
+credentials separately. The application code is unchanged — `SET ROLE` to the
+role you already are is a no-op.
+
+### `cde.tenancy.default-tenant-slug`
+
+| | |
+|---|---|
+| Environment variable | `CDE_TENANCY_DEFAULT_TENANT_SLUG` |
+| Type | string |
+| Default | `default` |
+| Secret | no |
+
+The tenant that owns rows created before tenancy existed, and the one
+self-service registration joins. It is created by `V2__tenant_isolation.sql`,
+not by application seeding, so a database restored from a pre-tenancy backup
+has something for the backfill to point at.
+
+---
+
 ## Database
 
 ### `spring.datasource.url` / `username` / `password`
@@ -214,7 +276,8 @@ These are required by the guidelines and are **not** configurable yet. Listed
 so the gap is visible rather than discovered:
 
 - Deployment tier ceilings (`commercial` / `government` / `defence`) constraining
-  what a tenant admin may set
+  what a tenant admin may set — the `deployment_tier` column exists on `tenants`
+  and is not yet read by anything
 - Password policy: length, complexity, history, expiry, lockout
 - Compromised-password checking mode (`ONLINE_API` / `LOCAL_DATASET` / `DISABLED`)
 - Storage provider selection (`azure` / `s3` / `gcs` / `local`)

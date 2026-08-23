@@ -45,9 +45,10 @@ dependencies {
 
     // JPA / Database
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    // PostgreSQL in every real environment; H2 stays for the fast test suite.
+    // PostgreSQL everywhere, including the test suite. H2 is gone: it has no
+    // Row-Level Security, so tests against it reported tenant isolation
+    // working while the mechanism under test did not exist.
     runtimeOnly 'org.postgresql:postgresql'
-    runtimeOnly 'com.h2database:h2'
     // Schema is owned by migrations, not by Hibernate.
     implementation 'org.flywaydb:flyway-core'
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'
@@ -73,12 +74,14 @@ dependencies {
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
-    // Runs the real migrations against a real PostgreSQL. The rest of the
-    // suite uses H2 for speed, which cannot prove the migrations are correct.
+    // Every test runs against a real PostgreSQL, started once per JVM by
+    // PostgresTestSessionListener.
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:postgresql'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // Compile-scope, not runtime: PostgresTestSessionListener implements
+    // LauncherSessionListener and so needs the API at compile time.
+    testImplementation 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
@@ -89,10 +92,25 @@ tasks.named('test') {
     // datasource and try to reach a PostgreSQL that is not there.
     systemProperty 'spring.profiles.active', 'test'
 
-    // FlywayMigrationIntegrationTest needs a Docker daemon. Opt in rather than
-    // fail a checkout that has none; CI should set -Pdocker so the migrations
-    // are actually exercised.
-    systemProperty 'cde.testcontainers', findProperty('docker') ?: System.getenv('CDE_TESTCONTAINERS') ?: 'false'
+    // The suite requires a Docker daemon, because it requires a real
+    // PostgreSQL. This used to be opt-in with an H2 fallback; a suite that
+    // silently degrades to a database without RLS is worse than one that
+    // refuses to run.
+    systemProperty 'cde.testcontainers', 'true'
+
+    // Registers DefaultTenantExtension for every test without each class
+    // having to remember @ExtendWith. A test that forgets tenant context does
+    // not fail informatively — it reads zero rows and asserts against them.
+    systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+
+    // Docker Hub is not reachable from the build environment; mirror.gcr.io
+    // serves the same images. Ryuk is disabled because its own image comes
+    // from a registry the proxy blocks — containers are stopped at JVM exit
+    // instead.
+    environment 'TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX',
+                System.getenv('TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX') ?: 'mirror.gcr.io/'
+    environment 'TESTCONTAINERS_RYUK_DISABLED',
+                System.getenv('TESTCONTAINERS_RYUK_DISABLED') ?: 'true'
 }
 
 /**
