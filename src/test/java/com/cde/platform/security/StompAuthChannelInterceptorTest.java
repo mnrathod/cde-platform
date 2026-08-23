@@ -29,18 +29,18 @@ class StompAuthChannelInterceptorTest {
 
     private static final String VALID_TOKEN = "valid.jwt.token";
 
-    private JwtUtil            jwtUtil;
+    private JwtTokenService            jwtTokenService;
     private UserDetailsService userDetailsService;
     private StompAuthChannelInterceptor interceptor;
 
     @BeforeEach
     void setUp() {
-        jwtUtil            = mock(JwtUtil.class);
+        jwtTokenService            = mock(JwtTokenService.class);
         userDetailsService = mock(UserDetailsService.class);
-        interceptor        = new StompAuthChannelInterceptor(jwtUtil, userDetailsService);
+        interceptor        = new StompAuthChannelInterceptor(jwtTokenService, userDetailsService);
 
-        when(jwtUtil.validateToken(VALID_TOKEN)).thenReturn(true);
-        when(jwtUtil.extractUsername(VALID_TOKEN)).thenReturn("ada");
+        when(jwtTokenService.isTokenValid(VALID_TOKEN)).thenReturn(true);
+        when(jwtTokenService.extractUsername(VALID_TOKEN)).thenReturn("ada");
         when(userDetailsService.loadUserByUsername("ada")).thenReturn(
             new User("ada", "", List.of(new SimpleGrantedAuthority("ROLE_ENGINEER"))));
     }
@@ -77,7 +77,7 @@ class StompAuthChannelInterceptorTest {
     @Test
     @DisplayName("an invalid token is refused")
     void invalidTokenIsRefused() {
-        when(jwtUtil.validateToken(anyString())).thenReturn(false);
+        when(jwtTokenService.isTokenValid(anyString())).thenReturn(false);
 
         assertThatThrownBy(() -> send(frame(StompCommand.CONNECT, "Bearer nonsense")))
             .isInstanceOf(IllegalArgumentException.class);

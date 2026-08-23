@@ -35,12 +35,12 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     private static final String AUTH_HEADER  = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
-    private final JwtUtil            jwtUtil;
+    private final JwtTokenService            jwtTokenService;
     private final UserDetailsService userDetailsService;
 
-    public StompAuthChannelInterceptor(JwtUtil jwtUtil,
+    public StompAuthChannelInterceptor(JwtTokenService jwtTokenService,
                                        @Lazy UserDetailsService userDetailsService) {
-        this.jwtUtil            = jwtUtil;
+        this.jwtTokenService            = jwtTokenService;
         this.userDetailsService = userDetailsService;
     }
 
@@ -68,10 +68,10 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     /** @return the authenticated user, or null when the token is absent or invalid */
     private UserDetails authenticate(StompHeaderAccessor accessor) {
         String token = bearerToken(accessor.getNativeHeader(AUTH_HEADER));
-        if (token == null || !jwtUtil.validateToken(token)) return null;
+        if (token == null || !jwtTokenService.isTokenValid(token)) return null;
 
         try {
-            return userDetailsService.loadUserByUsername(jwtUtil.extractUsername(token));
+            return userDetailsService.loadUserByUsername(jwtTokenService.extractUsername(token));
         } catch (Exception e) {
             // The token was well-formed but names nobody — a deleted account,
             // most likely. Logged without the token itself.

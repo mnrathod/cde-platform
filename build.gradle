@@ -128,7 +128,51 @@ tasks.register('converterTest', Exec) {
     }
 }
 
+/**
+ * §4.1: a bare digest applied to a password is a security defect, and the
+ * guidelines require CI to enforce it rather than relying on review.
+ *
+ * The rule is deliberately narrow. Banning MessageDigest outright would be
+ * wrong — SHA-256 is the mandated primitive for the audit-log hash chain
+ * (§5.7), API key lookup and file integrity — so this looks for a digest and a
+ * password in the same expression, which is the shape the defect actually
+ * takes. It also pins password hashing to PasswordEncoderConfig, so a
+ * hand-rolled encoder cannot reappear beside the configured one and quietly
+ * become what a new call site picks up.
+ */
+tasks.register('passwordHashingPolicyCheck') {
+    group = 'verification'
+    description = 'Fails on a bare digest over a password, or an encoder built outside PasswordEncoderConfig.'
+
+    def sources = fileTree('src/main/java') { include '**/*.java' }
+    def encoderConfig = 'PasswordEncoderConfig.java'
+    inputs.files sources
+
+    doLast {
+        def bareDigest = ~/(?:\.digest\s*\([^)]*[Pp]assword)|(?:[Pp]assword[^;]*\.digest\s*\()/
+        def directEncoder = ~/new\s+(?:BCrypt|Argon2|Pbkdf2|SCrypt)PasswordEncoder\s*\(/
+        def violations = []
+
+        sources.each { file ->
+            file.eachLine { line, number ->
+                def where = "${file.name}:${number}"
+                if (bareDigest.matcher(line).find()) {
+                    violations << "$where  bare digest over a password — use the configured PasswordEncoder"
+                }
+                if (file.name != encoderConfig && directEncoder.matcher(line).find()) {
+                    violations << "$where  password encoder built directly — construct it in $encoderConfig"
+                }
+            }
+        }
+
+        if (violations) {
+            throw new GradleException(
+                "Password hashing policy violated (CLAUDE.md §4.1):\n  " + violations.join('\n  '))
+        }
+    }
+}
+
 tasks.named('check') {
-    dependsOn 'converterTest'
+    dependsOn 'converterTest', 'passwordHashingPolicyCheck'
 }
 

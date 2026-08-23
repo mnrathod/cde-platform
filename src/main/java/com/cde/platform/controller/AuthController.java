@@ -3,7 +3,7 @@ package com.cde.platform.controller;
 import com.cde.platform.dto.Dtos.*;
 import com.cde.platform.model.User;
 import com.cde.platform.repository.UserRepository;
-import com.cde.platform.security.JwtUtil;
+import com.cde.platform.security.JwtTokenService;
 import jakarta.validation.Valid;
 import org.springframework.http.*;
 import org.springframework.security.authentication.*;
@@ -17,14 +17,14 @@ public class AuthController {
 
     private final UserRepository userRepo;
     private final PasswordEncoder encoder;
-    private final JwtUtil jwtUtil;
+    private final JwtTokenService jwtTokenService;
     private final AuthenticationManager authManager;
 
     public AuthController(UserRepository userRepo, PasswordEncoder encoder,
-                          JwtUtil jwtUtil, AuthenticationManager authManager) {
+                          JwtTokenService jwtTokenService, AuthenticationManager authManager) {
         this.userRepo = userRepo;
         this.encoder = encoder;
-        this.jwtUtil = jwtUtil;
+        this.jwtTokenService = jwtTokenService;
         this.authManager = authManager;
     }
 
@@ -43,7 +43,7 @@ public class AuthController {
             .build();
         userRepo.save(user);
 
-        String token = jwtUtil.generateToken(user.getUsername());
+        String token = jwtTokenService.generateToken(user.getUsername());
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(new AuthResponse(token, user.getUsername(), user.getRole().name()));
     }
@@ -57,7 +57,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid credentials");
         }
         var user = userRepo.findByUsername(req.username()).orElseThrow();
-        String token = jwtUtil.generateToken(user.getUsername());
+        String token = jwtTokenService.generateToken(user.getUsername());
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), user.getRole().name()));
     }
 }

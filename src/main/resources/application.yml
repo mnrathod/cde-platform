@@ -69,8 +69,14 @@ spring:
 
 cde:
   jwt:
-    secret: cde-platform-super-secret-key-change-in-production-2024
-    expiration-ms: 86400000   # 24 hours
+    # No default, deliberately. A signing key with a fallback value is a
+    # published key — see JwtProperties, which refuses to bind a missing,
+    # short, or previously-committed secret and stops the application rather
+    # than letting it boot able to verify tokens anyone can mint.
+    #
+    #   export CDE_JWT_SECRET="$(openssl rand -base64 48)"
+    secret: ${CDE_JWT_SECRET:}
+    expiration-ms: ${CDE_JWT_EXPIRATION_MS:86400000}   # 24 hours
   storage:
     upload-dir: ./uploads
   converter:
