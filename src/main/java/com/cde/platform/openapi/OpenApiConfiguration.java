@@ -122,6 +122,11 @@ public class OpenApiConfiguration {
                 "Registration, sign-in and the session lifecycle."),
             tag(TAG_PROJECTS,
                 "Projects group documents and carry the ownership and phase a document inherits."),
+            tag(TAG_CDE,
+                "Information containers, their revisions and the gated transitions between "
+                + "work in progress, shared, published and archived. A container's identity is "
+                + "separate from any revision of its content, and a published revision is never "
+                + "edited — it is superseded by a new one and archived, with the lineage kept."),
             tag(TAG_DOCUMENTS,
                 "Upload, download, metadata and deletion of documents held in a project."),
             tag(TAG_DOCUMENT_VERSIONS,

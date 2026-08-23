@@ -42,12 +42,20 @@ public final class AuthDtos {
                 example = "correct-horse-battery-staple-42", minLength = 12, maxLength = 128,
                 format = "password", requiredMode = Schema.RequiredMode.REQUIRED,
                 accessMode = Schema.AccessMode.WRITE_ONLY)
-        @NotBlank @Size(min = 12, max = 128) String password,
-
-        @Schema(description = "Role to create the account with. Defaults to `ENGINEER` when "
-                            + "omitted, which is the least-privileged role that can do useful work.",
-                example = "ENGINEER", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-        User.Role role
+        @NotBlank @Size(min = 12, max = 128) String password
+        // There is deliberately no role field.
+        //
+        // There was one, honoured as supplied, on an endpoint that requires no
+        // credential — so any anonymous caller could register as ADMIN simply
+        // by asking. That was already an escalation, and it became a
+        // considerably worse one when roles started carrying the container
+        // permissions: it would have handed a stranger the authority to
+        // publish a contractual record.
+        //
+        // A role is granted, not chosen. Every account starts as ENGINEER, and
+        // the reply says which role was actually assigned, so a client that
+        // still sends one is told plainly what it got rather than being left
+        // to assume.
     ) {}
 
     @Schema(name = "LoginRequest", description = "Credentials for a password sign-in.")

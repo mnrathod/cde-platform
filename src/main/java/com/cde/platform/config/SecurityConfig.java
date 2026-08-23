@@ -2,6 +2,8 @@ package com.cde.platform.config;
 
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.security.JwtFilter;
+import com.cde.platform.security.RolePermissions;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.context.annotation.*;
@@ -20,6 +22,10 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+// Turns on @PreAuthorize. Without it the annotations are inert decoration —
+// present in the source, checked by nothing, and indistinguishable from a real
+// control to anyone reading the code.
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
@@ -118,12 +124,21 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * The principal carries its permissions, not only its role.
+     *
+     * <p>{@code .roles(...)} was granting a single {@code ROLE_} authority, so
+     * the permission each endpoint documents as its requirement was checkable
+     * nowhere — the only real gate was "is this request authenticated". The
+     * authorities now include both, so a rule written against a role and a
+     * rule written against a permission both resolve.
+     */
     @Bean
     public UserDetailsService userDetailsService() {
         return username -> userRepo.findByUsername(username)
             .map(u -> User.withUsername(u.getUsername())
                 .password(u.getPassword())
-                .roles(u.getRole().name())
+                .authorities(RolePermissions.authoritiesFor(u.getRole()))
                 .build())
             .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
     }

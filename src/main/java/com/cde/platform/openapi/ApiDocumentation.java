@@ -20,6 +20,7 @@ public final class ApiDocumentation {
 
     public static final String TAG_AUTHENTICATION = "Authentication";
     public static final String TAG_PROJECTS = "Projects";
+    public static final String TAG_CDE = "Common Data Environment";
     public static final String TAG_DOCUMENTS = "Documents";
     public static final String TAG_DOCUMENT_VERSIONS = "Document versions";
     public static final String TAG_ANNOTATIONS = "Annotations";

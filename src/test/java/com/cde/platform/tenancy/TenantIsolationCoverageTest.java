@@ -30,7 +30,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 class TenantIsolationCoverageTest {
 
-    private static final String ENTITY_PACKAGE = "com.cde.platform.model";
+    /**
+     * The whole application, not one package.
+     *
+     * <p>This was scoped to {@code com.cde.platform.model}, which is where the
+     * first seven entities happened to live. The four CDE entities are in
+     * {@code com.cde.platform.cde.model} and were therefore outside every
+     * assertion below — the suite reported full coverage of tenant scoping
+     * while never looking at the tables holding the contractual record. That is
+     * the exact failure this class exists to prevent, so the scan follows the
+     * entities rather than a package someone remembered to add.
+     */
+    private static final String ENTITY_PACKAGE = "com.cde.platform";
 
     /**
      * The one entity that is legitimately not tenant-scoped: it is the table
@@ -60,7 +71,7 @@ class TenantIsolationCoverageTest {
     void entityScanIsNotVacuous() {
         // Without this, a broken scanner would make every assertion below pass
         // over an empty list — the most comfortable kind of green.
-        assertThat(allEntities()).hasSizeGreaterThanOrEqualTo(8);
+        assertThat(allEntities()).hasSizeGreaterThanOrEqualTo(12);
     }
 
     @Test

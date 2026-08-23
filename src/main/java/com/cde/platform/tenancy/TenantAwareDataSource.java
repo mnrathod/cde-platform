@@ -74,7 +74,8 @@ public class TenantAwareDataSource extends DelegatingDataSource {
     private Connection wrap(Connection connection) throws SQLException {
         try {
             assumeApplicationRole(connection);
-            applyTenantSetting(connection);
+            String applied = applyTenantSetting(connection);
+            return proxy(connection, applied);
         } catch (SQLException e) {
             // A connection that could not be constrained must not be handed
             // out: it would run as the unrestricted role with no tenant filter,
@@ -82,7 +83,6 @@ public class TenantAwareDataSource extends DelegatingDataSource {
             closeQuietly(connection);
             throw e;
         }
-        return proxy(connection);
     }
 
     private void assumeApplicationRole(Connection connection) throws SQLException {
@@ -95,29 +95,38 @@ public class TenantAwareDataSource extends DelegatingDataSource {
         }
     }
 
-    private void applyTenantSetting(Connection connection) throws SQLException {
+    /**
+     * @return the value written, so the caller can tell later whether the
+     *         connection has drifted from the currently bound tenant.
+     */
+    private String applyTenantSetting(Connection connection) throws SQLException {
+        String tenant = currentTenant();
         // set_config rather than SET, because SET takes no parameter marker and
         // would mean interpolating the tenant id into SQL.
         try (PreparedStatement statement =
                  connection.prepareStatement("SELECT set_config(?, ?, false)")) {
             statement.setString(1, TENANT_SETTING);
-            statement.setString(2, TenantContext.currentTenantId()
-                .map(String::valueOf)
-                // Empty rather than null: set_config rejects null for a
-                // non-null-able setting. The policies wrap the read in NULLIF
-                // because ''::BIGINT raises rather than yielding NULL, so the
-                // comparison ends up NULL and matches nothing — the
-                // fail-closed path.
-                .orElse(""));
+            statement.setString(2, tenant);
             statement.execute();
         }
+        return tenant;
     }
 
-    private Connection proxy(Connection connection) {
+    /**
+     * Empty rather than null: set_config rejects null for a non-nullable
+     * setting. The policies wrap the read in NULLIF because {@code ''::BIGINT}
+     * raises rather than yielding NULL, so the comparison ends up NULL and
+     * matches nothing — the fail-closed path.
+     */
+    private static String currentTenant() {
+        return TenantContext.currentTenantId().map(String::valueOf).orElse("");
+    }
+
+    private Connection proxy(Connection connection, String appliedTenant) {
         return (Connection) Proxy.newProxyInstance(
             Connection.class.getClassLoader(),
             new Class<?>[]{Connection.class},
-            new ResettingConnectionHandler(connection));
+            new ResettingConnectionHandler(connection, appliedTenant));
     }
 
     private static void closeQuietly(Connection connection) {
@@ -129,26 +138,66 @@ public class TenantAwareDataSource extends DelegatingDataSource {
     }
 
     /**
-     * Clears the session state this class established, immediately before the
-     * connection goes back to the pool.
+     * Keeps the connection's tenant in step with the bound one, and clears the
+     * session state immediately before the connection goes back to the pool.
      */
     private final class ResettingConnectionHandler implements InvocationHandler {
 
+        /**
+         * The calls that are about to send SQL. Re-checking the tenant here
+         * rather than only on acquisition is what makes the ordering
+         * irrelevant.
+         */
+        private static final java.util.Set<String> ISSUES_SQL =
+            java.util.Set.of("createStatement", "prepareStatement", "prepareCall");
+
         private final Connection delegate;
 
-        private ResettingConnectionHandler(Connection delegate) {
+        /** What {@code app.tenant_id} currently holds on this connection. */
+        private String appliedTenant;
+
+        private ResettingConnectionHandler(Connection delegate, String appliedTenant) {
             this.delegate = delegate;
+            this.appliedTenant = appliedTenant;
         }
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             if ("close".equals(method.getName())) {
                 resetSessionState();
+            } else if (ISSUES_SQL.contains(method.getName())) {
+                synchroniseTenant();
             }
             try {
                 return method.invoke(delegate, args);
             } catch (InvocationTargetException e) {
                 throw e.getTargetException();
+            }
+        }
+
+        /**
+         * Scoping a connection only when it is acquired assumes the tenant is
+         * always known before the first query. Two flows cannot satisfy that,
+         * because for them the tenant <em>is</em> the answer to a query:
+         * registration resolves the default tenant, and sign-in resolves the
+         * tenant from the username. With {@code open-in-view} the connection
+         * that answered those questions stays with the request, so everything
+         * after ran unscoped — registration was refused by the policy, and
+         * sign-in read no rows and reported bad credentials.
+         *
+         * <p>Re-applying at statement time removes the ordering requirement
+         * altogether rather than asking every future caller to respect it. It
+         * costs nothing in the ordinary case: the tenant is bound before the
+         * first query, so the values match and no statement is sent.
+         */
+        private void synchroniseTenant() throws SQLException {
+            String current = currentTenant();
+            if (!current.equals(appliedTenant)) {
+                // Assigned only after it succeeds. A failure here must leave
+                // the connection recorded as still carrying the old value, so
+                // the next attempt tries again rather than assuming a scope it
+                // does not have.
+                appliedTenant = applyTenantSetting(delegate);
             }
         }
 

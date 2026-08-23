@@ -98,10 +98,10 @@ public enum ContainerState {
      */
     public String requiredPermission() {
         return switch (this) {
-            case WORK_IN_PROGRESS -> "container:reject";
-            case SHARED -> "container:share";
-            case PUBLISHED -> "container:publish";
-            case ARCHIVED -> "container:archive";
+            case WORK_IN_PROGRESS -> ContainerPermission.REJECT;
+            case SHARED -> ContainerPermission.SHARE;
+            case PUBLISHED -> ContainerPermission.PUBLISH;
+            case ARCHIVED -> ContainerPermission.ARCHIVE;
         };
     }
 }

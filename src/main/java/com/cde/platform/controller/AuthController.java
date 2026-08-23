@@ -79,12 +79,14 @@ public class AuthController {
         operationId = "register",
         summary = "Create an account in the default tenant",
         description = """
-            Self-service registration. The account is created in the deployment's default tenant \
-            with the `ENGINEER` role unless another is asked for.
+            Self-service registration. The account is always created in the deployment's default \
+            tenant with the `ENGINEER` role.
 
-            A tenant cannot be chosen here. Accepting a tenant identifier would let any caller \
-            create an account inside another organisation; joining a specific tenant is either an \
-            administrative action or home-realm discovery by verified email domain.
+            Neither the tenant nor the role can be chosen here, for the same reason in both \
+            cases: this endpoint requires no credential, so anything it accepts is something a \
+            stranger can assert about themselves. A role is granted by an administrator; \
+            joining a specific tenant is an administrative action or home-realm discovery by \
+            verified email domain. The reply states the role actually assigned.
 
             No permission is required — this endpoint is how a caller gets one.""")
     @ApiResponse(responseCode = "201",
@@ -137,7 +139,8 @@ public class AuthController {
                 .username(req.username())
                 .email(req.email())
                 .password(encoder.encode(req.password()))
-                .role(req.role() != null ? req.role() : User.Role.ENGINEER)
+                // Not negotiable by the caller: see RegisterRequest.
+                .role(User.Role.ENGINEER)
                 .tenantId(defaultTenant.getId())
                 .build();
             userRepo.save(user);

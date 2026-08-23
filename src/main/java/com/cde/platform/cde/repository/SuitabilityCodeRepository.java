@@ -8,4 +8,6 @@ import java.util.List;
 public interface SuitabilityCodeRepository extends JpaRepository<SuitabilityCode, Long> {
 
     List<SuitabilityCode> findByProjectIdAndActiveTrueOrderByDisplayOrderAsc(Long projectId);
+
+    boolean existsByProjectIdAndCode(Long projectId, String code);
 }

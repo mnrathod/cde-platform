@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.test.context.support.WithMockUser;
 
 import java.util.List;
 
@@ -37,6 +38,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * a migration. What is asserted is that the database refuses, whoever asks.
  */
 @SpringBootTest
+// Every lifecycle operation demands its own permission, so a test calling the
+// service directly has to hold them — as this one does, because what it is
+// about is the state machine and the database, not the authorisation. That the
+// permissions are enforced at all is asserted in
+// ContainerPermissionEnforcementTest, and asserted by their absence: without
+// this annotation every test here fails on missing credentials, which is the
+// check working rather than a fixture problem.
+@WithMockUser(username = "cde-lifecycle-test",
+              authorities = { "container:read", "container:write", "container:share",
+                              "container:publish", "container:reject", "container:archive" })
 class ContainerLifecycleIntegrationTest {
 
     @Autowired ContainerLifecycleService            lifecycle;

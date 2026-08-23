@@ -1,5 +1,8 @@
 package com.cde.platform.exception;
 
+import com.cde.platform.cde.domain.RevisionAlreadySupersededException;
+import com.cde.platform.cde.domain.StateTransitionNotPermittedException;
+import com.cde.platform.cde.domain.SuitabilityCodeNotValidInStateException;
 import com.cde.platform.openapi.ApiDocumentation;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -124,6 +127,26 @@ public class GlobalExceptionHandler {
         return ApiProblem.of(HttpStatus.BAD_REQUEST, "malformed-request-body", "Malformed request body",
             "The request body could not be read — check it is valid JSON and that each field holds an accepted value.",
             request);
+    }
+
+    /**
+     * The CDE state machine refusing a move, and the two collisions that go
+     * with it.
+     *
+     * <p>Each of these messages is authored in the domain for a person to read
+     * — it names the states or the revision involved and nothing else — so it
+     * is echoed rather than replaced with a generic line. They are not logged
+     * as errors: being told that a published container cannot be edited is the
+     * control working, not a fault.
+     */
+    @ExceptionHandler({
+        StateTransitionNotPermittedException.class,
+        SuitabilityCodeNotValidInStateException.class,
+        RevisionAlreadySupersededException.class,
+        ResourceConflictException.class })
+    public ProblemDetail handleConflict(RuntimeException ex, HttpServletRequest request) {
+        return ApiProblem.of(HttpStatus.CONFLICT, "state-conflict", "Conflict",
+            ex.getMessage(), request);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

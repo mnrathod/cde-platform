@@ -37,6 +37,11 @@ tags:
 - description: Projects group documents and carry the ownership and phase a document
     inherits.
   name: Projects
+- description: "Information containers, their revisions and the gated transitions\
+    \ between work in progress, shared, published and archived. A container's identity\
+    \ is separate from any revision of its content, and a published revision is never\
+    \ edited — it is superseded by a new one and archived, with the lineage kept."
+  name: Common Data Environment
 - description: "Upload, download, metadata and deletion of documents held in a project."
   name: Documents
 - description: "The revision history of a document. Every operation that rewrites\
@@ -1144,9 +1149,9 @@ paths:
   /api/auth/register:
     post:
       description: |-
-        Self-service registration. The account is created in the deployment's default tenant with the `ENGINEER` role unless another is asked for.
+        Self-service registration. The account is always created in the deployment's default tenant with the `ENGINEER` role.
 
-        A tenant cannot be chosen here. Accepting a tenant identifier would let any caller create an account inside another organisation; joining a specific tenant is either an administrative action or home-realm discovery by verified email domain.
+        Neither the tenant nor the role can be chosen here, for the same reason in both cases: this endpoint requires no credential, so anything it accepts is something a stranger can assert about themselves. A role is granted by an administrator; joining a specific tenant is an administrative action or home-realm discovery by verified email domain. The reply states the role actually assigned.
 
         No permission is required — this endpoint is how a caller gets one.
       operationId: register
@@ -1209,6 +1214,1003 @@ paths:
       summary: Create an account in the default tenant
       tags:
       - Authentication
+  /api/cde/containers/{containerId}:
+    get:
+      description: |-
+        Requires the `container:read` permission.
+
+        A container in another tenant reports `404`, not `403`.
+      operationId: getInformationContainer
+      parameters:
+      - description: Identifier of the container.
+        example: 1024
+        in: path
+        name: containerId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerResponse"
+                example: null
+          description: The container.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No container with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Read one information container
+      tags:
+      - Common Data Environment
+  /api/cde/containers/{containerId}/revisions:
+    get:
+      description: |-
+        Every revision the container has ever had, oldest first, including archived ones. Superseded revisions are never removed: a published revision is the contractual record and stays retrievable for the operational life of the asset.
+
+        Requires the `container:read` permission.
+      operationId: listContainerRevisions
+      parameters:
+      - description: Identifier of the container.
+        example: 1024
+        in: path
+        name: containerId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                example: null
+                items:
+                  $ref: "#/components/schemas/RevisionResponse"
+                  example: null
+          description: "The container's revisions, oldest first."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No container with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: List a container's revisions
+      tags:
+      - Common Data Environment
+    post:
+      description: |-
+        Creates a revision in work in progress — visible to the originating task team, and not yet issued for coordination or approved for use.
+
+        Supplying `supersedesRevisionId` supersedes the container's published revision: the new revision inherits its content, and the superseded one is archived in the same transaction, with the lineage recorded in both directions. This is the only way published information changes. Superseding requires both `container:write` and `container:archive`, and is refused if that revision is not published or has already been superseded.
+
+        Requires the `container:write` permission.
+      operationId: createContainerRevision
+      parameters:
+      - description: Identifier of the container.
+        example: 1024
+        in: path
+        name: containerId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisionRequest"
+              example: null
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionResponse"
+                example: null
+          description: The revision as created.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No such container, or no such revision of it."
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The container already has a revision with that code, or the\
+            \ revision being superseded is not published or is already superseded."
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The revision details failed validation — a blank code, or\
+            \ one over its length limit."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Issue a new revision of a container
+      tags:
+      - Common Data Environment
+  /api/cde/projects/{projectId}/containers:
+    get:
+      description: |-
+        Returns every container in the project, ordered by the database's natural order.
+
+        Requires the `container:read` permission.
+
+        A project belonging to another tenant reports `404`, so the response does not confirm that the id exists elsewhere.
+      operationId: listInformationContainers
+      parameters:
+      - description: Identifier of the project.
+        example: 42
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                example: null
+                items:
+                  $ref: "#/components/schemas/ContainerResponse"
+                  example: null
+          description: The project's containers.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No project with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: List a project's information containers
+      tags:
+      - Common Data Environment
+    post:
+      description: |-
+        Creates the container's identity. It has no content and no state until a revision is issued for it — see `createContainerRevision`.
+
+        The container is created in the caller's tenant and attributed to the caller; neither can be supplied in the body.
+
+        Requires the `container:write` permission.
+      operationId: createInformationContainer
+      parameters:
+      - description: Identifier of the project.
+        example: 42
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContainerRequest"
+              example: null
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerResponse"
+                example: null
+          description: The container as created.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No project with that id is visible to the caller.
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The project already has a container with that reference.
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The container details failed validation — a blank reference,\
+            \ or one over its length limit."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Create an information container
+      tags:
+      - Common Data Environment
+  /api/cde/projects/{projectId}/suitability-codes:
+    get:
+      description: |-
+        The codes currently offered on the project, in the order they should be presented. Retired codes are not returned: they stay in the database so that revisions already carrying one keep their meaning, but they are no longer offered for new use.
+
+        A project that has defined none returns an empty list. Nothing is seeded — a new project starts with no codes and the organisation populates its own.
+
+        Requires the `container:read` permission.
+      operationId: listSuitabilityCodes
+      parameters:
+      - description: Identifier of the project.
+        example: 42
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                example: null
+                items:
+                  $ref: "#/components/schemas/SuitabilityCodeResponse"
+                  example: null
+          description: "The project's active codes, in display order."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No project with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: List a project's suitability codes
+      tags:
+      - Common Data Environment
+    post:
+      description: |-
+        Adds a code to the project's own list.
+
+        Setting `validInState` restricts the code to revisions in that state, which is what stops information being labelled approved for construction while it is still unverified work in progress. Leaving it unset allows the code in any state.
+
+        Requires the `container:write` permission.
+      operationId: createSuitabilityCode
+      parameters:
+      - description: Identifier of the project.
+        example: 42
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuitabilityCodeRequest"
+              example: null
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuitabilityCodeResponse"
+                example: null
+          description: The code as created.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No project with that id is visible to the caller.
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The project already defines that code.
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The code failed validation — a blank code or description,\
+            \ or one over its length limit."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Define a suitability code on a project
+      tags:
+      - Common Data Environment
+  /api/cde/revisions/{revisionId}:
+    get:
+      description: |-
+        Requires the `container:read` permission.
+
+        A revision in another tenant reports `404`, not `403`.
+      operationId: getContainerRevision
+      parameters:
+      - description: Identifier of the revision.
+        example: 2049
+        in: path
+        name: revisionId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionResponse"
+                example: null
+          description: The revision.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No revision with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Read one revision
+      tags:
+      - Common Data Environment
+  /api/cde/revisions/{revisionId}/suitability-code:
+    put:
+      description: |-
+        Marks what the information may be relied on for, using a code the project defined for itself. Send a null `suitabilityCodeId` to clear it.
+
+        Idempotent: setting the same code twice leaves the revision as it was.
+
+        Only while the revision is still work in progress or shared. After publication the label is part of the frozen record, and the request is refused with `409` — the way to change it is a new revision that supersedes this one.
+
+        Requires the `container:write` permission.
+      operationId: setRevisionSuitabilityCode
+      parameters:
+      - description: Identifier of the revision.
+        example: 2049
+        in: path
+        name: revisionId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuitabilityAssignmentRequest"
+              example: null
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionResponse"
+                example: null
+          description: The revision as it now stands.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No such revision, or no such suitability code."
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The revision is published or archived, or the code does not\
+            \ apply to information in the revision's current state."
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request body could not be validated.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Set a revision's suitability code
+      tags:
+      - Common Data Environment
+  /api/cde/revisions/{revisionId}/transitions:
+    get:
+      description: |-
+        Every state change the revision has been through, oldest first, with who performed it, when, and why.
+
+        The history is append-only in the database rather than by convention: the application holds no grant to update or delete a row in this table, so no code path can rewrite it however privileged it is.
+
+        Requires the `container:read` permission.
+      operationId: listRevisionTransitions
+      parameters:
+      - description: Identifier of the revision.
+        example: 2049
+        in: path
+        name: revisionId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                example: null
+                items:
+                  $ref: "#/components/schemas/ContainerTransitionResponse"
+                  example: null
+          description: "The transition history, oldest first."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No revision with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Read a revision's transition history
+      tags:
+      - Common Data Environment
+    post:
+      description: |-
+        The only way a revision's state changes. Which moves are legal depends on where it is now:
+
+        - **work in progress** may be shared, or archived if the work is abandoned;
+        - **shared** may be published, rejected back to work in progress, or archived;
+        - **published** may only be archived, which happens as part of being superseded;
+        - **archived** is terminal.
+
+        Anything else returns `409` with a message naming both states.
+
+        Each target state requires its own permission — `container:share`, `container:publish`, `container:reject` or `container:archive` — and the check is made against the state actually requested, not against the endpoint. Holding one of them is enough to reach the endpoint; it is not enough to make a move you lack the permission for.
+
+        Publishing records the caller as the authorising party and the reason as the authorisation. From that point the revision's content is frozen: the database refuses any edit or deletion, and the way to change published information is a new revision that supersedes it.
+      operationId: transitionContainerRevision
+      parameters:
+      - description: Identifier of the revision.
+        example: 2049
+        in: path
+        name: revisionId
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionRequest"
+              example: null
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionTransitionResult"
+                example: null
+          description: "The revision after the change, and the transition recorded\
+            \ for it."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No revision with that id is visible to the caller.
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The state machine does not allow that move from the revision's
+            current state.
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request failed validation — a missing target state, or\
+            \ a blank reason."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Move a revision to a new state
+      tags:
+      - Common Data Environment
   /api/compare:
     post:
       description: |-
@@ -5051,6 +6053,140 @@ components:
           example: true
       required:
       - success
+    ContainerRequest:
+      description: "The identity of a piece of project information, independent of\
+        \ any revision of its content."
+      example: null
+      properties:
+        containerReference:
+          type:
+          - string
+          description: "The assembled, delimited identifier people read and search\
+            \ on. The field pattern and delimiter are the project's own convention,\
+            \ so this is validated for length and uniqueness here rather than against\
+            \ a shipped format."
+          example: PRJ-XYZ-ZZ-00-DR-A-0001
+          maxLength: 255
+          minLength: 1
+        namingFields:
+          type:
+          - object
+          additionalProperties:
+            type:
+            - string
+            example: null
+          description: "The individual naming fields, keyed by the name the project's\
+            \ convention gives each one. Free-form because the field set differs between\
+            \ organisations; omit it and the reference stands alone."
+          example:
+            project: PRJ
+            originator: XYZ
+            volume: ZZ
+            level: "00"
+            type: DR
+            role: A
+            number: "0001"
+      required:
+      - containerReference
+    ContainerResponse:
+      description: |-
+        A container as stored.
+
+        There is no state on a container, and that is not an omission: state belongs to its revisions, and a container in normal use has several at once — a published revision that is the current contractual record, and a work-in-progress revision that will supersede it. Reporting a single state here would have to pick one of them and would misrepresent the other.
+      example: null
+      properties:
+        containerReference:
+          type:
+          - string
+          description: "The assembled, delimited identifier."
+          example: PRJ-XYZ-ZZ-00-DR-A-0001
+        createdAt:
+          type:
+          - string
+          format: date-time
+          description: "When the container was created, in the server's time zone."
+          example: 2026-03-04T09:15:00
+        createdBy:
+          type:
+          - string
+          description: Username of whoever created the container.
+          example: a.surveyor
+        id:
+          type:
+          - integer
+          format: int64
+          description: Identifier of the container.
+          example: 1024
+        namingFields:
+          type:
+          - object
+          additionalProperties:
+            type:
+            - string
+            example: null
+          description: The individual naming fields as supplied.
+          example:
+            project: PRJ
+            originator: XYZ
+            volume: ZZ
+            level: "00"
+            type: DR
+            role: A
+            number: "0001"
+        projectId:
+          type:
+          - integer
+          format: int64
+          description: The project the container belongs to.
+          example: 42
+    ContainerTransitionResponse:
+      description: "One recorded state change: who moved a revision, from what to\
+        \ what, when, and why. Append-only — the application holds no grant to rewrite\
+        \ or remove one."
+      example: null
+      properties:
+        fromState:
+          type:
+          - string
+          description: The state the revision was in.
+          enum:
+          - WORK_IN_PROGRESS
+          - SHARED
+          - PUBLISHED
+          - ARCHIVED
+          example: WORK_IN_PROGRESS
+        id:
+          type:
+          - integer
+          format: int64
+          description: Identifier of the transition record.
+          example: 8801
+        performedAt:
+          type:
+          - string
+          format: date-time
+          description: When it was performed.
+          example: 2026-03-06T11:02:00
+        performedBy:
+          type:
+          - string
+          description: Username of whoever performed the transition.
+          example: a.surveyor
+        reason:
+          type:
+          - string
+          description: The reason given.
+          example: Issued for coordination.
+        toState:
+          type:
+          - string
+          description: The state it moved to.
+          enum:
+          - WORK_IN_PROGRESS
+          - SHARED
+          - PUBLISHED
+          - ARCHIVED
+          example: SHARED
     ConverterStatusResponse:
       description: "Whether the document conversion service is reachable. The viewer\
         \ asks before offering conversion-dependent actions, so it can say why something\
@@ -6410,17 +7546,6 @@ components:
           maxLength: 128
           minLength: 12
           writeOnly: true
-        role:
-          type:
-          - string
-          description: "Role to create the account with. Defaults to `ENGINEER` when\
-            \ omitted, which is the least-privileged role that can do useful work."
-          enum:
-          - ADMIN
-          - ENGINEER
-          - REVIEWER
-          - VIEWER
-          example: ENGINEER
         username:
           type:
           - string
@@ -6503,6 +7628,134 @@ components:
       - content
       - createdAt
       - id
+    RevisionRequest:
+      description: |-
+        A new revision of a container, created in work in progress.
+
+        Supply `supersedesRevisionId` to issue a revision that replaces the container's current published one. That is the only way published information changes: the superseded revision is archived rather than edited, and stays retrievable.
+      example: null
+      properties:
+        revisionCode:
+          type:
+          - string
+          description: "The revision identifier, in the project's own scheme — preliminary\
+            \ or contractual. Validated for length and uniqueness within the container,\
+            \ not against a shipped format."
+          example: P01.01
+          maxLength: 20
+          minLength: 1
+        supersedesRevisionId:
+          type:
+          - integer
+          format: int64
+          description: "The published revision this one replaces. Omit for the first\
+            \ revision of a container, or for a further revision that does not supersede\
+            \ anything."
+          example: 2048
+      required:
+      - revisionCode
+    RevisionResponse:
+      description: One revision of a container.
+      example: null
+      properties:
+        approvalReason:
+          type:
+          - string
+          description: The authorisation recorded at publication.
+          example: Approved for construction.
+        containerId:
+          type:
+          - integer
+          format: int64
+          description: The container this revision belongs to.
+          example: 1024
+        createdAt:
+          type:
+          - string
+          format: date-time
+          description: When the revision was created.
+          example: 2026-03-04T09:15:00
+        createdBy:
+          type:
+          - string
+          description: Username of whoever created the revision.
+          example: a.surveyor
+        currentPublished:
+          type:
+          - boolean
+          description: "Whether this revision is the container's current authorised\
+            \ expression — published and not yet superseded. At most one revision\
+            \ of a container can be, and the database enforces that."
+          example: false
+        documentId:
+          type:
+          - integer
+          format: int64
+          description: "The document holding this revision's content, where one is\
+            \ linked."
+          example: 512
+        id:
+          type:
+          - integer
+          format: int64
+          description: Identifier of the revision.
+          example: 2049
+        publishedAt:
+          type:
+          - string
+          format: date-time
+          description: When the revision was published. Null until published.
+          example: 2026-03-11T16:40:00
+        publishedBy:
+          type:
+          - string
+          description: Username of whoever authorised publication. Null until published.
+          example: l.reviewer
+        revisionCode:
+          type:
+          - string
+          description: The revision identifier in the project's scheme.
+          example: P01.02
+        state:
+          type:
+          - string
+          description: The revision's current state.
+          enum:
+          - WORK_IN_PROGRESS
+          - SHARED
+          - PUBLISHED
+          - ARCHIVED
+          example: SHARED
+        suitabilityCode:
+          type:
+          - string
+          description: "The suitability code applied, if any."
+          example: S2
+        supersededByRevisionCode:
+          type:
+          - string
+          description: "The revision that replaced this one, by its code."
+          example: C01
+        supersedesRevisionCode:
+          type:
+          - string
+          description: "The revision this one replaced, by its code."
+          example: P01.01
+    RevisionTransitionResult:
+      description: "The outcome of a state change: the revision as it now stands,\
+        \ and the transition recorded for it. Both, because a client needs the new\
+        \ state to render and the transition to append to a history it is already\
+        \ showing."
+      example: null
+      properties:
+        revision:
+          $ref: "#/components/schemas/RevisionResponse"
+          description: The revision after the change.
+          example: null
+        transition:
+          $ref: "#/components/schemas/ContainerTransitionResponse"
+          description: The transition that was recorded.
+          example: null
     SignatureRequest:
       description: Optional context recorded alongside a signature. The signer's identity
         comes from the authenticated principal and is not settable here.
@@ -6668,6 +7921,111 @@ components:
       - embedded
       - signature
       - version
+    SuitabilityAssignmentRequest:
+      description: The suitability code to apply to a revision — what the information
+        may be relied on for.
+      example: null
+      properties:
+        suitabilityCodeId:
+          type:
+          - integer
+          format: int64
+          description: "The code to apply, from the project's own list. Send null\
+            \ to clear the current one."
+          example: 7
+    SuitabilityCodeRequest:
+      description: A suitability code the project defines for itself — what information
+        carrying it may be relied on for.
+      example: null
+      properties:
+        code:
+          type:
+          - string
+          description: The short code as the organisation writes it.
+          example: S2
+          maxLength: 20
+          minLength: 1
+        description:
+          type:
+          - string
+          description: "What the code means, in the project's own words."
+          example: Suitable for information
+          maxLength: 255
+          minLength: 1
+        displayOrder:
+          type:
+          - integer
+          format: int32
+          default: "0"
+          description: Where the code sits in the list the user picks from. Codes
+            with the same order are returned in an unspecified order relative to each
+            other.
+          example: 20
+        validInState:
+          type:
+          - string
+          description: |-
+            The container state this code may be applied in. Omit it and the code applies in any state.
+
+            Setting it is what stops a drawing being marked approved for construction while it is still unverified work in progress — which is most of the reason the list exists.
+          enum:
+          - WORK_IN_PROGRESS
+          - SHARED
+          - PUBLISHED
+          - ARCHIVED
+          example: SHARED
+      required:
+      - code
+      - description
+    SuitabilityCodeResponse:
+      description: A suitability code as stored.
+      example: null
+      properties:
+        active:
+          type:
+          - boolean
+          description: "Whether the code is still offered. Codes are retired rather\
+            \ than deleted, so revisions that already carry one keep their meaning."
+          example: true
+        code:
+          type:
+          - string
+          description: The short code.
+          example: S2
+        description:
+          type:
+          - string
+          description: What it means.
+          example: Suitable for information
+        displayOrder:
+          type:
+          - integer
+          format: int32
+          description: Where it sits in the list.
+          example: 20
+        id:
+          type:
+          - integer
+          format: int64
+          description: Identifier of the code.
+          example: 7
+        projectId:
+          type:
+          - integer
+          format: int64
+          description: The project the code belongs to. Null for a code defined across
+            the whole tenant.
+          example: 42
+        validInState:
+          type:
+          - string
+          description: "The container state it may be applied in, or null for any."
+          enum:
+          - WORK_IN_PROGRESS
+          - SHARED
+          - PUBLISHED
+          - ARCHIVED
+          example: SHARED
     SvgPayload:
       description: "A drawing, as SVG markup ready to render. Used for uploaded SVG\
         \ and for CAD converted to it."
@@ -6881,6 +8239,37 @@ components:
           example: true
       required:
       - success
+    TransitionRequest:
+      description: |-
+        A move to a new state.
+
+        This is the only way a revision's state changes; there is no writable state field. Which moves are legal depends on the current state — work in progress may be shared or archived, shared may be published, rejected back to work in progress, or archived, and published may only be superseded. An illegal move returns `409`.
+      example: null
+      properties:
+        reason:
+          type:
+          - string
+          description: "Why. Required on every transition, including the ones where\
+            \ it might feel like ceremony: this is the text that answers \"on whose\
+            \ authority, and why\" years later, and a transition history of blank\
+            \ reasons is not an audit trail. On a move to `PUBLISHED` it is recorded\
+            \ as the authorisation."
+          example: Checked against the coordination model and approved for construction.
+          maxLength: 1000
+          minLength: 1
+        toState:
+          type:
+          - string
+          description: The state to move to.
+          enum:
+          - WORK_IN_PROGRESS
+          - SHARED
+          - PUBLISHED
+          - ARCHIVED
+          example: SHARED
+      required:
+      - reason
+      - toState
     UnopenablePayload:
       description: |-
         The document exists but this viewer cannot open it, and why. Returned with `200` — read `type` rather than the status.

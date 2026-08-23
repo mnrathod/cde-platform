@@ -1,15 +1,19 @@
 package com.cde.platform.cde.service;
 
 import com.cde.platform.cde.domain.ContainerState;
+import com.cde.platform.cde.domain.RevisionAlreadySupersededException;
 import com.cde.platform.cde.domain.StateTransitionNotPermittedException;
+import com.cde.platform.cde.domain.SuitabilityCodeNotValidInStateException;
 import com.cde.platform.cde.model.ContainerRevision;
 import com.cde.platform.cde.model.ContainerStateTransition;
 import com.cde.platform.cde.model.InformationContainer;
+import com.cde.platform.cde.model.SuitabilityCode;
 import com.cde.platform.cde.repository.ContainerRevisionRepository;
 import com.cde.platform.cde.repository.ContainerStateTransitionRepository;
 import com.cde.platform.model.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +33,13 @@ import java.util.List;
  * <p>Every operation records a transition row in the same transaction as the
  * change. Not afterwards, and not on a best-effort listener: an audit trail
  * that can be absent for a change that succeeded is not an audit trail.
+ *
+ * <p>The permission checks sit here rather than on the controllers, for the
+ * same reason tenant isolation sits in Row-Level Security rather than in
+ * repository methods: a rule enforced at the edge holds only for callers who
+ * come through that edge. A scheduled job, a message consumer or next year's
+ * second controller would each have to remember, and the cost of one that
+ * forgets is an unauthorised signature on the contractual record.
  */
 @Service
 public class ContainerLifecycleService {
@@ -47,6 +58,7 @@ public class ContainerLifecycleService {
     /**
      * Creates the first revision of a container, in work in progress.
      */
+    @PreAuthorize("hasAuthority('container:write')")
     @Transactional
     public ContainerRevision startWorkInProgress(InformationContainer container,
                                                  String revisionCode,
@@ -70,6 +82,7 @@ public class ContainerLifecycleService {
      * issued for coordination that is mistaken for information approved for use
      * is how unapproved design ends up built.
      */
+    @PreAuthorize("hasAuthority('container:share')")
     @Transactional
     public ContainerRevision share(ContainerRevision revision, User checker, String reason) {
         return transition(revision, ContainerState.SHARED, checker, reason);
@@ -78,6 +91,7 @@ public class ContainerLifecycleService {
     /**
      * Returns a shared revision to its author for rework.
      */
+    @PreAuthorize("hasAuthority('container:reject')")
     @Transactional
     public ContainerRevision reject(ContainerRevision revision, User reviewer, String reason) {
         if (reason == null || reason.isBlank()) {
@@ -94,6 +108,7 @@ public class ContainerLifecycleService {
      *                       revision is the contractual record, and a database
      *                       CHECK constraint refuses one without an approver.
      */
+    @PreAuthorize("hasAuthority('container:publish')")
     @Transactional
     public ContainerRevision publish(ContainerRevision revision, User approver, String approvalReason) {
         if (approver == null) {
@@ -115,7 +130,13 @@ public class ContainerLifecycleService {
      * revision is not edited and not removed — it is archived, and remains
      * retrievable for as long as the asset exists. Lineage is written in both
      * directions so it can be walked from either end.
+     *
+     * <p>Both permissions are demanded, and both are named rather than left to
+     * be inferred from the role mapping: this issues a revision and retires
+     * one, and a role that gains the right to originate information should not
+     * silently gain the right to retire the contractual record with it.
      */
+    @PreAuthorize("hasAuthority('container:write') and hasAuthority('container:archive')")
     @Transactional
     public ContainerRevision supersede(ContainerRevision publishedRevision,
                                        String newRevisionCode,
@@ -125,9 +146,9 @@ public class ContainerLifecycleService {
                 publishedRevision.getState(), ContainerState.ARCHIVED);
         }
         if (publishedRevision.getSupersededBy() != null) {
-            throw new IllegalStateException(
-                "Revision " + publishedRevision.getRevisionCode()
-                + " has already been superseded by " + publishedRevision.getSupersededBy().getRevisionCode());
+            throw new RevisionAlreadySupersededException(
+                publishedRevision.getRevisionCode(),
+                publishedRevision.getSupersededBy().getRevisionCode());
         }
 
         ContainerRevision replacement = revisionRepository.save(ContainerRevision.builder()
@@ -161,9 +182,45 @@ public class ContainerLifecycleService {
      * Archives a revision that was never published — abandoned work in progress,
      * or a shared revision that will not proceed.
      */
+    @PreAuthorize("hasAuthority('container:archive')")
     @Transactional
     public ContainerRevision archive(ContainerRevision revision, User actor, String reason) {
         return transition(revision, ContainerState.ARCHIVED, actor, reason);
+    }
+
+    /**
+     * Marks a revision with the project's suitability code — what the
+     * information may be relied on for.
+     *
+     * <p>Only while the revision is still mutable. After publication the label
+     * is part of the frozen record: the database trigger refuses the update
+     * outright, and catching that as a constraint violation would report a
+     * deliberate rule as an internal fault.
+     *
+     * @param code the code to apply, or null to clear it.
+     */
+    @PreAuthorize("hasAuthority('container:write')")
+    @Transactional
+    public ContainerRevision assignSuitabilityCode(ContainerRevision revision, SuitabilityCode code) {
+        if (!revision.getState().isMutable()) {
+            throw new StateTransitionNotPermittedException(revision.getState(), revision.getState());
+        }
+        if (code != null && !code.isActive()) {
+            throw new IllegalArgumentException(
+                "Suitability code " + code.getCode() + " is no longer in use on this project.");
+        }
+        // A code restricted to one state must match the state the revision is
+        // actually in — otherwise a drawing can be labelled approved for
+        // construction while it is still unverified work in progress, which is
+        // the precise confusion the code list exists to prevent.
+        if (code != null && code.getValidInState() != null
+            && code.getValidInState() != revision.getState()) {
+            throw new SuitabilityCodeNotValidInStateException(
+                code.getCode(), code.getValidInState(), revision.getState());
+        }
+
+        revision.setSuitabilityCode(code);
+        return revisionRepository.save(revision);
     }
 
     @Transactional(readOnly = true)
