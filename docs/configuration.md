@@ -147,6 +147,67 @@ memory weakens the function rather than strengthening it.
 
 ---
 
+## Deployment tier
+
+The regulatory envelope this deployment operates in. Set at deployment, never
+by a tenant — that is what makes the ceilings below meaningful. A tenant
+administrator can tighten a setting but cannot loosen it past what the tier
+permits, because the bound is not stored anywhere a tenant can write.
+
+### `cde.security.deployment.tier`
+
+| | |
+|---|---|
+| Environment variable | `CDE_SECURITY_DEPLOYMENT_TIER` |
+| Type | enum: `commercial` \| `government` \| `defence` |
+| Default | `commercial` |
+| Secret | no |
+
+| Tier | Expiry default | Admin may set | Outbound calls |
+|---|---|---|---|
+| `commercial` | 90 days | 30–365 | permitted |
+| `government` (IRAP-scoped) | 90 days | 30–90 | **prohibited** |
+| `defence` (UK MOD / Australian Defence) | by contract | **not at all** | **prohibited** |
+
+The default is `commercial` deliberately: a deployment is never silently locked
+into a stricter posture than its operator asked for.
+
+### `cde.security.deployment.contract-password-expiry-days`
+
+| | |
+|---|---|
+| Type | int |
+| Default | none |
+| Required | **on the `defence` tier only** |
+| Secret | no |
+
+The interval fixed by contract. Required where an administrator cannot choose
+one, and ignored on the other tiers. A `defence` deployment without it **fails
+to start** — a contractual control with no configured value is not a control.
+
+### External dependencies
+
+| Property | Default |
+|---|---|
+| `cde.security.deployment.breached-password-check` | `online_api` |
+| `cde.security.deployment.ai-features` | `online_api` |
+| `cde.security.deployment.telemetry` | `online_api` |
+
+Each takes `online_api`, `local_dataset` or `disabled` — three values rather
+than a boolean, because "off" and "running on our own infrastructure" are
+genuinely different answers. An air-gapped deployment still wants
+breached-password checking; it just cannot ask anyone else to perform it.
+
+**A `government` or `defence` deployment configured with `online_api` fails to
+start.** Checked at boot rather than at first use, so the misconfiguration
+surfaces in front of whoever deployed it — not weeks later in production, as an
+outbound call the contract forbids.
+
+`disabled` on a security control requires a documented risk acceptance. It is
+not a neutral default.
+
+---
+
 ## Tenant isolation
 
 ### `cde.tenancy.application-role`
@@ -275,10 +336,11 @@ the readiness group.
 These are required by the guidelines and are **not** configurable yet. Listed
 so the gap is visible rather than discovered:
 
-- Deployment tier ceilings (`commercial` / `government` / `defence`) constraining
-  what a tenant admin may set — the `deployment_tier` column exists on `tenants`
-  and is not yet read by anything
-- Password policy: length, complexity, history, expiry, lockout
-- Compromised-password checking mode (`ONLINE_API` / `LOCAL_DATASET` / `DISABLED`)
+- Password policy beyond expiry: length, complexity, history, minimum age,
+  lockout and breach checking. The expiry **ceiling** is enforced; the policy
+  the ceiling applies to is not built.
+- The actual Have I Been Pwned client. The mode is configured and validated;
+  nothing calls it yet.
 - Storage provider selection (`azure` / `s3` / `gcs` / `local`)
-- Per-tenant AI kill switch
+- Per-tenant AI kill switch. The deployment-level mode exists; the per-tenant
+  override does not.
