@@ -44,9 +44,16 @@ public class DefaultTenantExtension implements BeforeAllCallback, BeforeEachCall
 
     @Override
     public void afterAll(ExtensionContext context) {
-        // Not cleared per-test: JUnit may run @AfterEach and @AfterAll fixture
-        // teardown that still needs to reach the database.
-        TenantContextBinder.clear();
+        // Only the outermost class clears. A @Nested class finishing must not
+        // unbind the tenant its siblings still need — and it must not do so
+        // before the enclosing class's own @AfterAll teardown, which still
+        // reaches the database.
+        //
+        // Not cleared per-test either, for the same reason: @AfterEach
+        // teardown runs after the callback would have fired.
+        if (context.getTestClass().map(type -> type.getEnclosingClass() == null).orElse(true)) {
+            TenantContextBinder.clear();
+        }
     }
 
     private void bindDefaultTenant(ExtensionContext context) {
@@ -64,10 +71,22 @@ public class DefaultTenantExtension implements BeforeAllCallback, BeforeEachCall
         });
     }
 
+    /**
+     * Walks out through enclosing classes, because {@code @Nested} classes do
+     * not carry the annotation themselves — it sits on the outer test class.
+     * Checking only the immediate class silently skipped every nested test,
+     * and the first nested class's afterAll then cleared the binding for all
+     * the ones after it.
+     */
     private boolean isSpringBootTest(ExtensionContext context) {
-        return context.getTestClass()
-            .map(testClass -> testClass.isAnnotationPresent(SpringBootTest.class))
-            .orElse(false);
+        for (Class<?> testClass = context.getTestClass().orElse(null);
+             testClass != null;
+             testClass = testClass.getEnclosingClass()) {
+            if (testClass.isAnnotationPresent(SpringBootTest.class)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Optional<ApplicationContext> springContext(ExtensionContext context) {
