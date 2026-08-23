@@ -67,7 +67,45 @@ spring:
     # rolling update is not held open by one stuck request.
     timeout-per-shutdown-phase: 25s
 
+springdoc:
+  api-docs:
+    # The specification itself is public: a client generator, a linter and a
+    # reviewer all need to read it, and it describes the shape of the API
+    # rather than any data held in it.
+    path: /api/openapi
+    version: openapi_3_1
+  swagger-ui:
+    path: /api/docs
+    # Operations grouped by tag, in the order the tags are declared, rather
+    # than alphabetically — so Authentication comes before Annotations, which
+    # is the order someone reads them in.
+    tags-sorter: as-declared
+    operations-sorter: alpha
+    # The "try it" console is a production feature only where someone has
+    # deliberately made it one. It sends real requests with real credentials
+    # from a page that also documents every endpoint, which is a different
+    # thing from publishing the specification.
+    #
+    # An empty list. springdoc serialises this key into its swagger-config as
+    # the string "[]" rather than as a JSON array — written as a list here or
+    # bound from an environment variable, the served value is the same string,
+    # so reading the config back proves nothing either way.
+    #
+    # What was verified is the rendered page: /api/docs loads all 52 operations
+    # and no "Try it out" button. A deployment that wants the console overrides
+    # this key with the methods it wants to allow.
+    supported-submit-methods: []
+  # A property with no getter is not part of the API, and a synthetic
+  # `getX()`-shaped accessor on a record is not a property either.
+  default-produces-media-type: application/json
+  writer-with-order-by-keys: true
+
 cde:
+  api:
+    # The API's own version, which moves with the contract rather than with
+    # the build. Path versioning (/api/v1) is the compatibility boundary; this
+    # records where within that boundary a given deployment sits.
+    version: 1.0.0
   jwt:
     # No default, deliberately. A signing key with a fallback value is a
     # published key — see JwtProperties, which refuses to bind a missing,

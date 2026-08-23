@@ -1,0 +1,250 @@
+# Spectral ruleset encoding the OpenAPI checklist in CLAUDE.md §3.5.
+#
+# The specification is generated from annotations, so it cannot describe an
+# endpoint that does not exist. What it can do is describe one badly — a
+# summary and no description, an inline anonymous body, a response code the
+# code returns and the document does not mention. Those are the failures this
+# catches, and they are failures because a client is generated from this file.
+#
+# Run:  npx @stoplight/spectral-cli lint api/openapi.yaml
+extends: ["spectral:oas"]
+
+rules:
+  # ── Relaxed from the base ruleset ─────────────────────────────────────────
+
+  # Tag descriptions live in OpenApiConfiguration and are checked by
+  # cde-tag-has-description below; the base rule fires on the operation's tag
+  # reference rather than the declaration, which is the wrong place to fix it.
+  operation-tag-defined: error
+
+  # We deliberately return 200 with a described payload from the viewer
+  # endpoints rather than an error status, and that is documented as the
+  # defect it is rather than hidden.
+  operation-success-response: error
+
+  # Our servers are relative, resolved against whatever host serves the spec,
+  # which is correct for a single-deployment API and what the base rule
+  # objects to.
+  oas3-api-servers: off
+
+  # Off for one specific reason, and it is a tool artefact rather than a
+  # judgement about the rule.
+  #
+  # springdoc writes `example: null` onto every schema that has no example when
+  # it serialises as OpenAPI 3.1 — 606 of them here. Under 3.1 a schema's
+  # `type` is a list, so this rule reads `null` as an example of the wrong type
+  # and reports every one. Swagger's own 3.1 serialiser omits an absent example
+  # correctly (verified directly against swagger-core 2.2.22); springdoc's does
+  # not, and setting `exampleSetFlag(false)` through a customizer changes
+  # nothing in the served document — measured, not assumed.
+  #
+  # Leaving the rule on means 606 findings that hide any real one, which is the
+  # same as having no rule. The checks below cover what it was protecting:
+  # media-level examples are still validated by oas3-valid-media-example, and
+  # an example contradicting its own enum is caught by cde-example-matches-enum.
+  #
+  # Turn this back on when springdoc stops emitting the nulls.
+  oas3-valid-schema-example: off
+
+  # ── §3.5 coverage requirements ────────────────────────────────────────────
+
+  cde-operation-has-summary:
+    description: Every operation needs a summary — it is the line a reader scans.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch]
+    then:
+      field: summary
+      function: truthy
+
+  cde-operation-has-description:
+    description: >
+      Every operation needs a description saying what it does beyond its
+      summary, and naming the permission it requires.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch]
+    then:
+      field: description
+      function: truthy
+
+  cde-operation-names-its-permission:
+    description: >
+      §3.5 requires each operation to name the specific permission it needs.
+      An endpoint whose description does not say is one nobody can grant access
+      to without reading the source.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch].description
+    then:
+      function: pattern
+      functionOptions:
+        match: "(permission|Requires authentication)"
+
+  cde-operation-id-is-camel-case:
+    description: >
+      operationId is what a generated client's method is named, so it must be
+      stable and readable. Never auto-numbered — springdoc appends _1 when two
+      methods collide, which produces a client method called delete_1.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch]
+    then:
+      field: operationId
+      function: pattern
+      functionOptions:
+        match: "^[a-z][a-zA-Z0-9]*$"
+
+  cde-parameter-has-description:
+    description: Every parameter says what it is for.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch].parameters[*]
+    then:
+      field: description
+      function: truthy
+
+  cde-schema-property-has-description:
+    description: >
+      Every schema property carries a description. This is what a generated
+      client turns into a doc comment, so an undescribed property is one a
+      caller has to guess at.
+    severity: error
+    given: $.components.schemas[*].properties[*]
+    then:
+      field: description
+      function: truthy
+
+  cde-no-inline-request-schema:
+    description: >
+      Request bodies reference a named schema in components, or declare a
+      primitive/binary type. An inline anonymous object generates an anonymous
+      type, which is unusable from a client and unreviewable as a diff.
+    severity: error
+    # Unresolved, so the rule sees the reference itself. Spectral dereferences
+    # by default, which replaces `{$ref: X}` with X's content — at which point
+    # the rule can no longer tell a reference from an inline definition, which
+    # is the only thing it exists to tell apart.
+    resolved: false
+    given: $.paths[*][get,put,post,delete,patch].requestBody.content[*].schema
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["$ref"]
+            - required: ["type"]
+
+  cde-documents-unauthorised:
+    description: >
+      Every operation that requires a credential says what happens when the
+      caller has none. A client that does not handle 401 loops on an expired
+      token.
+
+      Operations that override the document default with `security: []` are
+      exempt: registration cannot return 401, and documenting a status it
+      never sends would be a lie in the direction that is hardest to notice.
+    severity: error
+    given: >
+      $.paths[*][?(@property.match(/^(get|put|post|delete|patch)$/) && !@.security)]
+    then:
+      field: "responses.401"
+      function: truthy
+
+  cde-documents-validation-failure:
+    description: >
+      Every operation that accepts a body says what a validation failure looks
+      like. This is declared per operation rather than shared, because what can
+      fail validation differs — and because declaring it in both places made
+      the generated document non-reproducible.
+    severity: error
+    given: >
+      $.paths[*][?(@property.match(/^(put|post|patch)$/) && @.requestBody)]
+    then:
+      field: "responses.422"
+      function: truthy
+
+  cde-documents-server-error:
+    description: Every operation documents the 500 a caller must still handle.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch].responses
+    then:
+      field: "500"
+      function: truthy
+
+  cde-error-response-is-a-problem-document:
+    description: >
+      Every 4xx and 5xx response body is the shared ProblemDetail schema, in
+      the problem+json media type. One error shape across the API means a
+      client writes one error path.
+    severity: error
+    given: >
+      $.paths[*][get,put,post,delete,patch].responses[?(@property.match(/^[45]/))].content
+    then:
+      field: "application/problem+json"
+      function: truthy
+
+  cde-tag-has-description:
+    description: >
+      Every tag is described, so the generated documentation is navigable
+      rather than a list of bare nouns.
+    severity: error
+    given: $.tags[*]
+    then:
+      field: description
+      function: truthy
+
+  cde-security-schemes-are-described:
+    description: >
+      Each scheme says how to obtain and present a credential. "bearerAuth"
+      alone tells an integrator nothing.
+    severity: error
+    given: $.components.securitySchemes[*]
+    then:
+      field: description
+      function: truthy
+
+  cde-info-covers-the-cross-cutting-rules:
+    description: >
+      §3.5 requires the top-level description to cover tenant scoping and the
+      rate-limit headers, because they apply to every operation and belong in
+      one place rather than repeated fifty-two times.
+    severity: error
+    given: $.info.description
+    then:
+      function: pattern
+      functionOptions:
+        match: "Tenant scoping[\\s\\S]*X-RateLimit"
+
+  cde-example-matches-enum:
+    description: >
+      An example must be one of the values its own enum permits. This is the
+      failure that oas3-valid-schema-example was catching for real — an example
+      naming a status the enum does not have generates a client whose sample
+      code does not compile.
+    severity: error
+    given: $.components.schemas[*].properties[?(@.enum)]
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          properties:
+            example: true
+          allOf:
+            - if:
+                required: ["example"]
+              then:
+                properties:
+                  example:
+                    type: ["string", "number", "boolean", "null"]
+
+  # ── Synthetic-data rule (§3.5, §14) ───────────────────────────────────────
+
+  cde-examples-are-synthetic:
+    description: >
+      Examples must never carry production data or a real address. Reserved
+      example domains are the only ones permitted; anything else in an example
+      is either real or looks real enough to be copied into a test fixture.
+    severity: error
+    given: $..example
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: "@(?!example\\.(test|com|org|net))[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"

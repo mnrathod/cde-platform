@@ -1,6 +1,17 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.dto.ViewerDtos.ModelTreeNode;
+import com.cde.platform.dto.ViewerDtos.ViewerPayload;
+import com.cde.platform.openapi.ApiDocumentation;
+import com.cde.platform.openapi.StandardErrorResponses;
 import com.cde.platform.repository.DocumentRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -18,6 +29,8 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/viewer3d")
+@Tag(name = ApiDocumentation.TAG_VIEWER_3D)
+@StandardErrorResponses
 public class Viewer3DController {
 
     private static final Set<String> EXT_3D = Set.of(
@@ -34,8 +47,39 @@ public class Viewer3DController {
         this.documentRepo = documentRepo;
     }
 
+    @Operation(
+        operationId = "getModel",
+        summary = "Get a model's geometry",
+        description = """
+            IFC is extracted by the conversion service and returned as JSON. Mesh formats — GLB, \
+            glTF, OBJ, STL, PLY, DAE — are streamed as raw bytes with the matching content type \
+            and an `X-3D-Format` header, so check the content type before parsing. Revit files \
+            cannot be opened at all and report why.
+
+            As with the document viewer, a problem is reported with `200` and a described \
+            payload rather than an error status. Read `success` and `type`.
+
+            The structured hierarchy from `/tree` is the primary route to a model's information; \
+            this endpoint serves the visual layer over it.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200",
+        description = "The geometry, or a described reason it is unavailable.",
+        content = {
+            @Content(mediaType = "application/json",
+                     schema = @Schema(implementation = ViewerPayload.class)),
+            @Content(mediaType = "model/gltf-binary",
+                     schema = @Schema(type = "string", format = "binary"))
+        })
+    @ApiResponse(responseCode = "404",
+        description = "No document with that id is visible to the caller.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping("/{documentId}")
-    public ResponseEntity<?> get3DModel(@PathVariable Long documentId) {
+    public ResponseEntity<?> get3DModel(
+        @Parameter(description = "Identifier of the model document.", example = "1212")
+        @PathVariable Long documentId
+    ) {
         var docOpt = documentRepo.findById(documentId);
         if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
         var doc = docOpt.get();
@@ -73,8 +117,34 @@ public class Viewer3DController {
 
 
     // ── IFC Model Tree ────────────────────────────────────────────
+    @Operation(
+        operationId = "getModelTree",
+        summary = "Get a model's hierarchy as a navigable tree",
+        description = """
+            The structured route to everything the model holds — the interface a keyboard or a \
+            screen reader uses, and the one a rendered canvas cannot replace. It supports the \
+            same navigation and selection the visual view does.
+
+            **When the conversion service cannot be reached, a placeholder outline is returned \
+            instead of the model's real hierarchy**, and its root carries `synthetic: true`. It \
+            lists the element classes a model of this kind usually contains, not this model's \
+            contents. A client must not present it as the model's structure; check the flag.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200",
+        description = "The hierarchy, rooted at the model. Check the root's `synthetic` flag "
+                    + "before treating it as the model's real structure.",
+        content = @Content(mediaType = "application/json",
+                           array = @ArraySchema(schema = @Schema(implementation = ModelTreeNode.class))))
+    @ApiResponse(responseCode = "404",
+        description = "No document with that id is visible to the caller.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping("/{documentId}/tree")
-    public ResponseEntity<?> getIfcTree(@PathVariable Long documentId) {
+    public ResponseEntity<?> getIfcTree(
+        @Parameter(description = "Identifier of the model document.", example = "1212")
+        @PathVariable Long documentId
+    ) {
         var docOpt = documentRepo.findById(documentId);
         if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
         var doc = docOpt.get();
@@ -106,6 +176,16 @@ public class Viewer3DController {
         }
     }
 
+    /**
+     * A placeholder outline, used when the model's own hierarchy cannot be
+     * extracted.
+     *
+     * <p>The root is marked {@code synthetic} so a client can tell this apart
+     * from the real thing. Without the marker it is indistinguishable from an
+     * extracted hierarchy, which makes it worse than returning nothing: a
+     * reader navigating the tree would be reading invented element classes as
+     * though they were the building's contents.
+     */
     private java.util.List<java.util.Map<String,Object>> buildSyntheticTree(
         com.cde.platform.model.Document doc
     ) {
@@ -132,6 +212,7 @@ public class Viewer3DController {
         root.put("expanded", true);
         root.put("selected", false);
         root.put("visible", true);
+        root.put("synthetic", true);
         root.put("children", children);
         return java.util.List.of(root);
     }

@@ -1,6 +1,6 @@
 package com.cde.platform.collaboration;
 
-import com.cde.platform.dto.Dtos.AnnotationResponse;
+import com.cde.platform.dto.AnnotationDtos.AnnotationResponse;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;

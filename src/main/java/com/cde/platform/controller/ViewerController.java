@@ -1,6 +1,16 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.dto.DiagnosticsDtos.ConverterStatusResponse;
+import com.cde.platform.dto.ViewerDtos.ViewerPayload;
+import com.cde.platform.openapi.ApiDocumentation;
+import com.cde.platform.openapi.StandardErrorResponses;
 import com.cde.platform.repository.DocumentRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.cde.platform.service.ConverterService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
@@ -14,6 +24,8 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/viewer")
+@Tag(name = ApiDocumentation.TAG_VIEWER)
+@StandardErrorResponses
 public class ViewerController {
 
     private final DocumentRepository documentRepo;
@@ -45,8 +57,44 @@ public class ViewerController {
         this.converter = converter;
     }
 
+    @Operation(
+        operationId = "getViewerPayload",
+        summary = "Get what the viewer needs to open a document",
+        description = """
+            Returns whatever suits the document's format: SVG markup for a drawing, a pointer to \
+            the bytes for a PDF, extracted geometry for a model, or an explanation of why it \
+            cannot be opened. Read the `type` member first — it decides the shape of the rest.
+
+            Images and mesh formats (GLB, STL, OBJ, PLY, DAE) are returned as raw bytes with the \
+            matching content type rather than as JSON, so check the response's content type \
+            before parsing it. Office documents are converted and returned as PDF bytes.
+
+            **A `200` does not mean the document opened.** The variants that report a problem — \
+            `error`, `dwg_binary`, `office_error`, `revit_binary`, `3d_error`, `unsupported` — \
+            are also returned with `200`. This is a defect kept for compatibility: every client \
+            branches on `type`, so correcting the status is a coordinated change on both sides.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200",
+        description = "What the viewer needs, or a described reason it cannot open the document.",
+        content = {
+            @Content(mediaType = "application/json",
+                     schema = @Schema(implementation = ViewerPayload.class)),
+            @Content(mediaType = "application/pdf",
+                     schema = @Schema(type = "string", format = "binary")),
+            @Content(mediaType = "image/*", schema = @Schema(type = "string", format = "binary")),
+            @Content(mediaType = "model/gltf-binary",
+                     schema = @Schema(type = "string", format = "binary"))
+        })
+    @ApiResponse(responseCode = "404",
+        description = "No document with that id is visible to the caller.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping("/{documentId}")
-    public ResponseEntity<?> getViewerData(@PathVariable Long documentId) {
+    public ResponseEntity<?> getViewerData(
+        @Parameter(description = "Identifier of the document to open.", example = "1180")
+        @PathVariable Long documentId
+    ) {
         var docOpt = documentRepo.findById(documentId);
         if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
         var doc = docOpt.get();
@@ -177,8 +225,38 @@ public class ViewerController {
 
     // ── Serve raw PDF bytes for pdf.js (called by the Angular viewer using
     //    the pdfUrl returned from /{documentId} above) ────────────────────
+    @Operation(
+        operationId = "getPdfBytes",
+        summary = "Stream a PDF's bytes",
+        description = """
+            The bytes of the document's current version, served inline for the viewer to render.
+
+            Not cached: processing replaces the bytes behind this URL, so a cached response would \
+            show a version that no longer exists. The viewer passes the version in the query \
+            string for the same reason.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200", description = "The PDF's bytes.",
+        content = @Content(mediaType = "application/pdf",
+                           schema = @Schema(type = "string", format = "binary")))
+    @ApiResponse(responseCode = "404",
+        description = "No such document, or its file is missing from storage.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @ApiResponse(responseCode = "422",
+        description = "The document is not a PDF.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping("/{documentId}/pdf")
-    public ResponseEntity<?> getPdfBytes(@PathVariable Long documentId) {
+    public ResponseEntity<?> getPdfBytes(
+        @Parameter(description = "Identifier of the document.", example = "1180")
+        @PathVariable Long documentId,
+        @Parameter(description = "Version the client believes it is fetching. Present so a "
+                               + "browser does not serve a superseded copy from cache; the "
+                               + "current version is always what is returned.",
+                   example = "3")
+        @RequestParam(value = "v", required = false) Integer v
+    ) {
         var docOpt = documentRepo.findById(documentId);
         if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
         var doc = docOpt.get();
@@ -204,9 +282,18 @@ public class ViewerController {
         }
     }
 
+    @Operation(
+        operationId = "getConverterStatus",
+        summary = "Check whether the conversion service is reachable",
+        description = """
+            The viewer asks before offering conversion-dependent actions, so it can say why \
+            something is unavailable rather than failing when someone tries it.
+
+            Requires authentication.""")
+    @ApiResponse(responseCode = "200", description = "Whether the conversion service answered.")
     @GetMapping("/converter-status")
-    public ResponseEntity<?> converterStatus() {
-        return ResponseEntity.ok(Map.of("running", converter.isConverterRunning()));
+    public ResponseEntity<ConverterStatusResponse> converterStatus() {
+        return ResponseEntity.ok(new ConverterStatusResponse(converter.isConverterRunning()));
     }
 
     private ResponseEntity<byte[]> servePdf(byte[] bytes, String filename) {

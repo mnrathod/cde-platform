@@ -20,8 +20,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * /error — a dispatch that carried no authentication and was rejected.
  *
  * That made a client-side mistake look like a permissions problem, with no
- * message to act on. These assert the status a caller can actually act on,
- * and that the reply carries a message rather than an empty body.
+ * message to act on. These assert the status a caller can actually act on, and
+ * that the reply carries a problem document — text to act on, and a trace id
+ * to quote — rather than an empty body.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -36,7 +37,8 @@ class ApiErrorResponseTest {
         // /verify is a POST.
         mockMvc.perform(get("/api/signatures/any-signature-id/verify"))
             .andExpect(status().isMethodNotAllowed())
-            .andExpect(jsonPath("$.message").isNotEmpty());
+            .andExpect(jsonPath("$.detail").isNotEmpty())
+            .andExpect(jsonPath("$.traceId").isNotEmpty());
     }
 
     @Test
@@ -47,7 +49,8 @@ class ApiErrorResponseTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"documentId\":"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").isNotEmpty());
+            .andExpect(jsonPath("$.detail").isNotEmpty())
+            .andExpect(jsonPath("$.traceId").isNotEmpty());
     }
 
     @Test
@@ -60,7 +63,8 @@ class ApiErrorResponseTest {
                     {"documentId":1,"pageNumber":1,"type":"NOT_A_REAL_TYPE",
                      "shapeData":"{}","comment":"x"}"""))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").isNotEmpty());
+            .andExpect(jsonPath("$.detail").isNotEmpty())
+            .andExpect(jsonPath("$.traceId").isNotEmpty());
     }
 
     @Test

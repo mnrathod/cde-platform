@@ -117,7 +117,7 @@ class SignatureVersioningTest {
             .andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
 
-        return mapper.readTree(response).path("signatureId").asText();
+        return mapper.readTree(response).path("signature").path("signatureId").asText();
     }
 
     /**
@@ -146,7 +146,10 @@ class SignatureVersioningTest {
             // its own — and that is the version the signature covers.
             .andExpect(jsonPath("$.version").value(2))
             .andExpect(jsonPath("$.embedded").value(true))
-            .andExpect(jsonPath("$.status").value("VALID"));
+            // Under `signature` rather than at the top level: the reply is the
+            // signature plus what signing did, not a merge of the two.
+            .andExpect(jsonPath("$.signature.status").value("VALID"))
+            .andExpect(jsonPath("$.signature.version").value(2));
     }
 
     @Test

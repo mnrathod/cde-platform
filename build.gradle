@@ -35,6 +35,12 @@ repositories {
 dependencies {
     // Web
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // OpenAPI 3.1, generated from the controller and DTO annotations rather
+    // than hand-written, so the specification cannot drift from the code
+    // (§3.5). 2.6.0 is the line built against Spring Boot 3.3; the 2.7+ and
+    // 2.8+ lines are built against 3.4 and 3.5 and pull a Swagger Core that
+    // expects APIs this Boot version does not have.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
     // Health, metrics and the liveness/readiness probes Kubernetes needs
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     // Exposes those metrics in the format Prometheus scrapes
@@ -102,6 +108,16 @@ tasks.named('test') {
     // having to remember @ExtendWith. A test that forgets tenant context does
     // not fail informatively — it reads zero rows and asserts against them.
     systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+
+    // Tests fork their own JVM, which does not inherit -D from the Gradle
+    // invocation. Without this the regenerate flag was silently ignored and
+    // the run failed with the very message telling you to pass it.
+    if (System.getProperty('updateOpenApiSpec')) {
+        systemProperty 'updateOpenApiSpec', System.getProperty('updateOpenApiSpec')
+        // The comparison would otherwise be skipped as up-to-date on a rerun
+        // where nothing else changed.
+        outputs.upToDateWhen { false }
+    }
 
     // Docker Hub is not reachable from the build environment; mirror.gcr.io
     // serves the same images. Ryuk is disabled because its own image comes
@@ -190,7 +206,39 @@ tasks.register('passwordHashingPolicyCheck') {
     }
 }
 
+/**
+ * §3.5: the specification is linted against a ruleset encoding the coverage
+ * checklist, and the build fails on an error-level finding.
+ *
+ * Skipped rather than failed when npx is unavailable, so a checkout without
+ * Node still builds — but CI has Node, so CI runs it. Requires network on
+ * first run to fetch the linter.
+ */
+tasks.register('openApiLint', Exec) {
+    group = 'verification'
+    description = 'Lints /api/openapi.yaml against the Spectral ruleset (CLAUDE.md §3.5).'
+    executable = 'npx'
+    args = ['--yes', '@stoplight/spectral-cli@6.16.3',
+            'lint', 'api/openapi.yaml',
+            '--ruleset', '.spectral.yaml',
+            '--fail-severity', 'error']
+
+    inputs.file('api/openapi.yaml')
+    inputs.file('.spectral.yaml')
+
+    onlyIf {
+        def available = exec {
+            commandLine 'sh', '-c', 'command -v npx > /dev/null'
+            ignoreExitValue = true
+        }.exitValue == 0
+        if (!available) {
+            logger.lifecycle('openApiLint SKIPPED: npx not on PATH')
+        }
+        available
+    }
+}
+
 tasks.named('check') {
-    dependsOn 'converterTest', 'passwordHashingPolicyCheck'
+    dependsOn 'converterTest', 'passwordHashingPolicyCheck', 'openApiLint'
 }
 

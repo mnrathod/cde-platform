@@ -331,6 +331,68 @@ the readiness group.
 
 ---
 
+## API documentation
+
+### `cde.api.version`
+
+| | |
+|---|---|
+| Environment variable | `CDE_API_VERSION` |
+| Type | string |
+| Default | `1.0.0` |
+| Secret | no |
+
+The version reported in the OpenAPI document's `info.version`. It moves with
+the API contract rather than with the build: path versioning (`/api/v1`) is the
+compatibility boundary, and this records where within that boundary a given
+deployment sits.
+
+### `springdoc.api-docs.path`
+
+| | |
+|---|---|
+| Type | string |
+| Default | `/api/openapi` |
+| Secret | no |
+
+Where the specification is served. The YAML form is the same path with a
+`.yaml` suffix. Both are public: a client generator, a linter and a reviewer
+all read them and none has a credential, and the document describes the shape
+of the API rather than anything held in it.
+
+### `springdoc.swagger-ui.path`
+
+| | |
+|---|---|
+| Type | string |
+| Default | `/api/docs` |
+| Secret | no |
+
+Where the interactive documentation is served. It redirects to
+`/api/swagger-ui/index.html`, so that prefix is public too — permitting only
+`/swagger-ui/**` leaves the page reachable and its every asset refused, which
+renders as a blank frame.
+
+### `springdoc.swagger-ui.supported-submit-methods`
+
+| | |
+|---|---|
+| Type | list of HTTP methods |
+| Default | empty — the "try it" console is off |
+| Secret | no |
+
+The console sends real requests with real credentials from a page that also
+enumerates every endpoint, which is a different thing from publishing the
+specification. Set it to the methods a sandbox deployment should allow.
+
+Note that springdoc serialises this key into its own `swagger-config` as the
+string `"[]"` whether it is written as a list or bound from an environment
+variable, so reading the config back does not tell you whether the console is
+on. `e2e/tests/api-docs.spec.ts` in the frontend repository asserts against the
+rendered page instead.
+
+---
+
 ## Not yet implemented
 
 These are required by the guidelines and are **not** configurable yet. Listed

@@ -1,6 +1,6 @@
 package com.cde.platform.collaboration;
 
-import com.cde.platform.dto.Dtos.AnnotationResponse;
+import com.cde.platform.dto.AnnotationDtos.AnnotationResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;

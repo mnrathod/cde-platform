@@ -1,6 +1,14 @@
 package com.cde.platform.controller;
 
-import com.cde.platform.dto.Dtos.DocumentVersionResponse;
+import com.cde.platform.dto.VersionDtos.DocumentVersionResponse;
+import com.cde.platform.openapi.ApiDocumentation;
+import com.cde.platform.openapi.StandardErrorResponses;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.cde.platform.exception.DocumentProcessingException;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.DocumentVersion;
@@ -36,6 +44,8 @@ import java.util.Optional;
  */
 @RestController
 @RequestMapping("/api/documents/{documentId}/versions")
+@Tag(name = ApiDocumentation.TAG_DOCUMENT_VERSIONS)
+@StandardErrorResponses
 public class DocumentVersionController {
 
     private final DocumentVersionService versionService;
@@ -50,8 +60,28 @@ public class DocumentVersionController {
         this.userRepo       = userRepo;
     }
 
+    @Operation(
+        operationId = "listDocumentVersions",
+        summary = "Read a document's version history",
+        description = """
+            Every version the document has had, newest first, each with what produced it and who \
+            committed it.
+
+            A document nothing has processed yet still has a history: its upload is recorded as \
+            version 1 on first read, so the original is downloadable whether or not anyone has \
+            opened the history panel.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200", description = "The version history, newest first.")
+    @ApiResponse(responseCode = "404",
+        description = "No document with that id is visible to the caller.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping
-    public ResponseEntity<List<DocumentVersionResponse>> listVersions(@PathVariable Long documentId) {
+    public ResponseEntity<List<DocumentVersionResponse>> listVersions(
+        @Parameter(description = "Identifier of the document.", example = "1180")
+        @PathVariable Long documentId
+    ) {
         Optional<Document> documentOpt = ensureHistory(documentId);
         if (documentOpt.isEmpty()) return ResponseEntity.notFound().build();
 
@@ -61,9 +91,29 @@ public class DocumentVersionController {
             .toList());
     }
 
+    @Operation(
+        operationId = "downloadDocumentVersion",
+        summary = "Download one version of a document",
+        description = """
+            Returns the bytes as they stood at that version, not the current ones. This is how a \
+            signature on an earlier version stays checkable after the document has moved on.
+
+            The reply is a file download, not JSON.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200", description = "The version's bytes.",
+        content = @Content(mediaType = "application/pdf",
+                           schema = @Schema(type = "string", format = "binary")))
+    @ApiResponse(responseCode = "404",
+        description = "No such document, no such version, or its file is no longer on disk.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping("/{versionNumber}/file")
-    public ResponseEntity<byte[]> downloadVersion(@PathVariable Long documentId,
-                                                  @PathVariable int versionNumber) throws IOException {
+    public ResponseEntity<byte[]> downloadVersion(
+        @Parameter(description = "Identifier of the document.", example = "1180")
+        @PathVariable Long documentId,
+        @Parameter(description = "Version to download, counting from 1.", example = "2")
+        @PathVariable int versionNumber) throws IOException {
         // Backfill first: on a document nothing has processed yet, version 1
         // exists as a file but not yet as a row, and downloading it would 404
         // purely because nobody had opened the history panel.
@@ -83,11 +133,29 @@ public class DocumentVersionController {
             .body(Files.readAllBytes(path));
     }
 
+    @Operation(
+        operationId = "restoreDocumentVersion",
+        summary = "Make an earlier version current again",
+        description = """
+            Copies the chosen version forward as a new one rather than discarding the versions \
+            after it. Nothing that references a later version — a signature above all — is left \
+            pointing at bytes that no longer exist.
+
+            The reply describes the version this created, not the one that was restored from.
+
+            Requires the `document:write` permission.""")
+    @ApiResponse(responseCode = "200", description = "The new version, holding the restored content.")
+    @ApiResponse(responseCode = "404",
+        description = "No such document, or no such version of it.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @PostMapping("/{versionNumber}/restore")
     public ResponseEntity<DocumentVersionResponse> restoreVersion(
+        @Parameter(description = "Identifier of the document.", example = "1180")
         @PathVariable Long documentId,
+        @Parameter(description = "Version to restore, counting from 1.", example = "2")
         @PathVariable int versionNumber,
-        @AuthenticationPrincipal UserDetails principal
+        @Parameter(hidden = true) @AuthenticationPrincipal UserDetails principal
     ) throws IOException {
         Document document = documentRepo.findById(documentId)
             .orElseThrow(() -> new DocumentProcessingException("Document not found."));

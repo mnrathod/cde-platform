@@ -11,7 +11,9 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.*;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.*;
 import java.util.List;
@@ -22,10 +24,17 @@ public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
     private final UserRepository userRepo;
+    private final AuthenticationEntryPoint authenticationEntryPoint;
+    private final AccessDeniedHandler accessDeniedHandler;
 
-    public SecurityConfig(JwtFilter jwtFilter, UserRepository userRepo) {
+    public SecurityConfig(JwtFilter jwtFilter,
+                          UserRepository userRepo,
+                          AuthenticationEntryPoint authenticationEntryPoint,
+                          AccessDeniedHandler accessDeniedHandler) {
         this.jwtFilter = jwtFilter;
         this.userRepo = userRepo;
+        this.authenticationEntryPoint = authenticationEntryPoint;
+        this.accessDeniedHandler = accessDeniedHandler;
     }
 
     @Bean
@@ -56,13 +65,41 @@ public class SecurityConfig {
                 // metrics reveal traffic shape and the Prometheus endpoint
                 // enumerates every route. Admin only.
                 .requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("ADMIN")
-                // /h2-console is gone with H2 itself. It was permitAll, which
-                // meant an unauthenticated SQL console on any deployment where
-                // the console was enabled — and it was enabled unconditionally.
+                // The specification and the docs page describe the API's shape,
+                // not its contents, and both are read by tooling that has no
+                // credential — a client generator, a linter, a reviewer. The
+                // "try it" console is off by default
+                // (springdoc.swagger-ui.supported-submit-methods), so the page
+                // documents without also being a request console.
+                //
+                // The .yaml and .json variants are separate paths rather than
+                // children of the base one: "/api/openapi/**" does not match
+                // "/api/openapi.yaml", so the YAML the build compares against
+                // was being refused until it was named here.
+                // /api/docs redirects to /api/swagger-ui/index.html — the UI's
+                // assets are served under the docs path's own prefix, not at
+                // the root. Permitting only "/swagger-ui/**" left the docs
+                // page reachable and its every asset refused, so it rendered
+                // as a blank frame.
+                .requestMatchers("/api/openapi", "/api/openapi.yaml", "/api/openapi/**",
+                                 "/api/docs", "/api/docs/**",
+                                 "/api/swagger-ui/**", "/swagger-ui/**").permitAll()
+                // /api/ai/** is no longer here. It forwards a caller-supplied
+                // body to a third-party model provider and spends this
+                // deployment's credit doing it — unauthenticated, that is an
+                // open relay billed to us, and it forwards whatever it is
+                // handed to an outside service. Authentication is the floor,
+                // not the fix: the payload sanitiser the data-handling rules
+                // require is still to be built.
+                //
+                // /api/logs/** stays open deliberately. An error worth
+                // reporting often happens when the session has already failed,
+                // so requiring a credential would lose exactly the reports
+                // worth having. Its input is bounded and stripped of line
+                // breaks before it reaches a log.
                 .requestMatchers("/api/auth/**",
                                  "/", "/index.html", "/viewer.html",
                                  "/favicon.ico", "/favicon.png",
-                                 "/api/ai/**",
                                  "/api/logs/**",
                                  "/js/**", "/css/**", "/img/**").permitAll()
                 .anyRequest().authenticated()
@@ -71,6 +108,12 @@ public class SecurityConfig {
             // could render in a frame, and leaving it off invites clickjacking
             // of the viewer.
             .headers(h -> h.frameOptions(fo -> fo.sameOrigin()))
+            // Without these, a request refused by the filter chain never
+            // reaches the controller advice, so 401 and 403 came back in a
+            // different shape from every other error the API returns.
+            .exceptionHandling(e -> e
+                .authenticationEntryPoint(authenticationEntryPoint)
+                .accessDeniedHandler(accessDeniedHandler))
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
