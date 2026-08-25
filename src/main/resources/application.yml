@@ -117,6 +117,18 @@ cde:
     expiration-ms: ${CDE_JWT_EXPIRATION_MS:86400000}   # 24 hours
   storage:
     upload-dir: ./uploads
+  upload:
+    # Bounds on a chunked upload in flight. Each has a working default, so a
+    # deployment that sets none of them is still bounded — the alternative is
+    # a staging area an attacker fills with one request per upload.
+    #
+    # max-file-size is enforced as the exact running total of what has been
+    # staged, not estimated from the chunk count. Two gigabytes is the scale of
+    # a federated model, which is what this path exists for.
+    max-file-size: 2GB
+    max-chunk-size: 8MB
+    max-chunks: 4096
+    staging-expiry: PT24H
   converter:
     url: http://localhost:5001
   anthropic:

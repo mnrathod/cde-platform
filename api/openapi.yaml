@@ -2417,7 +2417,11 @@ paths:
       description: |-
         Multipart upload for a file small enough to send in a single request. For a large file use the chunked route, which survives an interrupted connection.
 
-        The stored name is generated server-side; the name the client sent is kept as metadata for display and for the download header only, and is never used as a path. The media type is detected from the file's own content rather than from its extension or the browser's claim.
+        The stored name is generated server-side; the name the client sent is kept as metadata for display and for the download header only, and is never used as a path.
+
+        The media type is taken from the file's extension, falling back to what the browser claimed. That is a rendering hint, not a security check — it decides which viewer opens the file, and the formats that matter here are drawing and model formats that content sniffing reports as generic binary. Do not read it as a statement about what the bytes are.
+
+        The body is streamed to storage rather than buffered, so the size a deployment can accept is a matter of disk and configuration rather than of heap.
 
         Requires the `document:write` permission on the target project.
       operationId: uploadDocument
@@ -2547,8 +2551,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
-          description: "A required part is missing, or `documentType` is not a recognised\
-            \ value."
+          description: "A required part is missing, `documentType` is not a recognised\
+            \ value, or the file is larger than this deployment accepts."
         "429":
           content:
             application/problem+json:
@@ -2574,7 +2578,11 @@ paths:
       description: |-
         Chunks may arrive in any order. Each is acknowledged with a count of what has arrived so far; the chunk that completes the set assembles the file and returns the created document instead, so a client tells completion from progress by the shape of the reply.
 
-        The upload identifier is chosen by the client and must be unique to this upload — reusing one belonging to an upload still in flight would interleave the two.
+        The upload identifier is chosen by the client, and an upload is scoped to the tenant that sent it: two tenants using the same identifier do not share chunks, cannot see each other's, and cannot complete or contaminate each other's file. Within one tenant it should still be unique per upload, because there it does identify the upload.
+
+        Re-sending a chunk replaces it, so an interrupted upload can be resumed by repeating whatever did not arrive.
+
+        Limits, all configurable per deployment: at most 4096 chunks, 8 MB per chunk, and 2 GB assembled. A chunk index outside the declared total, or a total outside that range, is refused with `422`. Chunks of an upload nothing has added to for 24 hours are deleted.
 
         Requires the `document:write` permission on the target project.
       operationId: uploadDocumentChunk
@@ -2733,8 +2741,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
-          description: "A required part is missing, or the chunk index is outside\
-            \ the declared total."
+          description: "A required part is missing, the chunk index is outside the\
+            \ declared total, the total is outside the permitted range, the chunk\
+            \ is over the per-chunk limit, or the upload has reached the maximum file\
+            \ size. The `detail` names which, and the limit it exceeded."
         "429":
           content:
             application/problem+json:

@@ -4,6 +4,7 @@ import com.cde.platform.cde.domain.RevisionAlreadySupersededException;
 import com.cde.platform.cde.domain.StateTransitionNotPermittedException;
 import com.cde.platform.cde.domain.SuitabilityCodeNotValidInStateException;
 import com.cde.platform.openapi.ApiDocumentation;
+import com.cde.platform.upload.UploadRejectedException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -147,6 +148,21 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleConflict(RuntimeException ex, HttpServletRequest request) {
         return ApiProblem.of(HttpStatus.CONFLICT, "state-conflict", "Conflict",
             ex.getMessage(), request);
+    }
+
+    /**
+     * An upload refused on its own terms — a chunk index outside the declared
+     * total, an oversized chunk, a file past the maximum.
+     *
+     * <p>Its message describes a limit the caller can see and act on, so it is
+     * returned rather than replaced. {@code 422} rather than {@code 400}: the
+     * request parsed perfectly well and was rejected on its content.
+     */
+    @ExceptionHandler(UploadRejectedException.class)
+    public ProblemDetail handleUploadRejected(UploadRejectedException ex,
+                                              HttpServletRequest request) {
+        return ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
+            "upload-rejected", "Upload rejected", ex.getMessage(), request);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
