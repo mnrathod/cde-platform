@@ -20,9 +20,11 @@ public final class AuthDtos {
     }
 
     @Schema(name = "RegisterRequest",
-            description = "Details for a new account. The account is created in the default "
-                        + "tenant; a tenant cannot be chosen here, because accepting one would "
-                        + "let any caller create an account inside another organisation.")
+            description = "Details for a new account. A tenant still cannot be named here, "
+                        + "because accepting one would let any caller create an account inside "
+                        + "another organisation. Without an invitation the account gets a new "
+                        + "tenant of its own; with one it joins the tenant that issued it, "
+                        + "which is proof rather than an assertion.")
     public record RegisterRequest(
 
         @Schema(description = "Unique sign-in name within the tenant.",
@@ -42,20 +44,49 @@ public final class AuthDtos {
                 example = "correct-horse-battery-staple-42", minLength = 12, maxLength = 128,
                 format = "password", requiredMode = Schema.RequiredMode.REQUIRED,
                 accessMode = Schema.AccessMode.WRITE_ONLY)
-        @NotBlank @Size(min = 12, max = 128) String password
-        // There is deliberately no role field.
+        @NotBlank @Size(min = 12, max = 128) String password,
+
+        @Schema(description = "An invitation issued by an administrator of the organisation to "
+                            + "join. Omit it to create a new organisation instead. The invited "
+                            + "email address must match the one above, so a forwarded invitation "
+                            + "does not admit whoever received it.",
+                example = "cdeinv_c3ludGhldGljLXNhbXBsZS10b2tlbi12YWx1ZQ", maxLength = 100,
+                requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                accessMode = Schema.AccessMode.WRITE_ONLY,
+                nullable = true)
+        @Size(max = 100) String invitationToken,
+
+        @Schema(description = "What to call the new organisation. Ignored when an invitation is "
+                            + "presented, because that organisation already has a name. Omit it "
+                            + "and one is derived from the username — signing up should not "
+                            + "require a decision nobody has made yet.",
+                example = "Okafor Engineering", maxLength = 200,
+                requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
+        @Size(max = 200) String organisationName
+
+        // There is deliberately no tenant field and no role field. Same
+        // argument in both cases: this endpoint requires no credential, so
+        // anything it accepts is something a stranger can assert about
+        // themselves.
         //
-        // There was one, honoured as supplied, on an endpoint that requires no
-        // credential — so any anonymous caller could register as ADMIN simply
-        // by asking. That was already an escalation, and it became a
-        // considerably worse one when roles started carrying the container
-        // permissions: it would have handed a stranger the authority to
-        // publish a contractual record.
+        // The role field existed once, honoured as supplied, so any anonymous
+        // caller could register as ADMIN simply by asking. That was already an
+        // escalation, and it became a considerably worse one when roles
+        // started carrying the container permissions: it would have handed a
+        // stranger the authority to publish a contractual record. A role is
+        // granted, not chosen — an invited account gets the role its inviter
+        // chose, an uninvited one administers only the tenant it just created,
+        // and the reply says which role was actually assigned so a client that
+        // still sends one is told plainly what it got.
         //
-        // A role is granted, not chosen. Every account starts as ENGINEER, and
-        // the reply says which role was actually assigned, so a client that
-        // still sends one is told plainly what it got rather than being left
-        // to assume.
+        // The tenant field never existed, and the workaround was worse than
+        // the field would have been: every account went into the deployment's
+        // default tenant, so anyone who could reach this endpoint could read
+        // every project in the deployment. Row-Level Security was enforcing
+        // correctly the entire time. It had nothing to separate, because
+        // registration had already put everybody on the same side of the
+        // boundary. An invitation is how a tenant gets named without a
+        // stranger asserting it.
     ) {}
 
     @Schema(name = "LoginRequest", description = "Credentials for a password sign-in.")

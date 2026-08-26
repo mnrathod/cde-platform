@@ -7,6 +7,7 @@ import com.cde.platform.model.User;
 import com.cde.platform.repository.ProjectRepository;
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.security.RolePermissions;
+import com.cde.platform.security.TenantPermission;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -227,12 +228,29 @@ class ContainerPermissionEnforcementTest {
         @DisplayName("no role is accidentally granted everything")
         void onlyAdministratorsHoldEveryPermission() {
             assertThat(RolePermissions.grantedTo(User.Role.ADMIN))
-                .containsExactlyInAnyOrderElementsOf(ContainerPermission.ALL);
+                .containsAll(ContainerPermission.ALL);
 
             for (User.Role role : List.of(User.Role.ENGINEER, User.Role.REVIEWER, User.Role.VIEWER)) {
                 assertThat(RolePermissions.grantedTo(role))
                     .as("%s should not hold every permission", role)
                     .isNotEqualTo(ContainerPermission.ALL);
+            }
+        }
+
+        @Test
+        @DisplayName("only an administrator may decide who is in the organisation")
+        void onlyAdministratorsManageMembership() {
+            // A separate axis from the container vocabulary above, not a step
+            // up the same ladder. An engineer holds container:write and a
+            // reviewer holds container:publish, and neither of those should
+            // carry the authority to add an account that holds the other.
+            assertThat(RolePermissions.grantedTo(User.Role.ADMIN))
+                .contains(TenantPermission.MANAGE_USERS);
+
+            for (User.Role role : List.of(User.Role.ENGINEER, User.Role.REVIEWER, User.Role.VIEWER)) {
+                assertThat(RolePermissions.grantedTo(role))
+                    .as("%s must not be able to invite people into the tenant", role)
+                    .doesNotContain(TenantPermission.MANAGE_USERS);
             }
         }
 

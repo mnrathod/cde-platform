@@ -9,7 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import com.cde.platform.model.Tenant;
+import com.cde.platform.invitation.RegistrationService;
 import com.cde.platform.model.User;
 import com.cde.platform.repository.TenantRepository;
 import com.cde.platform.repository.UserRepository;
@@ -42,51 +42,55 @@ public class AuthController {
     private static final String GENERIC_LOGIN_FAILURE = "Invalid credentials";
 
     private final UserRepository userRepo;
-    private final TenantRepository tenantRepo;
-    private final PasswordEncoder encoder;
     private final JwtTokenService jwtTokenService;
     private final AuthenticationManager authManager;
     private final LoginTenantResolver loginTenantResolver;
-    private final TenancyProperties tenancyProperties;
+    private final RegistrationService registrationService;
 
     public AuthController(UserRepository userRepo,
-                          TenantRepository tenantRepo,
-                          PasswordEncoder encoder,
                           JwtTokenService jwtTokenService,
                           AuthenticationManager authManager,
                           LoginTenantResolver loginTenantResolver,
-                          TenancyProperties tenancyProperties) {
+                          RegistrationService registrationService) {
         this.userRepo = userRepo;
-        this.tenantRepo = tenantRepo;
-        this.encoder = encoder;
         this.jwtTokenService = jwtTokenService;
         this.authManager = authManager;
         this.loginTenantResolver = loginTenantResolver;
-        this.tenancyProperties = tenancyProperties;
+        this.registrationService = registrationService;
     }
 
     /**
-     * Registers into the default tenant.
+     * Registers into a new tenant, or into the one that invited the caller.
      *
-     * <p>Self-service registration cannot choose its own tenant — accepting a
-     * tenant identifier from the request body would let any caller create an
-     * account inside someone else's organisation. Provisioning a user into a
-     * specific tenant is an administrative operation, and joining one by
-     * invitation or verified email domain is home-realm discovery, which is not
-     * built yet.
+     * <p>Self-service registration still cannot choose its own tenant —
+     * accepting a tenant identifier from the request body would let any caller
+     * create an account inside someone else's organisation. It used to resolve
+     * that by putting everyone into the deployment's default tenant, which
+     * meant anyone who could reach this endpoint could read every project in
+     * the deployment. An invitation is the third option: proof issued from
+     * inside the tenant, rather than an assertion made about it.
      */
     @Operation(
         operationId = "register",
-        summary = "Create an account in the default tenant",
+        summary = "Create an account, in a new organisation or an inviting one",
         description = """
-            Self-service registration. The account is always created in the deployment's default \
-            tenant with the `ENGINEER` role.
+            Self-service registration, in one of two shapes.
 
-            Neither the tenant nor the role can be chosen here, for the same reason in both \
-            cases: this endpoint requires no credential, so anything it accepts is something a \
-            stranger can assert about themselves. A role is granted by an administrator; \
-            joining a specific tenant is an administrative action or home-realm discovery by \
-            verified email domain. The reply states the role actually assigned.
+            **With no invitation** the account gets a **new tenant of its own**, and the \
+            registrant administers it — somebody has to be able to invite the second person, and \
+            in a one-member organisation there is nobody else to grant that. The authority \
+            covers nothing but what the caller is about to create.
+
+            **With an invitation** the account joins the tenant that issued it, with the role \
+            the inviting administrator chose. The invited email address must match the one in \
+            this request, so a forwarded invitation does not admit whoever received it.
+
+            A tenant still cannot be named directly, and neither can a role: this endpoint \
+            requires no credential, so anything it accepts is something a stranger can assert \
+            about themselves. The reply states the role actually assigned.
+
+            A deployment may set `cde.tenancy.self-registration` to `INVITATION_ONLY` or \
+            `DISABLED`, in which case the uninvited cases above return `403`.
 
             No permission is required — this endpoint is how a caller gets one.""")
     @ApiResponse(responseCode = "201",
@@ -98,13 +102,23 @@ public class AuthController {
         description = "The request body could not be read.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @ApiResponse(responseCode = "403",
+        description = "Self-service registration is closed on this deployment, or it requires "
+                    + "an invitation and none was presented.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @ApiResponse(responseCode = "409",
-        description = "The username or the email address is already in use in that tenant.",
+        description = "The username or the email address is already in use. The reply does not "
+                    + "say which, so this cannot be used to test whether a given person has an "
+                    + "account here.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @ApiResponse(responseCode = "422",
         description = "The details failed validation — most often a password shorter than the "
-                    + "tenant's minimum, or one found in a known-breached set.",
+                    + "tenant's minimum, or one found in a known-breached set. Also returned "
+                    + "when an invitation is unknown, expired, revoked, already redeemed, or "
+                    + "issued to a different address; those are one answer, because "
+                    + "distinguishing them tells a caller whether a guessed token is real.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @ApiResponse(responseCode = "429",
@@ -120,35 +134,50 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
                                       HttpServletRequest httpRequest) {
-        Tenant defaultTenant = tenantRepo.findBySlug(tenancyProperties.getDefaultTenantSlug())
-            .orElseThrow(() -> new IllegalStateException(
-                "Default tenant '" + tenancyProperties.getDefaultTenantSlug() + "' is missing"));
+        var outcome = registrationService.register(
+            req.username(), req.email(), req.password(),
+            req.invitationToken(), req.organisationName());
 
-        return TenantContext.callAsTenant(defaultTenant.getId(), () -> {
-            if (userRepo.existsByUsername(req.username()))
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiProblem.of(
-                    HttpStatus.CONFLICT, "username-taken", "Username taken",
-                    "That username is already in use. Choose another.", httpRequest));
-            if (userRepo.existsByEmail(req.email()))
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiProblem.of(
-                    HttpStatus.CONFLICT, "email-registered", "Email already registered",
-                    "That email address already has an account. Sign in instead, or reset the password.",
+        return switch (outcome) {
+            case RegistrationService.Outcome.Registered registered -> {
+                String token = jwtTokenService.generateToken(
+                    registered.user().getUsername(), registered.tenant().getId());
+                yield ResponseEntity.status(HttpStatus.CREATED).body(new AuthResponse(
+                    token, registered.user().getUsername(), registered.user().getRole().name()));
+            }
+
+            // One message covering username and email alike. Saying which one
+            // clashed turns registration into a test for whether a given
+            // person has an account here.
+            case RegistrationService.Outcome.IdentityTaken ignored ->
+                ResponseEntity.status(HttpStatus.CONFLICT).body(ApiProblem.of(
+                    HttpStatus.CONFLICT, "identity-taken", "Already registered",
+                    "That username or email address is already in use. Sign in instead, "
+                        + "or choose another username.", httpRequest));
+
+            case RegistrationService.Outcome.RegistrationClosed ignored ->
+                ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiProblem.of(
+                    HttpStatus.FORBIDDEN, "registration-closed", "Registration closed",
+                    "This deployment does not accept self-service registration. "
+                        + "Ask an administrator to create your account.", httpRequest));
+
+            case RegistrationService.Outcome.InvitationRequired ignored ->
+                ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiProblem.of(
+                    HttpStatus.FORBIDDEN, "invitation-required", "Invitation required",
+                    "This deployment only accepts registrations with an invitation. "
+                        + "Ask an administrator of your organisation to send you one.",
                     httpRequest));
 
-            var user = User.builder()
-                .username(req.username())
-                .email(req.email())
-                .password(encoder.encode(req.password()))
-                // Not negotiable by the caller: see RegisterRequest.
-                .role(User.Role.ENGINEER)
-                .tenantId(defaultTenant.getId())
-                .build();
-            userRepo.save(user);
-
-            String token = jwtTokenService.generateToken(user.getUsername(), defaultTenant.getId());
-            return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new AuthResponse(token, user.getUsername(), user.getRole().name()));
-        });
+            // Deliberately one answer for unknown, expired, revoked, already
+            // used, and issued to another address. Distinguishing them tells
+            // someone holding a guessed token whether they guessed a real one.
+            case RegistrationService.Outcome.InvitationNotUsable ignored ->
+                ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ApiProblem.of(
+                    HttpStatus.UNPROCESSABLE_ENTITY, "invitation-not-usable",
+                    "Invitation cannot be used",
+                    "That invitation is not valid for this email address, or it has expired "
+                        + "or already been used. Ask for a new one.", httpRequest));
+        };
     }
 
     @Operation(

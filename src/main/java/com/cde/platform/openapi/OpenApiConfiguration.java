@@ -120,6 +120,11 @@ public class OpenApiConfiguration {
         return List.of(
             tag(TAG_AUTHENTICATION,
                 "Registration, sign-in and the session lifecycle."),
+            tag(TAG_TENANT_MEMBERSHIP,
+                "Who is inside the organisation. An invitation is the only way an account is "
+                + "created in a tenant the caller does not already belong to: registration "
+                + "refuses to take a tenant identifier from an unauthenticated request, so an "
+                + "invitation issued from inside is proof rather than an assertion."),
             tag(TAG_PROJECTS,
                 "Projects group documents and carry the ownership and phase a document inherits."),
             tag(TAG_CDE,

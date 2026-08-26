@@ -263,10 +263,62 @@ role you already are is a no-op.
 | Default | `default` |
 | Secret | no |
 
-The tenant that owns rows created before tenancy existed, and the one
-self-service registration joins. It is created by `V2__tenant_isolation.sql`,
-not by application seeding, so a database restored from a pre-tenancy backup
-has something for the backfill to point at.
+The tenant that owns rows created before tenancy existed. It is created by
+`V2__tenant_isolation.sql`, not by application seeding, so a database restored
+from a pre-tenancy backup has something for the backfill to point at.
+
+Self-service registration **no longer joins it**. It used to, which meant
+anyone who could reach `/api/auth/register` got read access to every project in
+the deployment — Row-Level Security was enforcing correctly throughout, and had
+nothing to separate. See `cde.tenancy.self-registration` below.
+
+### `cde.tenancy.self-registration`
+
+| | |
+|---|---|
+| Environment variable | `CDE_TENANCY_SELF_REGISTRATION` |
+| Type | enum: `CREATE_TENANT`, `INVITATION_ONLY`, `DISABLED` |
+| Default | `CREATE_TENANT` |
+| Secret | no |
+
+What an anonymous caller gets from `POST /api/auth/register`.
+
+| Value | Uninvited registration | With an invitation |
+|---|---|---|
+| `CREATE_TENANT` | Creates a new organisation; the registrant administers it | Joins the inviting organisation |
+| `INVITATION_ONLY` | `403 invitation-required` | Joins the inviting organisation |
+| `DISABLED` | `403 registration-closed` | `403 registration-closed` |
+
+`CREATE_TENANT` is the default because an organisation has to be able to reach
+the core workflow without an operator provisioning anything first.
+
+**Set `DISABLED` for sovereign, air-gapped and Defence deployments** (§6.5,
+§6.6), where an account created by whoever can reach the network is the thing
+the deployment exists to prevent. Accounts are then provisioned out of band.
+
+`INVITATION_ONLY` suits a deployment serving named organisations, where an
+unrecognised signup is a mistake rather than a customer.
+
+A caller can never name a tenant directly under any of these — that endpoint
+requires no credential, so anything it accepts is something a stranger can
+assert about themselves. An invitation is proof issued from inside the tenant.
+
+### `cde.tenancy.invitation-validity`
+
+| | |
+|---|---|
+| Environment variable | `CDE_TENANCY_INVITATION_VALIDITY` |
+| Type | ISO-8601 duration |
+| Default | `PT168H` (7 days) |
+| Secret | no |
+
+How long an unredeemed invitation stays valid. Applies from the moment it is
+issued; shortening it does not extend invitations already outstanding, and
+lengthening it does not revive expired ones.
+
+Invitation tokens are stored as a SHA-256 hash and returned exactly once, at
+creation — a lost one is reissued rather than looked up, the same treatment an
+API key gets (§4.6).
 
 ---
 

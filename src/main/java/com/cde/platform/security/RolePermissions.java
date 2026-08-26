@@ -7,6 +7,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Which permissions each role holds — the single place the mapping is written.
@@ -60,6 +62,18 @@ public final class RolePermissions {
     private static final Set<String> VIEWER_PERMISSIONS = Set.of(
         ContainerPermission.READ);
 
+    /**
+     * Everything, including the authority to decide who is in the tenant.
+     *
+     * <p>Built by union rather than written out, so a permission added to
+     * either vocabulary reaches the administrator without anyone remembering
+     * to add it here — the failure mode otherwise is an administrator who
+     * cannot use a feature, diagnosed as a bug in the feature.
+     */
+    private static final Set<String> ADMIN_PERMISSIONS =
+        Stream.concat(ContainerPermission.ALL.stream(), TenantPermission.ALL.stream())
+              .collect(Collectors.toUnmodifiableSet());
+
     public static Set<String> grantedTo(User.Role role) {
         if (role == null) {
             // A row with no role gets nothing. Defaulting to the least
@@ -69,7 +83,10 @@ public final class RolePermissions {
             return Set.of();
         }
         return switch (role) {
-            case ADMIN -> ContainerPermission.ALL;
+            // The only role that may decide who is inside the tenant at all.
+            // An engineer publishes nothing and a reviewer originates nothing,
+            // but either holding this would let them add an account that does.
+            case ADMIN -> ADMIN_PERMISSIONS;
             case ENGINEER -> ENGINEER_PERMISSIONS;
             case REVIEWER -> REVIEWER_PERMISSIONS;
             case VIEWER -> VIEWER_PERMISSIONS;

@@ -67,12 +67,19 @@ class TenantBoundAfterFirstQueryTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.token").exists());
 
-        // Read back under the tenant the account was created in, to prove the
-        // row landed somewhere real rather than the endpoint merely answering
-        // 201.
-        TenantContextBinder.restore(bound);
-        assertThat(userRepository.findByUsername(username)).isPresent();
-        TenantContextBinder.clear();
+        // Proven by signing in rather than by reading the row back, because the
+        // account is now in a tenant of its own and the fixture's tenant cannot
+        // see it — which is the isolation working, not an obstacle to route
+        // around. Login resolves its own tenant from the username, so it
+        // succeeds only if the row genuinely landed somewhere real; the
+        // endpoint answering 201 is not enough on its own.
+        mockMvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"username":"%s","password":"correct-horse-battery-staple-42"}"""
+                    .formatted(username)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.token").exists());
     }
 
     @Test

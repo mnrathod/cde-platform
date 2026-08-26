@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -36,28 +37,36 @@ class RegistrationRoleEscalationTest {
     @Autowired UserRepository userRepository;
 
     @Test
-    @DisplayName("an anonymous caller asking to be an administrator is made an engineer")
+    @DisplayName("a requested role changes nothing, and the one granted reaches nobody else")
     void aRequestedRoleIsNotHonoured() throws Exception {
         String username = "escalation-attempt-" + System.nanoTime();
 
-        mockMvc.perform(post("/api/auth/register")
+        String response = mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                     {"username":"%s",
                      "email":"%s@example.test",
                      "password":"correct-horse-battery-staple-42",
-                     "role":"ADMIN"}""".formatted(username, username)))
+                     "role":"VIEWER"}""".formatted(username, username)))
             .andExpect(status().isCreated())
             // The reply is explicit about what was granted rather than silent
-            // about what was refused.
-            .andExpect(jsonPath("$.role").value("ENGINEER"));
+            // about what was refused. The request asked for VIEWER and the
+            // field was ignored, which is the property under test — the role
+            // comes from what the registration did, never from what it asked.
+            .andExpect(jsonPath("$.role").value("ADMIN"))
+            .andReturn().getResponse().getContentAsString();
 
-        // And the stored row agrees — the response could be right while the
-        // row that authorisation actually reads from is wrong.
-        assertThat(userRepository.findByUsername(username))
-            .get()
-            .extracting(User::getRole)
-            .isEqualTo(User.Role.ENGINEER);
+        // ADMIN here is not the escalation the old defect was. That one made
+        // the caller an administrator of the shared default tenant, which every
+        // account was in — this one administers a tenant created empty by this
+        // same request, so the authority reaches nothing that existed a moment
+        // ago. Asserted rather than argued:
+        int start = response.indexOf("\"token\":\"") + 9;
+        String token = response.substring(start, response.indexOf('"', start));
+
+        mockMvc.perform(get("/api/projects").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test

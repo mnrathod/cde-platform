@@ -34,6 +34,11 @@ security:
 tags:
 - description: "Registration, sign-in and the session lifecycle."
   name: Authentication
+- description: "Who is inside the organisation. An invitation is the only way an account\
+    \ is created in a tenant the caller does not already belong to: registration refuses\
+    \ to take a tenant identifier from an unauthenticated request, so an invitation\
+    \ issued from inside is proof rather than an assertion."
+  name: Organisation membership
 - description: Projects group documents and carry the ownership and phase a document
     inherits.
   name: Projects
@@ -1149,9 +1154,15 @@ paths:
   /api/auth/register:
     post:
       description: |-
-        Self-service registration. The account is always created in the deployment's default tenant with the `ENGINEER` role.
+        Self-service registration, in one of two shapes.
 
-        Neither the tenant nor the role can be chosen here, for the same reason in both cases: this endpoint requires no credential, so anything it accepts is something a stranger can assert about themselves. A role is granted by an administrator; joining a specific tenant is an administrative action or home-realm discovery by verified email domain. The reply states the role actually assigned.
+        **With no invitation** the account gets a **new tenant of its own**, and the registrant administers it — somebody has to be able to invite the second person, and in a one-member organisation there is nobody else to grant that. The authority covers nothing but what the caller is about to create.
+
+        **With an invitation** the account joins the tenant that issued it, with the role the inviting administrator chose. The invited email address must match the one in this request, so a forwarded invitation does not admit whoever received it.
+
+        A tenant still cannot be named directly, and neither can a role: this endpoint requires no credential, so anything it accepts is something a stranger can assert about themselves. The reply states the role actually assigned.
+
+        A deployment may set `cde.tenancy.self-registration` to `INVITATION_ONLY` or `DISABLED`, in which case the uninvited cases above return `403`.
 
         No permission is required — this endpoint is how a caller gets one.
       operationId: register
@@ -1178,14 +1189,23 @@ paths:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
           description: The request body could not be read.
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Self-service registration is closed on this deployment, or\
+            \ it requires an invitation and none was presented."
         "409":
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
-          description: The username or the email address is already in use in that
-            tenant.
+          description: "The username or the email address is already in use. The reply\
+            \ does not say which, so this cannot be used to test whether a given person\
+            \ has an account here."
         "422":
           content:
             application/problem+json:
@@ -1193,7 +1213,10 @@ paths:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
           description: "The details failed validation — most often a password shorter\
-            \ than the tenant's minimum, or one found in a known-breached set."
+            \ than the tenant's minimum, or one found in a known-breached set. Also\
+            \ returned when an invitation is unknown, expired, revoked, already redeemed,\
+            \ or issued to a different address; those are one answer, because distinguishing\
+            \ them tells a caller whether a guessed token is real."
         "429":
           content:
             application/problem+json:
@@ -1211,7 +1234,7 @@ paths:
           description: Registration failed for a reason the caller cannot act on.
             Quote the `traceId` when reporting it.
       security: []
-      summary: Create an account in the default tenant
+      summary: "Create an account, in a new organisation or an inviting one"
       tags:
       - Authentication
   /api/cde/containers/{containerId}:
@@ -4388,6 +4411,214 @@ paths:
       summary: Move a document to another review status
       tags:
       - Documents
+  /api/invitations:
+    get:
+      description: |-
+        Every invitation issued by the caller's tenant, newest first, with its current status: `PENDING`, `ACCEPTED`, `REVOKED` or `EXPIRED`.
+
+        No token is returned. Tokens are shown once, at creation, and are not stored in a recoverable form.
+
+        Requires the `tenant.user:manage` permission.
+      operationId: listInvitations
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                example: null
+                items:
+                  $ref: "#/components/schemas/InvitationResponse"
+                  example: null
+          description: The organisation's invitations.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: List this organisation's invitations
+      tags:
+      - Organisation membership
+    post:
+      description: |-
+        Issues a single-use invitation to join the caller's own tenant. The tenant is taken from the caller's session and cannot be named in the request — an administrator may only invite people into the organisation they are inside.
+
+        **The token in the reply is shown once and cannot be recovered.** It is stored as a SHA-256 hash, the same treatment an API key gets, because a readable invitation table would be a set of credentials for every pending account. A lost invitation is reissued, not looked up.
+
+        Send it to the invited address over a channel you trust. Redemption requires both the token and that address, so a forwarded invitation does not admit whoever received it.
+
+        Requires the `tenant.user:manage` permission.
+      operationId: createInvitation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationRequest"
+              example: null
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedInvitationResponse"
+                example: null
+          description: Invitation issued; the token is in the reply.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Invite someone into this organisation
+      tags:
+      - Organisation membership
+  /api/invitations/{id}:
+    delete:
+      description: |-
+        Stops an invitation being redeemed. An invitation that has already been accepted cannot be revoked — the account exists, and removing the invitation would not remove it.
+
+        An invitation belonging to another organisation is reported as absent rather than forbidden, because it genuinely is absent: the row is invisible to this caller under the tenant policy, and this endpoint cannot tell the two apart. That is the intended behaviour, not a limitation — a `403` would confirm the invitation exists.
+
+        Requires the `tenant.user:manage` permission.
+      operationId: revokeInvitation
+      parameters:
+      - description: Identifier of the invitation.
+        example: 17
+        in: path
+        name: id
+        required: true
+        schema:
+          type:
+          - integer
+          format: int64
+          example: null
+      responses:
+        "204":
+          description: The invitation can no longer be redeemed.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: No unredeemed invitation with that id is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Withdraw an unredeemed invitation
+      tags:
+      - Organisation membership
   /api/logs/errors:
     post:
       description: |-
@@ -6791,6 +7022,134 @@ components:
       required:
       - pages
       - sourceDocumentId
+    InvitationRequest:
+      description: An offer to join the caller's own organisation. The tenant is taken
+        from the caller's session and cannot be named here — an administrator may
+        only invite people into the organisation they are inside.
+      example: null
+      properties:
+        email:
+          type:
+          - string
+          format: email
+          description: "Address to invite. Registration must present this same address,\
+            \ so a forwarded invitation does not admit whoever received it."
+          example: n.dubois@example.test
+          maxLength: 254
+          minLength: 0
+        role:
+          type:
+          - string
+          description: "Role the invitee receives on joining. Chosen by the inviting\
+            \ administrator, never by the person redeeming the invitation."
+          enum:
+          - ADMIN
+          - ENGINEER
+          - REVIEWER
+          - VIEWER
+          example: ENGINEER
+      required:
+      - email
+      - role
+    InvitationResponse:
+      description: "An invitation as it appears in a listing. It carries no token\
+        \ — that was shown once, at creation."
+      example: null
+      properties:
+        acceptedAt:
+          type:
+          - string
+          format: date-time
+          description: "When it was redeemed, or null if it has not been."
+          example: 2026-08-27T11:02:00
+        createdAt:
+          type:
+          - string
+          format: date-time
+          description: When it was issued.
+          example: 2026-08-26T09:15:00
+        email:
+          type:
+          - string
+          format: email
+          description: Address the invitation admits.
+          example: n.dubois@example.test
+        expiresAt:
+          type:
+          - string
+          format: date-time
+          description: When it stops being redeemable.
+          example: 2026-09-02T09:15:00
+        id:
+          type:
+          - integer
+          format: int64
+          description: Identifier.
+          example: 17
+        role:
+          type:
+          - string
+          description: Role the invitee receives.
+          example: ENGINEER
+        status:
+          type:
+          - string
+          description: Where it stands.
+          enum:
+          - PENDING
+          - ACCEPTED
+          - REVOKED
+          - EXPIRED
+          example: PENDING
+      required:
+      - createdAt
+      - email
+      - expiresAt
+      - id
+      - role
+      - status
+    IssuedInvitationResponse:
+      description: "A newly created invitation. This is the only time the token is\
+        \ ever returned: it is stored as a SHA-256 hash and cannot be recovered, so\
+        \ a lost one is reissued rather than looked up."
+      example: null
+      properties:
+        email:
+          type:
+          - string
+          format: email
+          description: Address the invitation admits.
+          example: n.dubois@example.test
+        expiresAt:
+          type:
+          - string
+          format: date-time
+          description: When it stops being redeemable.
+          example: 2026-09-02T09:15:00
+        id:
+          type:
+          - integer
+          format: int64
+          description: "Identifier, for revoking it later."
+          example: 17
+        role:
+          type:
+          - string
+          description: Role the invitee will receive.
+          example: ENGINEER
+        token:
+          type:
+          - string
+          description: The invitation token. Send it to the invited address over a
+            channel you trust — anyone holding it and that address can join the organisation.
+          example: cdeinv_c3ludGhldGljLXNhbXBsZS10b2tlbi12YWx1ZQ
+          readOnly: true
+      required:
+      - email
+      - expiresAt
+      - id
+      - role
+      - token
     LoginRequest:
       description: Credentials for a password sign-in.
       example: null
@@ -7530,9 +7889,11 @@ components:
       required:
       - regions
     RegisterRequest:
-      description: "Details for a new account. The account is created in the default\
-        \ tenant; a tenant cannot be chosen here, because accepting one would let\
-        \ any caller create an account inside another organisation."
+      description: "Details for a new account. A tenant still cannot be named here,\
+        \ because accepting one would let any caller create an account inside another\
+        \ organisation. Without an invitation the account gets a new tenant of its\
+        \ own; with one it joins the tenant that issued it, which is proof rather\
+        \ than an assertion."
       example: null
       properties:
         email:
@@ -7544,6 +7905,27 @@ components:
             \ matters."
           example: j.okafor@example.test
           maxLength: 254
+          minLength: 0
+        invitationToken:
+          type:
+          - string
+          description: "An invitation issued by an administrator of the organisation\
+            \ to join. Omit it to create a new organisation instead. The invited email\
+            \ address must match the one above, so a forwarded invitation does not\
+            \ admit whoever received it."
+          example: cdeinv_c3ludGhldGljLXNhbXBsZS10b2tlbi12YWx1ZQ
+          maxLength: 100
+          minLength: 0
+          writeOnly: true
+        organisationName:
+          type:
+          - string
+          description: "What to call the new organisation. Ignored when an invitation\
+            \ is presented, because that organisation already has a name. Omit it\
+            \ and one is derived from the username — signing up should not require\
+            \ a decision nobody has made yet."
+          example: Okafor Engineering
+          maxLength: 200
           minLength: 0
         password:
           type:
