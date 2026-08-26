@@ -5,59 +5,45 @@
 # source suggests it should. Run this after changing any DTO and diff the
 # output against API-CONTRACT.md — a field renamed on the server is a field
 # every installed copy of the app silently stops reading.
+#
+#   ./capture-contract.sh <base-url> <username> <password>
+#
+# Credentials are required rather than defaulted. They used to fall back to
+# admin/admin123, which is a real seeded account: a tool that works without
+# being told a password teaches everyone to leave that account alive.
 set -euo pipefail
 
-BASE="${1:-http://localhost:8080}"
-USER="${2:-admin}"
-PASS="${3:-admin123}"
+if [ $# -lt 3 ]; then
+  echo "usage: $0 <base-url> <username> <password>" >&2
+  echo "  e.g. $0 http://localhost:8080 someone 'their password'" >&2
+  exit 2
+fi
+
+BASE="$1"
+USER="$2"
+PASS="$3"
+here="$(dirname "$0")"
+
+login_body=$(USERNAME="$USER" PASSWORD="$PASS" python3 -c '
+import json, os
+print(json.dumps({"username": os.environ["USERNAME"],
+                  "password": os.environ["PASSWORD"]}))')
 
 token=$(curl -sf -X POST "$BASE/api/auth/login" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$USER\",\"password\":\"$PASS\"}" \
+  -d "$login_body" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
 
-auth=(-H "Authorization: Bearer $token")
-
-# describe <label> <path> [post-body]
-# The body argument exists because /api/auth/login is a POST; describing it
-# with a GET reported "no data" and quietly omitted the one payload every
-# other call depends on.
-describe() {
-  echo "=== $1  ($2)"
-  if [ -n "${3:-}" ]; then
-    curl -sf -X POST "$BASE$2" -H 'Content-Type: application/json' -d "$3"
-  else
-    curl -sf "${auth[@]}" "$BASE$2"
-  fi | python3 -c '
-import sys, json
-payload = json.load(sys.stdin)
-# An empty list is the trap here. Reporting "(not an object)" for it reads
-# like a shape mismatch when it actually means there was nothing on the
-# server to describe — so the field list silently goes missing and the diff
-# against API-CONTRACT.md looks clean. Say which it is.
-if isinstance(payload, list) and not payload:
-    print("  (EMPTY — nothing on the server to describe; this endpoint was NOT verified)")
-    raise SystemExit
-sample = payload[0] if isinstance(payload, list) else payload
-if not isinstance(sample, dict):
-    print(f"  (not an object: {type(sample).__name__})"); raise SystemExit
-for key, value in sample.items():
-    kind = type(value).__name__
-    preview = str(value)[:48].replace("\n", " ")
-    print(f"  {key}: {kind} = {preview}")
-' || echo "  (no data)"
-  echo
-}
-
 echo "Contract captured from $BASE on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo
-describe "AuthResponse"       "/api/auth/login" "{\"username\":\"$USER\",\"password\":\"$PASS\"}"
-describe "ProjectResponse"   "/api/projects"
-describe "DocumentResponse"  "/api/documents/project/1"
-describe "ViewerData"        "/api/viewer/1"
-describe "AnnotationResponse" "/api/annotations/document/${ANNOTATED_DOC:-1}"
+
+# The payload shapes are described by a sibling Python file rather than by
+# Python quoted inside this script — see the note at the top of that file for
+# what quoting did to the previous version.
+python3 "$here/contract_shapes.py" "$BASE" "$token" "$USER" "$login_body"
 
 echo "=== enums (from the backend source)"
-grep -rhoE 'enum (AnnotationType|AnnotationStatus|DocumentType|DocumentStatus) \{' -A 4 \
-  "$(dirname "$0")/../../src/main/java" --include='*.java' 2>/dev/null \
-  | tr -s ' \n' ' ' | sed 's/--/\n/g' || echo "  (source not available)"
+# No -o here: it suppresses the -A context, so this printed the four enum
+# declarations and none of their values — the part anyone actually needs.
+grep -rhE 'enum (AnnotationType|AnnotationStatus|DocumentType|DocumentStatus) \{' -A 4 \
+  "$here/../../src/main/java" --include='*.java' 2>/dev/null \
+  | sed 's/^[[:space:]]*/  /' || echo "  (source not available)"

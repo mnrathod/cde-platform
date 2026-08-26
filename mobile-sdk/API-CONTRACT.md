@@ -4,8 +4,14 @@ The surface both SDKs bind to. Every endpoint and payload below was read from
 a running server rather than from the source, so the field names are what the
 wire actually carries.
 
-Last checked against a running server on 2026-08-26. Regenerate with
-`mobile-sdk/tools/capture-contract.sh` after changing any DTO.
+Last regenerated from a running server on 2026-08-26 with
+`mobile-sdk/tools/capture-contract.sh`, which verified `AuthResponse`,
+`ProjectResponse`, `DocumentResponse`, `ViewerData`, `AnnotationResponse` and
+the four enums against live payloads. Re-run it after changing any DTO.
+
+That run is also what corrected the role list and `ProjectResponse` below, so
+treat "the script has not been run since" as meaning this document is
+unverified rather than merely old.
 
 ## Authentication
 
@@ -21,9 +27,16 @@ POST /api/auth/register
      { "username": "...", "email": "...", "password": "..." }
 ```
 
-`role` is one of `ADMIN`, `MANAGER`, `REVIEWER`, `VIEWER`. The server decides
-permissions; the SDK uses the role only to hide controls that would be
-rejected, never to grant anything.
+`role` is one of `ADMIN`, `ENGINEER`, `REVIEWER`, `VIEWER` — and `ENGINEER` is
+what registration assigns, so it is the one the SDKs see most. This document
+previously listed a `MANAGER` role, which does not exist, and omitted
+`ENGINEER`, which is the common case. Neither SDK broke on it, because both
+carry `role` as an opaque string and never switch on it; the damage was
+confined to anyone writing a client from this document, who would have matched
+the role almost never.
+
+The server decides permissions; the SDK uses the role only to hide controls
+that would be rejected, never to grant anything.
 
 ## Projects and documents
 
@@ -65,6 +78,7 @@ hand-written client compiles against whatever it believes.
 | `location` | string? | |
 | `phase` | string? | `CONCEPT`, `DESIGN`, `CONSTRUCTION`, `HANDOVER`, `OPERATION` |
 | `ownerUsername` | string? | the username, not the id |
+| `createdAt` / `updatedAt` | ISO-8601 local date-time, **no zone** | see below |
 | `documentCount` | number | computed by the server, not a stored column |
 
 `DocumentResponse`
