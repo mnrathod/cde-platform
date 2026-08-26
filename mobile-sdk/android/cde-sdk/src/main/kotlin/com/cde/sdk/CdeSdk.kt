@@ -22,7 +22,7 @@ import java.io.File
  * ```kotlin
  * val cde = CdeSdk(context, CdeConfiguration(baseUrl = "https://cde.example.com"))
  * cde.signIn("username", "password")
- * val documents = cde.documents(projectId = 1)
+ * val documents = cde.documents(projectId = 1).content
  * ```
  *
  * Everything that touches the network suspends and answers from the offline
@@ -78,11 +78,24 @@ class CdeSdk(
 
     suspend fun projects(): List<Project> = api.projects()
 
-    /** Documents in a project, falling back to the last list seen offline. */
-    suspend fun documents(projectId: Long): List<CdeDocument> = try {
-        api.documents(projectId).also { store.storeDocuments(projectId, it) }
+    /**
+     * One page of a project's documents, falling back to what was last seen
+     * when there is no connection.
+     *
+     * <p>The cache holds the first page only, and the page returned offline
+     * describes itself as exactly that — the totals are the cache's own, not a
+     * remembered server count, so a caller is never told there are 137
+     * documents when it can produce 50.
+     */
+    suspend fun documents(projectId: Long, page: Int = 0, size: Int = 50): DocumentPage = try {
+        api.documents(projectId, page, size)
+            .also { if (it.number == 0) store.storeDocuments(projectId, it.content) }
     } catch (e: CdeError.Offline) {
-        store.cachedDocuments(projectId)
+        val cached = if (page == 0) store.cachedDocuments(projectId) else emptyList()
+        DocumentPage(
+            content = cached, number = page, size = size,
+            totalElements = cached.size.toLong(), totalPages = 1,
+            first = page == 0, last = true)
     }
 
     // ── Opening a document ───────────────────────────────────────

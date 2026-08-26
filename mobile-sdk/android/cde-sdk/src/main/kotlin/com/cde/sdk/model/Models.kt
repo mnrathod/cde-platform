@@ -144,6 +144,30 @@ data class CdeDocument(
     val updatedAt: String? = null,
 )
 
+/**
+ * One page of a document listing.
+ *
+ * <p>The counts are carried on the type rather than left to the caller to
+ * infer, because there is no way to infer them: a page holding fewer items
+ * than the page size is not necessarily the last page, and a full page is not
+ * necessarily followed by another. A client that returned only [content] would
+ * show a plausible, silently truncated list.
+ */
+@Serializable
+data class DocumentPage(
+    /** The documents on this page, in the order the server returned them. */
+    val content: List<CdeDocument>,
+    /** Zero-based index of this page. */
+    val number: Int,
+    /** Maximum documents a page of this listing holds. */
+    val size: Int,
+    /** Documents across every page, not just this one. */
+    val totalElements: Long,
+    val totalPages: Int,
+    val first: Boolean,
+    val last: Boolean,
+)
+
 @Serializable
 data class Project(
     val id: Long,

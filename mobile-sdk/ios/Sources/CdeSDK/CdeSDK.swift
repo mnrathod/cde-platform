@@ -19,7 +19,7 @@ public enum OpenedDocument: Sendable {
 /// ```swift
 /// let cde = CdeSDK(configuration: .init(baseURL: URL(string: "https://cde.example.com")!))
 /// try await cde.signIn(username: "…", password: "…")
-/// let documents = try await cde.documents(projectId: 1)
+/// let documents = try await cde.documents(projectId: 1).content
 /// ```
 ///
 /// Everything that touches the network answers from the offline cache when
@@ -81,14 +81,28 @@ public actor CdeSDK {
         try await api.projects()
     }
 
-    /// Documents in a project, falling back to the last list seen offline.
-    public func documents(projectId: Int64) async throws -> [CdeDocument] {
+    /// One page of a project's documents, falling back to what was last seen
+    /// when there is no connection.
+    ///
+    /// The cache holds the first page only, and the page returned offline
+    /// describes itself as exactly that — the totals are the cache's own, not
+    /// a remembered server count, so a caller is never told there are 137
+    /// documents when it can produce 50.
+    public func documents(projectId: Int64,
+                          page: Int = 0,
+                          size: Int = 50) async throws -> DocumentPage {
         do {
-            let documents = try await api.documents(projectId: projectId)
-            store.storeDocuments(documents, projectId: projectId)
-            return documents
+            let listing = try await api.documents(projectId: projectId, page: page, size: size)
+            if listing.number == 0 {
+                store.storeDocuments(listing.content, projectId: projectId)
+            }
+            return listing
         } catch CdeError.offline {
-            return store.cachedDocuments(projectId: projectId)
+            let cached = page == 0 ? store.cachedDocuments(projectId: projectId) : []
+            return DocumentPage(
+                content: cached, number: page, size: size,
+                totalElements: Int64(cached.count), totalPages: 1,
+                first: page == 0, last: true)
         }
     }
 

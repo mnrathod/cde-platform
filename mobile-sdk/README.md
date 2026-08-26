@@ -11,15 +11,21 @@ rendering engine of its own, and neither uses a WebView for PDF.
 
 ## Status: compiled and tested off-device, never run on a device
 
-Both SDKs compile and both parity suites pass — 17 tests each, the same
-vectors on both platforms.
+Both SDKs compile, both parity suites pass — 17 tests each, the same vectors on
+both platforms — and both now decode the server's real payload shapes under
+test.
 
 | | Compiled | Tests | How |
 |---|---|---|---|
-| **iOS** | Everything except the UIKit layer | 17/17 | `swift build && swift test`, Swift 6.3.3, Swift 6 language mode |
-| **Android** | Every source file, against the real framework | 26/26 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.4.10, API 37 |
+| **iOS** | Everything except the UIKit layer | 23/23 | `swift build && swift test`, Swift 6.3.3, Swift 6 language mode |
+| **Android** | Every source file, against the real framework | 32/32 | [`tools/jvm-verify`](tools/jvm-verify), Kotlin 2.4.10, API 37 |
 
-The extra nine on Android cover [`ViewportTransform`](android/cde-sdk/src/main/kotlin/com/cde/sdk/ui/ViewportTransform.kt),
+Six tests on each side are `WireContractTest`
+([Kotlin](android/cde-sdk/src/test/kotlin/com/cde/sdk/net/WireContractTest.kt),
+[Swift](ios/Tests/CdeSDKTests/WireContractTests.swift)), which decode the same
+payload shapes the server actually sends — the same vectors on both platforms,
+for the same reason as the parity suite. The extra nine on Android cover
+[`ViewportTransform`](android/cde-sdk/src/main/kotlin/com/cde/sdk/ui/ViewportTransform.kt),
 which holds the arithmetic relating page, view and bitmap coordinates. It was
 pulled out of the view precisely so it could be tested without a device: the
 page and the markup over it being drawn at different scales is the one viewer
@@ -70,9 +76,14 @@ So: the geometry, the wire format, the measurement maths and every API
 signature are checked by a compiler and a test run. Rendering, gestures and
 networking are reviewed code that has not executed.
 
-The API contract remains the other verified piece: every endpoint, payload
-shape, enum value and field name in [API-CONTRACT.md](API-CONTRACT.md) was read
-from a running server rather than inferred from the backend source.
+The API contract in [API-CONTRACT.md](API-CONTRACT.md) was read from a running
+server rather than inferred from the backend source — but **being read from a
+running server once is not the same as still being true**, and it had since
+drifted in two places that broke the SDKs outright: the document listing became
+a page envelope, and errors became RFC 9457 problem documents. Both are fixed,
+and both are now pinned by `WireContractTest` so the next drift fails a build
+rather than a phone. The lesson is the general one: `capture-contract.sh` is
+manual and nobody ran it, so a client that compiles is not a client that works.
 
 Before trusting this on a device:
 
@@ -86,8 +97,13 @@ Before trusting this on a device:
 ### Running the checks that do work without a device
 
 ```bash
-# iOS — logic layers and the parity suite. Needs any Swift 6 toolchain.
+# iOS — logic layers, the parity suite and the wire contract.
+# Needs any Swift 6 toolchain:
 cd ios && swift test
+
+# …or none at all, which is how it is run here — the official image carries
+# the same compiler, so this is not a weaker check than the line above:
+cd ios && docker run --rm -v "$PWD":/pkg -w /pkg swift:6.3.3-noble swift test
 
 # Android — every source file type-checked against the real framework
 # classes, plus the parity suite. Needs only a JDK; no Android SDK.

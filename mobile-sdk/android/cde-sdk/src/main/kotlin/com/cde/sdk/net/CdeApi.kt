@@ -93,8 +93,20 @@ class CdeApi(
     suspend fun projects(): List<Project> =
         json.decodeFromString(get("/api/projects"))
 
-    suspend fun documents(projectId: Long): List<CdeDocument> =
-        json.decodeFromString(get("/api/documents/project/$projectId"))
+    /**
+     * One page of a project's documents.
+     *
+     * <p>The endpoint always answers with a page envelope, including when the
+     * page holds everything. This decoded a bare array, which threw on every
+     * listing rather than truncating one — the SDK compiled cleanly against a
+     * contract it no longer matched.
+     *
+     * @param page zero-based page index
+     * @param size documents per page; the server caps this at 200
+     */
+    suspend fun documents(projectId: Long, page: Int = 0, size: Int = 50): DocumentPage =
+        json.decodeFromString(
+            get("/api/documents/project/$projectId?page=$page&size=$size"))
 
     suspend fun document(documentId: Long): CdeDocument =
         json.decodeFromString(get("/api/documents/$documentId"))
@@ -221,20 +233,31 @@ class CdeApi(
         }
     }
 
-    /**
-     * The server writes `{ "message": ... }` for text meant to be read by a
-     * person. Anything else is discarded rather than shown: a stack trace or
-     * an internal identifier in front of a user is both unhelpful and a
-     * disclosure.
-     */
-    private fun serverMessage(response: okhttp3.Response): String? = runCatching {
-        val body = response.peekBody(8 * 1024).string()
-        json.decodeFromString<JsonObject>(body)["message"]?.jsonPrimitive?.contentOrNull()
-    }.getOrNull()
+    private fun serverMessage(response: okhttp3.Response): String? =
+        runCatching { problemMessage(json, response.peekBody(8 * 1024).string()) }.getOrNull()
 
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNull(): String? =
         if (this is kotlinx.serialization.json.JsonNull) null else content
 }
+
+/**
+ * The sentence to show a person out of an error response.
+ *
+ * <p>Errors are RFC 9457 problem documents. `detail` explains this particular
+ * occurrence and `title` names the class of problem, so `detail` is preferred
+ * and `title` stands in when there is none. The SDK read `message`, a key the
+ * server stopped sending: every refusal reached the user as the SDK's own
+ * generic sentence while the server's explanation was discarded unread.
+ *
+ * <p>Only text the server wrote for a reader is returned. `type`, `instance`
+ * and `traceId` are deliberately not: an internal identifier in front of a
+ * user is both unhelpful and a disclosure.
+ */
+internal fun problemMessage(json: Json, body: String): String? = runCatching {
+    val payload = json.decodeFromString<JsonObject>(body)
+    val text = (payload["detail"] ?: payload["title"])?.jsonPrimitive
+    if (text is kotlinx.serialization.json.JsonNull) null else text?.content?.ifBlank { null }
+}.getOrNull()
 
 @kotlinx.serialization.Serializable
 internal data class LoginRequest(val username: String, val password: String)

@@ -4,7 +4,7 @@ The surface both SDKs bind to. Every endpoint and payload below was read from
 a running server rather than from the source, so the field names are what the
 wire actually carries.
 
-Captured against `cde-platform` at `8bc8d2b`. Regenerate with
+Last checked against a running server on 2026-08-26. Regenerate with
 `mobile-sdk/tools/capture-contract.sh` after changing any DTO.
 
 ## Authentication
@@ -29,10 +29,31 @@ rejected, never to grant anything.
 
 ```
 GET  /api/projects                     -> ProjectResponse[]
-GET  /api/documents/project/{id}       -> DocumentResponse[]
+GET  /api/documents/project/{id}       -> PageResponse<DocumentResponse>
+     ?page=0&size=50&sort=createdAt,desc
 GET  /api/documents/{id}               -> DocumentResponse
 POST /api/documents/upload             (multipart: file, name, projectId)
 ```
+
+`PageResponse` — **the document listing is always an envelope**, including when
+the page holds everything, so one schema describes every response and a client
+never has to work out which shape it just parsed.
+
+| field | type | note |
+|---|---|---|
+| `content` | DocumentResponse[] | the items on this page |
+| `number` | number | zero-based page index |
+| `size` | number | page size, capped server-side at 200 |
+| `totalElements` | number | items across every page |
+| `totalPages` | number | pages at the current size |
+| `first` / `last` | boolean | |
+
+`sort` accepts `createdAt`, `updatedAt`, `name`, `fileSize`, `revision` and
+`drawingNumber` only; any other field is rejected rather than ignored.
+
+The SDKs decoded this as a bare array long after it became an envelope, which
+threw on every document listing. Nothing failed at build time, because a
+hand-written client compiles against whatever it believes.
 
 `ProjectResponse`
 
@@ -193,13 +214,38 @@ Handled uniformly by the server's exception handler. The SDKs map them to one
 
 | status | meaning |
 |---|---|
-| 400 | request rejected — body carries `message` |
+| 400, 409, 422 | request rejected — the body says why |
 | 401 | token missing, expired or invalid — SDK clears it and reports `unauthenticated` |
 | 403 | authenticated but not permitted |
 | 404 | no such document |
 | 405 | wrong method |
 | 503 | converter service unavailable — retryable |
 
-A body of `{ "message": "…" }` is written by the server for display. Anything
-else is reported generically; the SDKs never surface a raw status code or a
-stack trace to a user.
+### The body is an RFC 9457 problem document
+
+`Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "/problems/upload-rejected",
+  "title": "Upload rejected",
+  "status": 422,
+  "detail": "A single chunk may be at most 8 MB.",
+  "instance": "/api/documents/upload/chunk",
+  "traceId": "…"
+}
+```
+
+**`detail` is the sentence to show**, because it describes this particular
+occurrence; `title` names the class of problem and stands in when there is no
+`detail`. A validation failure additionally carries `invalidFields`.
+
+`type`, `instance` and `traceId` are never shown to a user — an internal
+identifier in front of someone is both unhelpful and a disclosure. Anything the
+SDK cannot read is reported generically; the SDKs never surface a raw status
+code or a stack trace.
+
+This replaced an earlier `{ "message": "…" }` envelope. The SDKs went on
+reading `message` for some time afterwards and compiled perfectly well doing
+it: every refusal reached the user as the SDK's own generic sentence while the
+server's explanation was discarded unread.

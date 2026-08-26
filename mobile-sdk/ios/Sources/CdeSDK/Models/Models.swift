@@ -213,6 +213,38 @@ public struct CdeDocument: Codable, Identifiable, Sendable {
     public let updatedAt: String?
 }
 
+/// One page of a document listing.
+///
+/// The counts are carried on the type rather than left to the caller to infer,
+/// because there is no way to infer them: a page holding fewer items than the
+/// page size is not necessarily the last page, and a full page is not
+/// necessarily followed by another. A client that returned only `content`
+/// would show a plausible, silently truncated list.
+public struct DocumentPage: Codable, Sendable {
+    /// The documents on this page, in the order the server returned them.
+    public let content: [CdeDocument]
+    /// Zero-based index of this page.
+    public let number: Int
+    /// Maximum documents a page of this listing holds.
+    public let size: Int
+    /// Documents across every page, not just this one.
+    public let totalElements: Int64
+    public let totalPages: Int
+    public let first: Bool
+    public let last: Bool
+
+    public init(content: [CdeDocument], number: Int, size: Int,
+                totalElements: Int64, totalPages: Int, first: Bool, last: Bool) {
+        self.content = content
+        self.number = number
+        self.size = size
+        self.totalElements = totalElements
+        self.totalPages = totalPages
+        self.first = first
+        self.last = last
+    }
+}
+
 public struct Project: Codable, Identifiable, Sendable {
     public let id: Int64
     public let name: String

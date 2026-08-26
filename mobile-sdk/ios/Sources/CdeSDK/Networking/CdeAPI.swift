@@ -109,9 +109,22 @@ public actor CdeAPI {
         try decoder.decode([Project].self, from: await get("/api/projects"))
     }
 
-    public func documents(projectId: Int64) async throws -> [CdeDocument] {
-        try decoder.decode([CdeDocument].self,
-                           from: await get("/api/documents/project/\(projectId)"))
+    /// One page of a project's documents.
+    ///
+    /// The endpoint always answers with a page envelope, including when the
+    /// page holds everything. This decoded a bare array, which threw on every
+    /// listing rather than truncating one — the SDK compiled cleanly against a
+    /// contract it no longer matched.
+    ///
+    /// - Parameters:
+    ///   - page: zero-based page index
+    ///   - size: documents per page; the server caps this at 200
+    public func documents(projectId: Int64,
+                          page: Int = 0,
+                          size: Int = 50) async throws -> DocumentPage {
+        try decoder.decode(
+            DocumentPage.self,
+            from: await get("/api/documents/project/\(projectId)?page=\(page)&size=\(size)"))
     }
 
     public func document(id: Int64) async throws -> CdeDocument {
@@ -259,15 +272,29 @@ public actor CdeAPI {
         }
     }
 
-    /// The server writes `{ "message": ... }` for text meant to be read by a
-    /// person. Anything else is discarded rather than shown: a stack trace or
-    /// an internal identifier in front of a user is both unhelpful and a
-    /// disclosure.
-    private func serverMessage(in data: Data) -> String? {
-        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return payload["message"] as? String
-    }
+    private func serverMessage(in data: Data) -> String? { problemMessage(in: data) }
+}
+
+/// The sentence to show a person out of an error response.
+///
+/// Errors are RFC 9457 problem documents. `detail` explains this particular
+/// occurrence and `title` names the class of problem, so `detail` is preferred
+/// and `title` stands in when there is none. The SDK read `message`, a key the
+/// server stopped sending: every refusal reached the user as the SDK's own
+/// generic sentence while the server's explanation was discarded unread.
+///
+/// Only text the server wrote for a reader is returned. `type`, `instance` and
+/// `traceId` are deliberately not: an internal identifier in front of a user
+/// is both unhelpful and a disclosure.
+///
+/// Free-standing rather than a method on the actor so it can be tested without
+/// a server, which is the whole reason the drift above went unnoticed.
+internal func problemMessage(in data: Data) -> String? {
+    guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return nil }
+
+    let text = (payload["detail"] as? String) ?? (payload["title"] as? String)
+    return text?.isEmpty == false ? text : nil
 }
 
 private extension String {
