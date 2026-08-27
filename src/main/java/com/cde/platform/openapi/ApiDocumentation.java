@@ -63,17 +63,6 @@ public final class ApiDocumentation {
 
     public static final String PROBLEM_MEDIA_TYPE = "application/problem+json";
 
-    /**
-     * The model provider's own request and reply formats, carried through
-     * unchanged. Named so the assistant endpoints reference one described
-     * schema rather than an empty inline object, which is what an untyped
-     * passthrough generates.
-     */
-    public static final String ASSISTANT_PAYLOAD_SCHEMA = "AssistantPayload";
-
-    public static final String ASSISTANT_PAYLOAD_REF =
-        "#/components/schemas/" + ASSISTANT_PAYLOAD_SCHEMA;
-
     // ── Extension members of the envelope ────────────────────────────────────
     //
     // ApiProblem sets these; OpenApiConfiguration documents them. Shared so the

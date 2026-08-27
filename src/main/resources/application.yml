@@ -165,8 +165,26 @@ cde:
     staging-expiry: PT24H
   converter:
     url: http://localhost:5001
-  anthropic:
-    api-key: ${ANTHROPIC_API_KEY:}   # set via env var or replace with your key here
+  ai:
+    # Assisted summaries (§10). Absent credentials simply mean the feature
+    # reports itself unavailable — the rest of the platform does not depend on
+    # it, so an absent key is not a reason to refuse to start.
+    #
+    # The tier check comes first regardless: a government or Defence deployment
+    # makes no outbound calls, and no amount of configuration here changes that.
+    api-key: ${CDE_AI_API_KEY:${ANTHROPIC_API_KEY:}}
+    # No default. A model identifier carries a dated version that goes out of
+    # support, and one written here would be wrong within a year and wrong
+    # silently — the provider would simply start refusing calls. Name the model
+    # this deployment has contracted for.
+    model: ${CDE_AI_MODEL:}
+    # Point this at a self-hosted or in-region endpoint for local inference,
+    # which is a configuration decision rather than a fork.
+    endpoint: ${CDE_AI_ENDPOINT:https://api.anthropic.com/v1/messages}
+    # Caps what one call can cost. Enforced here rather than accepted from the
+    # caller, because the caller does not pay for it.
+    max-output-tokens: ${CDE_AI_MAX_OUTPUT_TOKENS:1500}
+    timeout: ${CDE_AI_TIMEOUT:PT60S}
 
 management:
   endpoints:

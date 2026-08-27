@@ -532,14 +532,92 @@ The CAD/Office conversion service. Its reachability is reported by
 still worth routing traffic to without it, so it is deliberately excluded from
 the readiness group.
 
-### `cde.anthropic.api-key`
+## Assisted summaries
+
+Three checks decide whether anything reaches a model provider, and all three
+must pass:
+
+1. **The deployment tier permits outbound calls at all.** Government and
+   Defence tiers do not, and no configuration here overrides that.
+2. **`cde.security.deployment.ai-features` is `online-api`.**
+3. **A provider and model are configured below.**
+
+What is sent is built on the server from an allow-list of named fields.
+Personal identifiers are replaced with stable placeholders and put back locally
+on the reply; content carrying a classification marking is **refused outright**
+rather than redacted. Every call is recorded in the audit trail — who, when,
+which model and provider, whether redaction fired — and never the payload.
+
+### `cde.ai.api-key`
 
 | | |
 |---|---|
-| Environment variable | `ANTHROPIC_API_KEY` |
-| Type | string |
-| Default | empty (feature disabled) |
-| Secret | **yes** |
+| Type | String |
+| Default | *(empty — the feature reports itself unavailable)* |
+| Required | No |
+| Secret | **Yes** |
+| Environment variable | `CDE_AI_API_KEY`, falling back to `ANTHROPIC_API_KEY` |
+
+An absent key means the feature is unavailable, not that the application
+refuses to start: assisted summaries are optional and nothing else depends on
+them.
+
+### `cde.ai.model`
+
+| | |
+|---|---|
+| Type | String |
+| Default | *(none)* |
+| Required | **Yes, when `cde.ai.api-key` is set** |
+| Secret | No |
+| Environment variable | `CDE_AI_MODEL` |
+
+The model to call. There is deliberately no default: model identifiers carry
+dated versions that go out of support, and one written into the application
+would be wrong within a year and wrong *silently* — the provider would simply
+begin refusing calls. Name the model this deployment has contracted for.
+
+This used to be chosen by the browser, in a hard-coded string in the Angular
+source, which meant the client decided what the deployment spent and on what.
+
+### `cde.ai.endpoint`
+
+| | |
+|---|---|
+| Type | String (URL) |
+| Default | `https://api.anthropic.com/v1/messages` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_AI_ENDPOINT` |
+
+Point this at a self-hosted or in-region endpoint for local inference, which is
+what makes the sovereign-deployment option a configuration decision rather than
+a fork. Redirects are never followed: a provider that redirects is one whose
+destination this deployment did not approve.
+
+### `cde.ai.max-output-tokens`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `1500` |
+| Range | 1–8192 |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_AI_MAX_OUTPUT_TOKENS` |
+
+Caps what a single call can cost. Enforced here rather than accepted from the
+caller, because the caller does not pay for it.
+
+### `cde.ai.timeout`
+
+| | |
+|---|---|
+| Type | Duration (ISO-8601) |
+| Default | `PT60S` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_AI_TIMEOUT` |
 
 ---
 

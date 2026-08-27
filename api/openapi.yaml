@@ -86,31 +86,23 @@ tags:
 - description: Client-side error reporting and service status.
   name: Diagnostics
 paths:
-  /api/ai/messages:
-    post:
+  /api/ai/availability:
+    get:
       description: |-
-        Forwards the request to the configured model provider and returns its reply verbatim. The request and response bodies are the provider's own formats, which is why they are described here as opaque JSON rather than modelled: this endpoint does not interpret them.
+        Reports whether a model provider is configured and permitted on this deployment, so a client can hide the feature rather than offer one that will be refused.
 
-        **The payload is forwarded as supplied.** The redaction layer that the data-handling rules require — allow-list field selection, personal-data pseudonymisation, and a hard refusal on classified content — is not implemented here yet, so a caller is responsible for what it sends. On a deployment where the provider may not be called at all, the feature is switched off rather than relied upon to filter.
+        It is `false` on any government or Defence deployment regardless of configuration: those tiers make no outbound calls, and the check is not something a tenant administrator can override.
 
-        Requires authentication. Calls are chargeable and are attributed to the caller.
-      operationId: sendAssistantMessage
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AssistantPayload"
-              example: null
-        description: "The provider's own request format, forwarded unchanged."
-        required: true
+        Requires authentication.
+      operationId: getAssistanceAvailability
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AssistantPayload"
+                $ref: "#/components/schemas/AssistanceAvailability"
                 example: null
-          description: "The provider's reply, passed through unchanged."
+          description: Whether the feature can be used.
         "400":
           content:
             application/problem+json:
@@ -135,14 +127,6 @@ paths:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
           description: "Authenticated, but without the permission this operation requires."
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AssistantPayload"
-                example: null
-          description: "The provider rejected the payload. Its own error format is\
-            \ returned unchanged, so the members are the provider's, not this API's."
         "429":
           content:
             application/problem+json:
@@ -160,42 +144,37 @@ paths:
                 example: null
           description: The request failed for a reason the caller cannot act on. Quote
             the `traceId` when reporting it.
-        "503":
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ProblemDetail"
-                example: null
-          description: "No provider credential is configured on this deployment, or\
-            \ the provider could not be reached."
-      summary: Send a message to the assistant
+      summary: Whether this deployment offers assisted summaries
       tags:
       - Assistance
-  /api/ai/messages/stream:
+  /api/ai/comparison-report:
     post:
       description: |-
-        Same contract as the non-streaming route and, at present, the same behaviour: the reply is collected in full before it is returned, so a caller sees no incremental output. The separate path exists so streaming can be added behind it without a client change.
+        Turns the differences between two revisions into a structured review report.
 
-        The same caveat about unredacted payloads applies.
+        **The request carries facts, not a prompt.** The prompt, the model and the token ceiling are all decided on the server. This matters for more than tidiness: the outbound payload is built from an allow-list of named fields, so a field added to a comparison later does not travel to a third party until somebody decides it should.
 
-        Requires authentication. Calls are chargeable and are attributed to the caller.
-      operationId: streamAssistantMessage
+        Before anything is sent, the selected fields are scanned. Personal identifiers — email addresses, telephone numbers, addresses in URLs — are replaced with stable placeholders and put back locally on the way home, so the provider never sees them. Content carrying a **classification marking is refused outright** rather than redacted: there is no redaction that makes such material safe to send, and a partial send is still a send.
+
+        Every call is recorded in the audit trail — who, when, which model and provider, and whether redaction fired. The prompt and the reply are never recorded.
+
+        Requires authentication.
+      operationId: summariseComparison
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AssistantPayload"
+              $ref: "#/components/schemas/ComparisonReportRequest"
               example: null
-        description: "The provider's own request format, forwarded unchanged."
         required: true
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AssistantPayload"
+                $ref: "#/components/schemas/ComparisonReportResponse"
                 example: null
-          description: "The provider's reply, passed through unchanged."
+          description: The report.
         "400":
           content:
             application/problem+json:
@@ -222,12 +201,12 @@ paths:
           description: "Authenticated, but without the permission this operation requires."
         "422":
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AssistantPayload"
+                $ref: "#/components/schemas/ProblemDetail"
                 example: null
-          description: "The provider rejected the payload. Its own error format is\
-            \ returned unchanged, so the members are the provider's, not this API's."
+          description: "The content carries a classification marking and will not\
+            \ be sent to a third party. The reply names which field, never its contents."
         "429":
           content:
             application/problem+json:
@@ -251,9 +230,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
-          description: "No provider credential is configured on this deployment, or\
-            \ the provider could not be reached."
-      summary: "Send a message to the assistant, asking for a streamed reply"
+          description: "No provider is configured, or this deployment tier makes no\
+            \ outbound calls, or the provider could not be reached."
+      summary: Produce a review report for a comparison
       tags:
       - Assistance
   /api/annotations:
@@ -6289,15 +6268,18 @@ components:
             example: null
       required:
       - pages
-    AssistantPayload:
-      type:
-      - object
-      additionalProperties: true
-      description: "The model provider's own message format, passed through unchanged\
-        \ in both directions. Its members are defined by the provider, not by this\
-        \ API, and can change when the provider's version changes — so this API does\
-        \ not enumerate them and does not validate them."
+    AssistanceAvailability:
+      description: Whether assisted summaries can be used on this deployment.
       example: null
+      properties:
+        available:
+          type:
+          - boolean
+          description: "False on any deployment that makes no outbound calls, and\
+            \ on any with no provider configured."
+          example: true
+      required:
+      - available
     AuditChainVerificationResponse:
       description: The result of recomputing every hash in this organisation's chain.
       example: null
@@ -6458,6 +6440,77 @@ components:
       required:
       - documentId1
       - documentId2
+    ComparisonReportRequest:
+      description: "The facts to summarise. Deliberately not a prompt: the prompt\
+        \ is built on the server from these fields, which is what makes an allow-list\
+        \ possible."
+      example: null
+      properties:
+        changes:
+          type:
+          - array
+          description: "The changes detected, one per entry. At most 40 are sent;\
+            \ the rest are summarised by count."
+          example:
+          - Door schedule updated on grid line C
+          items:
+            type:
+            - string
+            example: null
+        documentKind:
+          type:
+          - string
+          description: What kind of document was compared.
+          example: drawing
+          maxLength: 64
+          minLength: 0
+        firstDocumentName:
+          type:
+          - string
+          description: Name of the earlier revision's document.
+          example: GA Plan — Level 02
+          maxLength: 400
+          minLength: 0
+        firstRevision:
+          type:
+          - string
+          description: Revision identifier of the earlier document.
+          example: P01
+          maxLength: 400
+          minLength: 0
+        secondDocumentName:
+          type:
+          - string
+          description: Name of the later revision's document.
+          example: GA Plan — Level 02
+          maxLength: 400
+          minLength: 0
+        secondRevision:
+          type:
+          - string
+          description: Revision identifier of the later document.
+          example: P02
+          maxLength: 400
+          minLength: 0
+      required:
+      - changes
+      - documentKind
+      - firstDocumentName
+      - firstRevision
+      - secondDocumentName
+      - secondRevision
+    ComparisonReportResponse:
+      description: The assisted review report.
+      example: null
+      properties:
+        report:
+          type:
+          - string
+          description: "The report, in five sections. Any placeholder the provider\
+            \ saw has been replaced with the real value before this reply was assembled."
+          example: Revision summary\nThe door schedule was revised...
+      required:
+      - report
     ComparisonResponse:
       description: "The difference between two documents. The comparison itself is\
         \ produced by the conversion service and its members vary with the document\

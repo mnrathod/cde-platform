@@ -246,7 +246,6 @@ public class OpenApiConfiguration {
     public OpenApiCustomizer problemDetailSchemaCustomizer() {
         return openApi -> {
             openApi.getComponents().addSchemas(PROBLEM_SCHEMA, problemSchema());
-            openApi.getComponents().addSchemas(ASSISTANT_PAYLOAD_SCHEMA, assistantPayloadSchema());
             // ModelTreeNode is referenced only from an @ApiResponse on a
             // method whose return type is erased, so nothing walks it into
             // components and the reference dangles. Registered explicitly.
@@ -254,23 +253,6 @@ public class OpenApiConfiguration {
                 new io.swagger.v3.core.converter.ModelConverters().read(
                     com.cde.platform.dto.ViewerDtos.ModelTreeNode.class).get("ModelTreeNode"));
         };
-    }
-
-    /**
-     * The assistant endpoints forward the model provider's own formats without
-     * interpreting them, so what they accept and return is whatever that
-     * provider defines. Describing it as a free-form object says exactly that;
-     * enumerating members would claim a stability this API does not control.
-     */
-    private Schema<Object> assistantPayloadSchema() {
-        ObjectSchema payload = new ObjectSchema();
-        payload.description("""
-            The model provider's own message format, passed through unchanged in both \
-            directions. Its members are defined by the provider, not by this API, and can \
-            change when the provider's version changes — so this API does not enumerate them \
-            and does not validate them.""");
-        payload.additionalProperties(true);
-        return payload;
     }
 
     private Schema<Object> problemSchema() {
