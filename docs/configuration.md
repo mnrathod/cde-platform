@@ -770,6 +770,131 @@ so the gap is visible rather than discovered:
   the ceiling applies to is not built.
 - The actual Have I Been Pwned client. The mode is configured and validated;
   nothing calls it yet.
-- Storage provider selection (`azure` / `s3` / `gcs` / `local`)
+- The `azure`, `s3` and `gcs` storage providers. The abstraction and the
+  `local` provider are built and tested; the three cloud adapters are not, and
+  selecting one fails at startup rather than silently falling back.
 - Per-tenant AI kill switch. The deployment-level mode exists; the per-tenant
   override does not.
+
+---
+
+## Object storage
+
+Which backend holds uploaded files, and how objects are addressed on it.
+See `docs/adr/0011-storage-abstraction.md` for why this sits behind an
+interface at all.
+
+### `cde.storage.provider`
+
+| | |
+|---|---|
+| Type | enum: `local`, `s3`, `azure`, `gcs` |
+| Default | `local` |
+| Required | no |
+| Secret | no |
+| Environment | `CDE_STORAGE_PROVIDER` |
+
+**Only `local` is implemented.** Selecting any of the other three fails at
+startup with a message saying so.
+
+That is deliberate rather than an oversight left to bite someone. The cloud
+adapters need the AWS, Azure and GCS SDKs, which the Spring Boot BOM does not
+manage, so adding them means pinning versions — and §0.1 forbids choosing a
+version without resolving it through Context7 first. Until that happens, a
+deployment that asks for S3 and silently gets a local disk would be writing
+customer data to a container filesystem that nothing backs up and that
+disappears on restart. Failing at startup is the kinder outcome.
+
+### `cde.storage.environment`
+
+| | |
+|---|---|
+| Type | string, lowercase letters, digits and hyphens |
+| Default | `local` |
+| Required | yes |
+| Secret | no |
+| Environment | `CDE_STORAGE_ENVIRONMENT` |
+
+The first segment of every storage key: `{environment}/{tenantId}/{category}/{objectId}`.
+
+Its job is to stop a staging deployment pointed at a shared bucket from
+writing over production objects. Cheap to set here, expensive to discover
+afterwards.
+
+### `cde.storage.local-root`
+
+| | |
+|---|---|
+| Type | filesystem path |
+| Default | `./storage` |
+| Required | when the provider is `local` |
+| Secret | no |
+| Environment | `CDE_STORAGE_LOCAL_ROOT` |
+
+Where the local provider keeps objects. Verified writable at startup by
+writing and reading back a real file — checking only that the directory
+exists would pass on a read-only mount, a full volume, and a path owned by
+another user, which are the three configurations that actually fail.
+
+**This volume must be encrypted at rest.** The local provider does not
+encrypt, unlike the cloud backends which encrypt per object server-side. An
+unencrypted volume means unencrypted customer data, and nothing in the
+application will stop you.
+
+### `cde.storage.signing-key`
+
+| | |
+|---|---|
+| Type | string, at least 32 bytes; base64 or raw |
+| Default | **none** |
+| Required | when the provider is `local` |
+| Secret | **yes** |
+| Environment | `CDE_STORAGE_SIGNING_KEY` |
+
+Signs the local provider's time-limited download URLs.
+
+There is no default, and the application refuses to start without it. A
+built-in signing key is a published signing key, and anyone holding it can
+mint a valid download URL for any object belonging to any tenant. Generate
+one with:
+
+```
+openssl rand -base64 32
+```
+
+Rotating it invalidates every outstanding download URL, which is the intended
+behaviour after a suspected compromise. Outstanding URLs live at most fifteen
+minutes, so a rotation is barely noticeable in normal operation.
+
+### `cde.storage.download-base-uri`
+
+| | |
+|---|---|
+| Type | absolute URI |
+| Default | `http://localhost:8080` |
+| Required | yes |
+| Secret | no |
+| Environment | `CDE_STORAGE_DOWNLOAD_BASE_URI` |
+
+The origin that presigned URLs point at.
+
+**In production this should be a different host from the application** — for
+example `files.example.com`. A stored HTML or SVG file is active content, and
+serving it from the application's own origin lets it execute against that
+origin with the user's session (§5.13.8). A separate origin makes that
+impossible rather than merely unlikely.
+
+### `cde.storage.upload-dir`
+
+| | |
+|---|---|
+| Type | filesystem path |
+| Default | `./uploads` |
+| Required | yes |
+| Secret | no |
+| Environment | — |
+
+The pre-abstraction upload path, still used by the fifteen call sites that
+have not yet moved to `StorageProvider`. It will be removed once they have.
+Until then both settings matter, and both paths need to be on encrypted,
+backed-up volumes.

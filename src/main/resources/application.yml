@@ -151,6 +151,29 @@ cde:
 
   storage:
     upload-dir: ./uploads
+
+    # Which object-storage backend is active (§11). Only `local` is implemented;
+    # selecting s3, azure or gcs fails at startup rather than silently writing
+    # customer data somewhere nothing backs up. See docs/adr/0011-storage-abstraction.md.
+    provider: ${CDE_STORAGE_PROVIDER:local}
+
+    # First segment of every storage key. Keeps a staging deployment pointed at
+    # a shared bucket from writing over production objects.
+    environment: ${CDE_STORAGE_ENVIRONMENT:local}
+
+    # Filesystem root for the local provider.
+    local-root: ${CDE_STORAGE_LOCAL_ROOT:./storage}
+
+    # Signs the local provider's time-limited download URLs. REQUIRED, no
+    # default: a built-in signing key is a published one, and whoever holds it
+    # can mint a URL for any object in any tenant. Generate with
+    #   openssl rand -base64 32
+    signing-key: ${CDE_STORAGE_SIGNING_KEY:}
+
+    # Origin those URLs point at. In production this should be a separate host
+    # from the application, so a stored HTML or SVG payload cannot execute
+    # against the application's own origin (§5.13.8).
+    download-base-uri: ${CDE_STORAGE_DOWNLOAD_BASE_URI:http://localhost:8080}
   upload:
     # Bounds on a chunked upload in flight. Each has a working default, so a
     # deployment that sets none of them is still bounded — the alternative is

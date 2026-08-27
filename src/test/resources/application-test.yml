@@ -43,3 +43,9 @@ cde:
       kdf: pbkdf2-sha256
   storage:
     upload-dir: ./build/test-uploads
+    # A fixed key, because these tests assert on signing behaviour and a random
+    # one per run would make a failure unreproducible. It is a test value and
+    # signs nothing outside the suite.
+    signing-key: dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyLWJ5dGVzLW1pbmltdW0=
+    local-root: ./build/test-storage
+    environment: test

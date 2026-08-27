@@ -15,3 +15,7 @@ cde:
     secret: test-only-signing-key-not-used-outside-the-test-suite-0123456789
   storage:
     upload-dir: ./build/test-uploads
+    # Test-only. Signs nothing outside the suite.
+    signing-key: dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyLWJ5dGVzLW1pbmltdW0=
+    local-root: ./build/test-storage
+    environment: test

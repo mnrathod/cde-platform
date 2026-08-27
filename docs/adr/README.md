@@ -27,6 +27,7 @@ loses the reasoning, which is the only part worth keeping.
 | [8](0008-out-of-process-conversion-toolchain.md) | Run the conversion and scanning toolchain out of process | Accepted |
 | [9](0009-bundle-third-party-javascript.md) | Bundle third-party JavaScript; never load executable code from a CDN | Accepted |
 | [10](0010-hash-chained-audit-trail.md) | Make the audit trail append-only and hash-chained in the database | Accepted |
+| [11](0011-storage-abstraction.md) | Put object storage behind one interface, with the local provider built first | Accepted |
 
 ## Decisions not yet recorded
 
@@ -36,7 +37,6 @@ consequences worth writing down are the ones discovered during
 implementation:
 
 - Valkey for caching, and what is cached versus what is not
-- The storage abstraction and its four providers
 - MFA: TOTP, recovery codes, and the WebAuthn position
 - SSO: SAML 2.0 and OIDC per-tenant configuration
 - The deployment-tier ceiling model for password policy
