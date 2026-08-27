@@ -307,6 +307,29 @@ class XfdfServiceTest {
         }
 
         @Test
+        @DisplayName("salvages the readable annotations from a damaged XFDF")
+        void salvagesWhatItCan() throws Exception {
+            // XFDF arrives from other vendors' tools, so a file that is well
+            // formed XML but nonsense inside is the normal case rather than
+            // the exceptional one. Importing eleven of twelve markups beats
+            // rejecting the file, and the per-element guard is what makes the
+            // difference — hence the assertion on the survivor, not on a log
+            // line.
+            var imported = parse("""
+                <square page="0" rect="not,a,rectangle,at,all"/>
+                <circle page="zero" rect=""/>
+                <ink page="0"><inklist><gesture>;;,,;</gesture></inklist></ink>
+                <polygon page="0" vertices=";;"/>
+                <freetext page="0" rect="0"/>
+                <square page="0" rect="0,0,10,10"/>
+                """);
+
+            assertThat(imported)
+                .extracting(XfdfService.ImportedAnnotation::shapeData)
+                .anySatisfy(shape -> assertThat(shape).contains("\"tool\":\"rect\""));
+        }
+
+        @Test
         @DisplayName("ignores an unsupported element rather than failing the import")
         void skipsUnsupported() throws Exception {
             var imported = parse("""

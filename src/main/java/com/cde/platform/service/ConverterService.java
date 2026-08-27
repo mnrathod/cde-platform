@@ -4,6 +4,8 @@ import com.cde.platform.exception.ConverterOfflineException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +18,8 @@ import java.time.Duration;
 
 @Service
 public class ConverterService {
+
+    private static final Logger log = LoggerFactory.getLogger(ConverterService.class);
 
     private final String converterUrl;
     private final DxfToSvgService fallback;
@@ -57,12 +61,14 @@ public class ConverterService {
             if (error.startsWith("DWG_BINARY:") || error.equals("DWG_NEED_CONVERTER"))
                 return new ConvertResult(false, null, error, json);
 
-            System.err.println("[Converter] Error: " + error + " — trying Java fallback");
+            log.warn("Converter refused the drawing ({}); falling back to the Java DXF parser", error);
 
         } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
-            System.err.println("[Converter] Not running on " + converterUrl + " — using Java DXF parser");
+            // Expected whenever the optional converter sidecar is not deployed,
+            // so this is a condition to note rather than an incident to raise.
+            log.info("Converter unreachable at {}; using the Java DXF parser", converterUrl);
         } catch (Exception e) {
-            System.err.println("[Converter] Error: " + e.getMessage() + " — using Java DXF parser");
+            log.warn("Converter call failed; using the Java DXF parser", e);
         }
 
         // Java fallback for DXF

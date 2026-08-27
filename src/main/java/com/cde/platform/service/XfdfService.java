@@ -4,6 +4,8 @@ import com.cde.platform.model.Annotation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.*;
 import javax.xml.parsers.*;
@@ -19,6 +21,8 @@ import java.util.*;
  */
 @Service
 public class XfdfService {
+
+    private static final Logger log = LoggerFactory.getLogger(XfdfService.class);
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -354,8 +358,12 @@ public class XfdfService {
                 ImportedAnnotation ann = parseXfdfElement(el);
                 if (ann != null) result.add(ann);
             } catch (Exception e) {
-                // Skip malformed annotations, continue processing rest
-                System.err.println("[XFDF] Skipped element " + el.getTagName() + ": " + e.getMessage());
+                // Skip malformed annotations, continue processing rest.
+                // The tag name is markup vocabulary and safe to log; the
+                // exception message can quote attribute values, which are user
+                // content, so only its type is recorded (§5.7).
+                log.warn("Skipped malformed XFDF element {} ({})",
+                    el.getTagName(), e.getClass().getSimpleName());
             }
         }
         return result;
