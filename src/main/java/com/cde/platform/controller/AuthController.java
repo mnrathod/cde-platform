@@ -1,5 +1,10 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.audit.AuditAction;
+import com.cde.platform.audit.AuditOutcome;
+import com.cde.platform.audit.AuditRequest;
+import com.cde.platform.audit.AuditableChange;
+import com.cde.platform.audit.RequestAuditor;
 import com.cde.platform.dto.AuthDtos.*;
 import com.cde.platform.exception.ApiProblem;
 import com.cde.platform.openapi.ApiDocumentation;
@@ -46,17 +51,20 @@ public class AuthController {
     private final AuthenticationManager authManager;
     private final LoginTenantResolver loginTenantResolver;
     private final RegistrationService registrationService;
+    private final RequestAuditor auditor;
 
     public AuthController(UserRepository userRepo,
                           JwtTokenService jwtTokenService,
                           AuthenticationManager authManager,
                           LoginTenantResolver loginTenantResolver,
-                          RegistrationService registrationService) {
+                          RegistrationService registrationService,
+                          RequestAuditor auditor) {
         this.userRepo = userRepo;
         this.jwtTokenService = jwtTokenService;
         this.authManager = authManager;
         this.loginTenantResolver = loginTenantResolver;
         this.registrationService = registrationService;
+        this.auditor = auditor;
     }
 
     /**
@@ -140,6 +148,25 @@ public class AuthController {
 
         return switch (outcome) {
             case RegistrationService.Outcome.Registered registered -> {
+                // Recorded against the tenant the account just joined or
+                // founded, which RegistrationService leaves bound. The role is
+                // recorded because "who granted this account ADMIN" is the
+                // question asked afterwards, and the answer for a founder is
+                // "the act of founding".
+                TenantContext.runAsTenant(registered.tenant().getId(), () ->
+                    auditor.record(
+                        AuditRequest.by(registered.user().getId(),
+                                        registered.user().getUsername())
+                            .did(registered.joinedByInvitation()
+                                 ? AuditAction.INVITATION_REDEEMED
+                                 : AuditAction.REGISTRATION)
+                            .outcome(AuditOutcome.SUCCESS)
+                            .to("User", registered.user().getId())
+                            .changing(AuditableChange
+                                .of("role", registered.user().getRole())
+                                .and("organisation", registered.tenant().getSlug())),
+                        httpRequest));
+
                 String token = jwtTokenService.generateToken(
                     registered.user().getUsername(), registered.tenant().getId());
                 yield ResponseEntity.status(HttpStatus.CREATED).body(new AuthResponse(
@@ -229,6 +256,17 @@ public class AuthController {
         // reported exactly like a wrong password.
         Optional<Long> tenantId = loginTenantResolver.resolveFor(req.username());
         if (tenantId.isEmpty()) {
+            // No tenant to attribute this to, so it goes to the application
+            // log rather than any organisation's trail. Writing it to a
+            // guessed tenant would disclose across the boundary, and this is
+            // also the shape a credential-stuffing run takes — many usernames
+            // that match nothing — which is a cross-tenant pattern the SIEM
+            // sees and a single tenant's trail could not.
+            auditor.recordWithoutTenant(
+                AuditRequest.byUnauthenticated(req.username())
+                    .did(AuditAction.SIGN_IN)
+                    .outcome(AuditOutcome.FAILURE),
+                httpRequest);
             return rejectLogin(httpRequest);
         }
 
@@ -239,10 +277,26 @@ public class AuthController {
                 authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(req.username(), req.password()));
             } catch (AuthenticationException e) {
+                // The tenant is known here, so this one does reach the
+                // organisation's own trail — a tenant administrator should be
+                // able to see failed attempts against their accounts, and that
+                // is not visible to the caller either way.
+                auditor.record(
+                    AuditRequest.byUnauthenticated(req.username())
+                        .did(AuditAction.SIGN_IN)
+                        .outcome(AuditOutcome.FAILURE),
+                    httpRequest);
                 return rejectLogin(httpRequest);
             }
 
             var user = userRepo.findByUsername(req.username()).orElseThrow();
+            auditor.record(
+                AuditRequest.by(user.getId(), user.getUsername())
+                    .did(AuditAction.SIGN_IN)
+                    .outcome(AuditOutcome.SUCCESS)
+                    .to("User", user.getId()),
+                httpRequest);
+
             String token = jwtTokenService.generateToken(user.getUsername(), tenantId.get());
             return ResponseEntity.ok(
                 new AuthResponse(token, user.getUsername(), user.getRole().name()));

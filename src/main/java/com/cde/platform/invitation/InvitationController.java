@@ -71,6 +71,11 @@ public class InvitationController {
     @ApiResponse(responseCode = "201", description = "Invitation issued; the token is in the reply.",
         content = @Content(mediaType = "application/json",
                            schema = @Schema(implementation = IssuedInvitationResponse.class)))
+    @ApiResponse(responseCode = "422",
+        description = "The request failed validation — a missing or malformed email address, "
+                    + "or a role that is not one of ADMIN, ENGINEER, REVIEWER or VIEWER.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @PostMapping
     @PreAuthorize("hasAuthority('" + TenantPermission.MANAGE_USERS + "')")
     public ResponseEntity<IssuedInvitationResponse> invite(

@@ -1,5 +1,10 @@
 package com.cde.platform.cde.service;
 
+import com.cde.platform.audit.AuditAction;
+import com.cde.platform.audit.AuditOutcome;
+import com.cde.platform.audit.AuditRequest;
+import com.cde.platform.audit.AuditTrailService;
+import com.cde.platform.audit.AuditableChange;
 import com.cde.platform.cde.domain.ContainerState;
 import com.cde.platform.cde.domain.RevisionAlreadySupersededException;
 import com.cde.platform.cde.domain.StateTransitionNotPermittedException;
@@ -48,11 +53,14 @@ public class ContainerLifecycleService {
 
     private final ContainerRevisionRepository revisionRepository;
     private final ContainerStateTransitionRepository transitionRepository;
+    private final AuditTrailService auditTrail;
 
     public ContainerLifecycleService(ContainerRevisionRepository revisionRepository,
-                                     ContainerStateTransitionRepository transitionRepository) {
+                                     ContainerStateTransitionRepository transitionRepository,
+                                     AuditTrailService auditTrail) {
         this.revisionRepository = revisionRepository;
         this.transitionRepository = transitionRepository;
+        this.auditTrail = auditTrail;
     }
 
     /**
@@ -252,6 +260,13 @@ public class ContainerLifecycleService {
         }
     }
 
+    /**
+     * The single point every transition passes through, including the creation
+     * of a first revision — which is why the audit event is emitted here rather
+     * than at each of the six public methods. A transition that reached the
+     * database without an audit record would be a change to the contractual
+     * record with nothing saying who made it.
+     */
     private void recordTransition(ContainerRevision revision, ContainerState from,
                                   ContainerState to, User actor, String reason) {
         transitionRepository.save(ContainerStateTransition.builder()
@@ -260,6 +275,26 @@ public class ContainerLifecycleService {
             .toState(to)
             .performedBy(actor)
             .reason(reason)
+            .build());
+
+        // In this transaction, so the record and the transition commit
+        // together or not at all. AuditTrailService.record demands an existing
+        // transaction precisely so this cannot be called anywhere the two
+        // could separate.
+        //
+        // The reason is deliberately absent from the change summary: it is
+        // free text an author wrote and may quote document content, and the
+        // audit trail is the log most likely to be exported to a customer's
+        // SIEM and kept for seven years. It is already recorded, in the
+        // transition row, inside the tenant boundary.
+        auditTrail.record(AuditRequest.by(actor.getId(), actor.getUsername())
+            .did(from == to ? AuditAction.CONTAINER_CREATED : AuditAction.CONTAINER_TRANSITIONED)
+            .outcome(AuditOutcome.SUCCESS)
+            .to("ContainerRevision", revision.getId())
+            .changing(AuditableChange
+                .of("state", to)
+                .and("previousState", from)
+                .and("revisionCode", revision.getRevisionCode()))
             .build());
     }
 }

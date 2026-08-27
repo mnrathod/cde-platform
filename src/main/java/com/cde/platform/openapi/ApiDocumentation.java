@@ -33,6 +33,7 @@ public final class ApiDocumentation {
     public static final String TAG_COMPARISON = "Document comparison";
     public static final String TAG_COLLABORATION = "Collaboration";
     public static final String TAG_ASSISTANCE = "Assistance";
+    public static final String TAG_AUDIT = "Audit trail";
     public static final String TAG_DIAGNOSTICS = "Diagnostics";
 
     // ── Security schemes ─────────────────────────────────────────────────────

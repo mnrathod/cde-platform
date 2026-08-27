@@ -27,5 +27,21 @@ public final class TenantPermission {
      */
     public static final String MANAGE_USERS = "tenant.user:manage";
 
-    public static final Set<String> ALL = Set.of(MANAGE_USERS);
+    /**
+     * Read and export this tenant's audit trail.
+     *
+     * <p>Separate from {@link #MANAGE_USERS} because reading the trail and
+     * deciding who is in the organisation are different jobs, and an auditor
+     * needs the first without the second. Both currently belong to the
+     * administrator role, but keeping them distinct is what makes a read-only
+     * Auditor role (§5.5) an assignment change rather than a redesign.
+     *
+     * <p>There is no corresponding write permission, and there will not be. The
+     * trail is written by the platform as a side effect of what it does, not by
+     * anyone holding a permission, and the application role cannot modify it at
+     * all (see {@code V5__audit_trail.sql}).
+     */
+    public static final String READ_AUDIT_TRAIL = "tenant.audit:read";
+
+    public static final Set<String> ALL = Set.of(MANAGE_USERS, READ_AUDIT_TRAIL);
 }

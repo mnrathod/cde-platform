@@ -125,6 +125,12 @@ public class OpenApiConfiguration {
                 + "created in a tenant the caller does not already belong to: registration "
                 + "refuses to take a tenant identifier from an unauthenticated request, so an "
                 + "invitation issued from inside is proof rather than an assertion."),
+            tag(TAG_AUDIT,
+                "This organisation's append-only, hash-chained record of security-relevant "
+                + "events. Each record carries the SHA-256 of the record before it, and the "
+                + "sequence numbers are contiguous, so an alteration breaks every hash after it "
+                + "and a removal leaves a gap. Both hashes are returned so that an organisation "
+                + "can verify the chain itself rather than being told it verified."),
             tag(TAG_PROJECTS,
                 "Projects group documents and carry the ownership and phase a document inherits."),
             tag(TAG_CDE,

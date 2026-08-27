@@ -39,6 +39,12 @@ tags:
     \ to take a tenant identifier from an unauthenticated request, so an invitation\
     \ issued from inside is proof rather than an assertion."
   name: Organisation membership
+- description: "This organisation's append-only, hash-chained record of security-relevant\
+    \ events. Each record carries the SHA-256 of the record before it, and the sequence\
+    \ numbers are contiguous, so an alteration breaks every hash after it and a removal\
+    \ leaves a gap. Both hashes are returned so that an organisation can verify the\
+    \ chain itself rather than being told it verified."
+  name: Audit trail
 - description: Projects group documents and carry the ownership and phase a document
     inherits.
   name: Projects
@@ -1083,6 +1089,188 @@ paths:
       summary: Mark markup as dealt with
       tags:
       - Annotations
+  /api/audit-events:
+    get:
+      description: |-
+        Returns this organisation's security-relevant events, newest first. The trail is append-only and hash-chained: each record carries the SHA-256 of the record before it, so an alteration anywhere breaks every hash after it, and the sequence numbers are contiguous so a removal leaves a gap.
+
+        Both hashes are returned so that an organisation streaming this to its own SIEM can verify the chain itself rather than being told it verified.
+
+        Records never carry a credential, a request body, or raw personal data — what changed is summarised by field name, with values that are identifiers or booleans.
+
+        Requires the `tenant.audit:read` permission.
+      operationId: listAuditEvents
+      parameters:
+      - description: Zero-based page index.
+        example: 0
+        in: query
+        name: page
+        required: false
+        schema:
+          type:
+          - integer
+          format: int32
+          default: 0
+          example: null
+          minimum: 0
+      - description: "Records per page, at most 200."
+        example: 50
+        in: query
+        name: size
+        required: false
+        schema:
+          type:
+          - integer
+          format: int32
+          default: 50
+          example: null
+          maximum: 200
+          minimum: 1
+      - description: Return only records for this action.
+        example: AUTHORISATION_DENIED
+        in: query
+        name: action
+        required: false
+        schema:
+          type:
+          - string
+          enum:
+          - SIGN_IN
+          - SIGN_OUT
+          - REGISTRATION
+          - PASSWORD_CHANGE
+          - INVITATION_ISSUED
+          - INVITATION_REVOKED
+          - INVITATION_REDEEMED
+          - ROLE_CHANGED
+          - AUTHORISATION_DENIED
+          - CONTAINER_CREATED
+          - CONTAINER_TRANSITIONED
+          - CONTAINER_SUPERSEDED
+          - DOCUMENT_UPLOADED
+          - DOCUMENT_DOWNLOADED
+          - DOCUMENT_DELETED
+          - DOCUMENT_REJECTED_BY_SCAN
+          - BULK_EXPORT
+          - AI_REQUEST
+          - TENANT_SETTING_CHANGED
+          - API_KEY_ISSUED
+          - API_KEY_REVOKED
+          example: null
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageResponse"
+                example: null
+          description: "A page of records, newest first."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Read this organisation's audit trail
+      tags:
+      - Audit trail
+  /api/audit-events/verification:
+    get:
+      description: |-
+        Reads the whole trail and recomputes each record's hash from its contents and the hash of the record before it. Reports the first record that does not verify, or that the chain is intact.
+
+        This detects tampering; it does not prevent it. Prevention needs storage the application cannot reach — the trail is shaped to be exported to write-once storage for that.
+
+        Reads every record, so it is an operator action rather than something to poll. Requires the `tenant.audit:read` permission.
+      operationId: verifyAuditChain
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditChainVerificationResponse"
+                example: null
+          description: "The verification result. A 200 with `intact: false` is the\
+            \ answer to a successful verification that found a break — not an error."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "Authenticated, but without the permission this operation requires."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Recompute every hash in this organisation's chain
+      tags:
+      - Audit trail
   /api/auth/login:
     post:
       description: |-
@@ -4525,6 +4713,14 @@ paths:
                 $ref: "#/components/schemas/ProblemDetail"
                 example: null
           description: "Authenticated, but without the permission this operation requires."
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+                example: null
+          description: "The request failed validation — a missing or malformed email\
+            \ address, or a role that is not one of ADMIN, ENGINEER, REVIEWER or VIEWER."
         "429":
           content:
             application/problem+json:
@@ -6102,6 +6298,36 @@ components:
         \ API, and can change when the provider's version changes — so this API does\
         \ not enumerate them and does not validate them."
       example: null
+    AuditChainVerificationResponse:
+      description: The result of recomputing every hash in this organisation's chain.
+      example: null
+      properties:
+        firstBrokenAt:
+          type:
+          - integer
+          format: int64
+          description: "The sequence number where verification stopped, or null when\
+            \ the chain is intact."
+          example: 97
+        intact:
+          type:
+          - boolean
+          description: True when every record follows from the one before it.
+          example: true
+        reason:
+          type:
+          - string
+          description: "What was wrong, in words, or null when the chain is intact."
+          example: the record's contents do not match its hash
+        recordsChecked:
+          type:
+          - integer
+          format: int32
+          description: How many records were read.
+          example: 1420
+      required:
+      - intact
+      - recordsChecked
     AuthResponse:
       description: A signed session. The token carries the subject and the tenant;
         the tenant claim is authoritative and cannot be overridden by any request
@@ -7488,7 +7714,6 @@ components:
           description: "The items on this page, in the requested order."
           example: null
           items:
-            $ref: "#/components/schemas/DocumentResponse"
             example: null
         first:
           type:
