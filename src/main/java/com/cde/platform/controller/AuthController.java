@@ -18,6 +18,7 @@ import com.cde.platform.invitation.RegistrationService;
 import com.cde.platform.model.User;
 import com.cde.platform.repository.TenantRepository;
 import com.cde.platform.repository.UserRepository;
+import com.cde.platform.security.AuthenticationThrottle;
 import com.cde.platform.security.JwtTokenService;
 import com.cde.platform.tenancy.LoginTenantResolver;
 import com.cde.platform.tenancy.TenancyProperties;
@@ -52,19 +53,22 @@ public class AuthController {
     private final LoginTenantResolver loginTenantResolver;
     private final RegistrationService registrationService;
     private final RequestAuditor auditor;
+    private final AuthenticationThrottle throttle;
 
     public AuthController(UserRepository userRepo,
                           JwtTokenService jwtTokenService,
                           AuthenticationManager authManager,
                           LoginTenantResolver loginTenantResolver,
                           RegistrationService registrationService,
-                          RequestAuditor auditor) {
+                          RequestAuditor auditor,
+                          AuthenticationThrottle throttle) {
         this.userRepo = userRepo;
         this.jwtTokenService = jwtTokenService;
         this.authManager = authManager;
         this.loginTenantResolver = loginTenantResolver;
         this.registrationService = registrationService;
         this.auditor = auditor;
+        this.throttle = throttle;
     }
 
     /**
@@ -250,6 +254,17 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest req,
                                    HttpServletRequest httpRequest) {
+        // Throttled before anything is looked up. Checking first is what makes
+        // this a rate limit rather than a report: the expensive work — a tenant
+        // lookup and 600,000 rounds of PBKDF2 — is exactly what an attacker
+        // wants to make the server do, so it must not happen for a request that
+        // is going to be refused anyway.
+        String source = httpRequest.getRemoteAddr();
+        var decision = throttle.evaluate(req.username(), source);
+        if (decision.isThrottled()) {
+            return tooManyAttempts(decision, httpRequest);
+        }
+
         // The tenant has to be established before authenticating, because
         // authentication reads the users table and that table is behind the
         // tenant policy. An unknown username yields no tenant, which is
@@ -267,6 +282,11 @@ public class AuthController {
                     .did(AuditAction.SIGN_IN)
                     .outcome(AuditOutcome.FAILURE),
                 httpRequest);
+            // Counted even though the account does not exist. Otherwise
+            // probing for valid usernames is unthrottled, and the difference in
+            // how fast the two cases are refused becomes the oracle the single
+            // error message exists to close.
+            throttle.recordFailure(req.username(), source);
             return rejectLogin(httpRequest);
         }
 
@@ -286,10 +306,16 @@ public class AuthController {
                         .did(AuditAction.SIGN_IN)
                         .outcome(AuditOutcome.FAILURE),
                     httpRequest);
+                throttle.recordFailure(req.username(), source);
                 return rejectLogin(httpRequest);
             }
 
             var user = userRepo.findByUsername(req.username()).orElseThrow();
+            // The account's counter clears; the source's does not. One success
+            // does not make a host working through a credential list
+            // legitimate — if it did, an attacker would interleave a
+            // known-good login to reset the penalty.
+            throttle.recordSuccess(req.username());
             auditor.record(
                 AuditRequest.by(user.getId(), user.getUsername())
                     .did(AuditAction.SIGN_IN)
@@ -314,6 +340,24 @@ public class AuthController {
      * response that differed by even a problem type would restore the
      * enumeration oracle {@link #GENERIC_LOGIN_FAILURE} exists to close.
      */
+    /**
+     * The reply when the caller is being slowed down.
+     *
+     * <p>Carries {@code Retry-After} so a well-behaved client waits rather than
+     * retrying immediately, and says nothing about whether the named account
+     * exists — the limit applies per account and per source alike, so a 429
+     * confirms nothing either way.
+     */
+    private ResponseEntity<ProblemDetail> tooManyAttempts(
+            AuthenticationThrottle.Decision decision, HttpServletRequest httpRequest) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, String.valueOf(decision.retryAfterSeconds()))
+            .body(ApiProblem.of(HttpStatus.TOO_MANY_REQUESTS, "too-many-attempts",
+                "Too many attempts",
+                "Too many sign-in attempts. Wait " + decision.retryAfterSeconds()
+                    + " seconds and try again.", httpRequest));
+    }
+
     private ResponseEntity<ProblemDetail> rejectLogin(HttpServletRequest httpRequest) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiProblem.of(
             HttpStatus.UNAUTHORIZED, "invalid-credentials", "Invalid credentials",
