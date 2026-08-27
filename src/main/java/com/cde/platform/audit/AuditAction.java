@@ -22,6 +22,32 @@ public enum AuditAction {
     REGISTRATION,
     PASSWORD_CHANGE,
 
+    // Second factor.
+    //
+    // Enrolment starting and enrolment completing are separate actions because
+    // only the second one changes what the account requires to sign in. A
+    // started-but-never-confirmed enrolment is a normal abandonment; a
+    // confirmed one is a security-relevant change to the account.
+    MFA_ENROLMENT_STARTED,
+    MFA_ENROLMENT_CONFIRMED,
+    MFA_VERIFIED,
+
+    /**
+     * A break-glass credential was spent. Distinct from {@link #MFA_VERIFIED}
+     * because it means the user could not use their authenticator, which is
+     * either a genuine device loss or someone who obtained the codes — and the
+     * two are indistinguishable at the moment of use, so both are worth an alert.
+     */
+    MFA_RECOVERY_REDEEMED,
+    MFA_RECOVERY_REGENERATED,
+
+    /**
+     * The second factor was removed. Always suspicious: it is the step an
+     * attacker takes after compromising a session, and the step a user takes
+     * perhaps once ever.
+     */
+    MFA_DISABLED,
+
     // Membership and authority
     INVITATION_ISSUED,
     INVITATION_REVOKED,

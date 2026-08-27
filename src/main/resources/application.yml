@@ -149,6 +149,23 @@ cde:
     # reporting directive; the policy still blocks, it just tells nobody.
     csp-report-uri: ${CDE_WEB_CSP_REPORT_URI:}
 
+  # Second factor (4.4). Off unless a deployment provisions an encryption key:
+  # a TOTP secret is a bearer credential with nothing to crack, so a built-in
+  # key would make every deployment's second factors forgeable by anyone who
+  # reads this repository.
+  mfa:
+    enabled: ${CDE_MFA_ENABLED:false}
+    # Shown beside the account in the authenticator app, so a user holding
+    # several accounts can tell them apart.
+    issuer: ${CDE_MFA_ISSUER:CDE Platform}
+    # AES-256 key protecting TOTP secrets at rest. Base64, exactly 32 bytes.
+    # REQUIRED when enabled, no default.  openssl rand -base64 32
+    secret-encryption-key: ${CDE_MFA_SECRET_ENCRYPTION_KEY:}
+    # SHA1 is the RFC 6238 default and the only one every authenticator app
+    # supports. SHA256 works where a deployment requires it, at the cost of
+    # some apps failing enrolment without saying why.
+    algorithm: ${CDE_MFA_ALGORITHM:SHA1}
+
   storage:
     upload-dir: ./uploads
 

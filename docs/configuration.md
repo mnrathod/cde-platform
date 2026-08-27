@@ -898,3 +898,89 @@ The pre-abstraction upload path, still used by the fifteen call sites that
 have not yet moved to `StorageProvider`. It will be removed once they have.
 Until then both settings matter, and both paths need to be on encrypted,
 backed-up volumes.
+
+---
+
+## Multi-factor authentication
+
+TOTP as a second factor, per RFC 6238. Off by default — see
+`cde.mfa.secret-encryption-key` for why that is the safe default rather than a
+timid one.
+
+### `cde.mfa.enabled`
+
+| | |
+|---|---|
+| Type | boolean |
+| Default | `false` |
+| Required | no |
+| Secret | no |
+| Environment | `CDE_MFA_ENABLED` |
+
+Off unless a deployment has provisioned an encryption key. With it off, the
+enrolment beans are not created and the endpoints do not exist.
+
+The alternative — shipping a default key so the feature always works — would
+make every deployment's second factors forgeable by anyone who reads this
+repository. Starting without the feature is better than starting with a
+worthless one.
+
+### `cde.mfa.secret-encryption-key`
+
+| | |
+|---|---|
+| Type | base64, decoding to exactly 32 bytes |
+| Default | **none** |
+| Required | when `cde.mfa.enabled` is true |
+| Secret | **yes** |
+| Environment | `CDE_MFA_SECRET_ENCRYPTION_KEY` |
+
+AES-256-GCM key protecting TOTP secrets at rest.
+
+A TOTP secret is a bearer credential with nothing to crack — unlike a password
+hash, the plaintext *is* the credential — so a database dump holding them in
+the clear is a dump of live second factors. Generate with:
+
+```
+openssl rand -base64 32
+```
+
+**Known gap.** §5.2 wants this key from a KMS, with envelope encryption and
+per-tenant data keys so a tenant can be crypto-shredded on offboarding. That
+is not built. Today one key protects every tenant's secrets, and rotating it
+means re-encrypting all of them; there is no per-tenant shredding path.
+
+### `cde.mfa.issuer`
+
+| | |
+|---|---|
+| Type | string |
+| Default | `CDE Platform` |
+| Required | yes |
+| Secret | no |
+| Environment | `CDE_MFA_ISSUER` |
+
+The name shown beside the account in the authenticator app, and the `issuer`
+parameter of the `otpauth://` URI. Users commonly hold several accounts across
+several products; without a distinct issuer their app shows a column of
+identical usernames.
+
+### `cde.mfa.algorithm`
+
+| | |
+|---|---|
+| Type | enum: `SHA1`, `SHA256`, `SHA512` |
+| Default | `SHA1` |
+| Required | yes |
+| Secret | no |
+| Environment | `CDE_MFA_ALGORITHM` |
+
+The HMAC algorithm behind the codes.
+
+`SHA1` is the RFC 6238 default and the only value every authenticator app
+supports — several ignore the `algorithm` parameter entirely and assume SHA-1,
+which means enrolment appears to succeed and then every code is rejected.
+
+This is not in tension with the SHA-1 ban in §4.1. That ban is on SHA-1 as a
+collision-resistant hash; HMAC's security does not rest on collision
+resistance, and HMAC-SHA-1 remains unbroken.

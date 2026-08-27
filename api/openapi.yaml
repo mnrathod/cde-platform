@@ -1118,6 +1118,12 @@ paths:
           - SIGN_OUT
           - REGISTRATION
           - PASSWORD_CHANGE
+          - MFA_ENROLMENT_STARTED
+          - MFA_ENROLMENT_CONFIRMED
+          - MFA_VERIFIED
+          - MFA_RECOVERY_REDEEMED
+          - MFA_RECOVERY_REGENERATED
+          - MFA_DISABLED
           - INVITATION_ISSUED
           - INVITATION_REVOKED
           - INVITATION_REDEEMED
