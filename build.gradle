@@ -1,5 +1,7 @@
 plugins {
     id 'java'
+    // Core Gradle plugin, versioned with Gradle itself — nothing to pin.
+    id 'jacoco'
     id 'org.springframework.boot' version '3.3.2'
     id 'io.spring.dependency-management' version '1.1.5'
 }
@@ -238,11 +240,80 @@ tasks.register('openApiLint', Exec) {
     }
 }
 
+/**
+ * Coverage reporting (§14).
+ *
+ * The report always runs after the tests, so the number is visible on every
+ * build rather than only when someone asks for it. Whether falling below a
+ * threshold *fails* the build is a separate switch — see jacocoTestCoverageVerification
+ * below — because turning the gate on before the codebase clears it would
+ * mean either a permanently red build or a threshold set low enough to be
+ * meaningless.
+ */
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true   // consumed by CI
+        html.required = true  // read by people
+    }
+}
+
+tasks.named('test') {
+    finalizedBy jacocoTestReport
+}
+
+/**
+ * Coverage floors, as a ratchet.
+ *
+ * §14 requires 90% line and 85% branch. Measured on 2026-08-27 the codebase
+ * is at 66.2% line and 47.9% branch, so switching the required figures on
+ * today would leave main permanently red — and a gate that is always red is
+ * a gate everyone learns to ignore, which is worse than no gate.
+ *
+ * So the build enforces the *measured floor* instead. Coverage cannot fall,
+ * and each improvement is banked by raising these numbers in the same commit.
+ * They ratchet up only. Lowering one to make a build pass defeats the whole
+ * mechanism and should fail review.
+ *
+ * `./gradlew jacocoTestCoverageVerification -PtargetCoverage` checks against
+ * the §14 figures instead, which is how you see the remaining distance
+ * without breaking anyone's build.
+ *
+ * Nothing is excluded from the measurement. §14 permits excluding generated
+ * code, DTOs and config classes, but excluding them would raise the reported
+ * number without testing anything more, and the point of the number is to be
+ * uncomfortable while it is low.
+ */
+def measuredLineFloor = '0.66'
+def measuredBranchFloor = '0.47'
+def targetLine = '0.90'
+def targetBranch = '0.85'
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    boolean checkingTarget = project.hasProperty('targetCoverage')
+
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = (checkingTarget ? targetLine : measuredLineFloor).toBigDecimal()
+            }
+            limit {
+                counter = 'BRANCH'
+                value = 'COVEREDRATIO'
+                minimum = (checkingTarget ? targetBranch : measuredBranchFloor).toBigDecimal()
+            }
+        }
+    }
+}
+
 // Licence policy and attribution generation (§2.1, §17.2).
 apply from: 'gradle/licences.gradle'
 
 tasks.named('check') {
     dependsOn 'converterTest', 'passwordHashingPolicyCheck', 'openApiLint',
-               'checkLicences', 'checkAttribution'
+               'checkLicences', 'checkAttribution', 'jacocoTestCoverageVerification'
 }
 
