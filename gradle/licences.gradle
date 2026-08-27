@@ -1,0 +1,381 @@
+// Licence compliance: attribution generation and policy enforcement (§2.1, §17.2).
+//
+// Three obligations are discharged here, all from the same resolved data so
+// they cannot disagree with each other:
+//
+//   1. THIRD-PARTY-NOTICES.txt is generated from the actual runtime
+//      classpath. Apache-2.0 §4(d) and the BSD/MIT attribution clauses make
+//      shipping this mandatory — omitting it is a licence breach, not a
+//      missing nicety.
+//   2. A forbidden licence anywhere in the graph, including transitively,
+//      fails the build.
+//   3. A licence that *changed* since the recorded baseline fails the build.
+//      Several major projects have re-licensed away from open source since
+//      2021; catching that at the upgrade rather than at an audit is the
+//      whole point of keeping the baseline in the repository.
+//
+// Licences are read from each artifact's POM, walking the parent chain,
+// because most Maven projects declare the licence once on a parent and
+// inherit it everywhere below.
+
+import groovy.xml.XmlSlurper
+
+// SPDX identifiers permitted by §2.1.
+ext.allowedLicences = [
+    'Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC',
+    'EPL-1.0', 'EPL-2.0', 'MPL-2.0', 'CDDL-1.0', 'CDDL-1.1',
+    'PostgreSQL', 'Unlicense', 'CC0-1.0', 'GPL-2.0-with-classpath-exception',
+    'Public-Domain', 'BSD-4-Clause-UC'
+]
+
+// §2.1 forbids these outright. LGPL is absent from both lists deliberately:
+// it is permitted only case by case for a dynamically linked, unmodified
+// library, so it lands in the "unrecognised" bucket and demands a decision
+// rather than passing silently.
+ext.forbiddenLicencePatterns = [
+    'AGPL', 'SSPL', 'Business Source', 'BUSL', 'Commons Clause',
+    'Elastic License', 'Server Side Public'
+]
+
+/**
+ * Maps the free-text licence names found in POMs onto SPDX identifiers.
+ *
+ * POM licence names are prose, not identifiers — "The Apache Software
+ * License, Version 2.0" and "Apache License, Version 2.0" and "Apache 2"
+ * are all the same licence. Comparing prose would make the baseline diff
+ * noisy enough to be ignored, which would defeat obligation 3.
+ */
+ext.toSpdxIdentifier = { String name, String url ->
+    String lowered = "${name ?: ''} ${url ?: ''}".toLowerCase()
+
+    // The copyleft family is matched first. These share vocabulary with the
+    // permissive licences ("public", "general"), and a false permissive match
+    // is the expensive direction of the error — it would let a forbidden
+    // licence through the gate silently.
+    if (lowered.contains('affero') || lowered.contains('agpl')) return 'AGPL-3.0'
+    if (lowered.contains('server side public') || lowered.contains('sspl')) return 'SSPL-1.0'
+    if (lowered.contains('business source') || lowered.contains('busl')) return 'BUSL-1.1'
+
+    // "GPL2 w/ CPE" is how the Jakarta EE and GlassFish artifacts spell the
+    // classpath exception, and it contains neither "gnu" nor "general", so
+    // matching on the spelled-out name alone misses every one of them.
+    boolean hasClasspathException =
+        lowered.contains('classpath') || lowered.contains('cpe')
+    if ((lowered.contains('gpl') || lowered.contains('general public')) && hasClasspathException) {
+        return 'GPL-2.0-with-classpath-exception'
+    }
+    if (lowered.contains('lesser general public') || lowered.contains('lgpl')) return 'LGPL-2.1'
+
+    if (lowered.contains('apache')) return 'Apache-2.0'
+    // The Eclipse Distribution License is the BSD 3-clause text verbatim under
+    // a different name — it is not a copyleft licence despite the Eclipse
+    // branding, and treating it as unrecognised would strand every JAXB and
+    // Jakarta XML artifact in the undeclared bucket.
+    if (lowered.contains('eclipse distribution') || lowered.contains('edl')) return 'BSD-3-Clause'
+    if (lowered.contains('eclipse public') || lowered.contains('epl')) {
+        return lowered.contains('2.0') ? 'EPL-2.0' : 'EPL-1.0'
+    }
+    if (lowered.contains('mozilla public') || lowered.contains('mpl')) return 'MPL-2.0'
+    if (lowered.contains('cddl') || lowered.contains('common development')) {
+        return lowered.contains('1.1') ? 'CDDL-1.1' : 'CDDL-1.0'
+    }
+    // The Bouncy Castle Licence is the MIT text verbatim, published under the
+    // project's own name.
+    if (lowered.contains('bouncy castle')) return 'MIT'
+    if (lowered.contains('mit license') || lowered.contains('mit licence')
+        || lowered ==~ /(?s).*\bmit\b.*/) return 'MIT'
+    if (lowered.contains('bsd')) {
+        if (lowered.contains('2-clause') || lowered.contains('simplified')) return 'BSD-2-Clause'
+        return 'BSD-3-Clause'
+    }
+    if (lowered.contains('postgresql')) return 'PostgreSQL'
+    if (lowered.contains('cc0') || lowered.contains('public domain')) return 'CC0-1.0'
+    if (lowered.contains('unlicense')) return 'Unlicense'
+    if (lowered.contains('gnu general public')) return 'GPL-2.0'
+    if (lowered.contains('isc')) return 'ISC'
+
+    return null
+}
+
+/**
+ * Case-by-case licence approvals, as §2.1 requires for LGPL.
+ *
+ * Keyed by coordinate so that a version bump keeps the approval but a *new*
+ * LGPL dependency fails the build and forces its own decision. Every entry
+ * here must also appear in docs/licences.md with the reasoning; this map is
+ * the enforcement half, that file is the record.
+ */
+ext.approvedLicenceExceptions = [
+    'org.hibernate.orm:hibernate-core':
+        'LGPL-2.1, dynamically linked and unmodified. Reached through ' +
+        'spring-boot-starter-data-jpa, not chosen directly.',
+    'org.hibernate.common:hibernate-commons-annotations':
+        'LGPL-2.1, dynamically linked and unmodified. Transitive under hibernate-core.'
+]
+
+/**
+ * Reads the licences declared by one artifact, following the parent chain.
+ *
+ * Depth is bounded because a malformed or circular parent chain would
+ * otherwise hang the build rather than fail it.
+ */
+ext.readLicencesFromPom = { Project project, String group, String name, String version ->
+    final int MAX_PARENT_DEPTH = 8
+    String currentGroup = group
+    String currentName = name
+    String currentVersion = version
+
+    for (int depth = 0; depth < MAX_PARENT_DEPTH; depth++) {
+        if (!currentGroup || !currentName || !currentVersion) return []
+
+        def pomFile
+        try {
+            def configuration = project.configurations.detachedConfiguration(
+                project.dependencies.create("${currentGroup}:${currentName}:${currentVersion}@pom"))
+            configuration.transitive = false
+            pomFile = configuration.singleFile
+        } catch (Exception ignored) {
+            return []
+        }
+
+        def pom
+        try {
+            pom = new XmlSlurper(false, false).parse(pomFile)
+        } catch (Exception ignored) {
+            return []
+        }
+
+        def declared = pom.licenses.license.collect { licence ->
+            [name: licence.name.text().trim(), url: licence.url.text().trim()]
+        }.findAll { it.name || it.url }
+
+        if (declared) return declared
+
+        // No licence on this POM — inherit from the parent, which is where
+        // most multi-module projects declare it exactly once.
+        def parent = pom.parent
+        if (!parent || !parent.artifactId.text()) return []
+        currentGroup = parent.groupId.text().trim()
+        currentName = parent.artifactId.text().trim()
+        currentVersion = parent.version.text().trim()
+    }
+    return []
+}
+
+/**
+ * Resolves the runtime classpath into a sorted list of components, each with
+ * its SPDX identifiers.
+ */
+ext.resolveRuntimeComponents = {
+    def components = []
+    configurations.runtimeClasspath.resolvedConfiguration
+        .resolvedArtifacts
+        .collect { it.moduleVersion.id }
+        .unique { "${it.group}:${it.name}" }
+        .sort { "${it.group}:${it.name}" }
+        .each { id ->
+            def declared = readLicencesFromPom(project, id.group, id.name, id.version)
+            def identifiers = declared
+                .collect { toSpdxIdentifier(it.name, it.url) }
+                .findAll { it != null }
+                .unique()
+            components << [
+                group      : id.group,
+                name       : id.name,
+                version    : id.version,
+                licences   : identifiers,
+                declared   : declared
+            ]
+        }
+    return components
+}
+
+tasks.register('generateAttribution') {
+    group = 'documentation'
+    description = 'Regenerates THIRD-PARTY-NOTICES.txt from the resolved runtime classpath'
+
+    def outputFile = rootProject.file('THIRD-PARTY-NOTICES.txt')
+    outputs.file(outputFile)
+
+    doLast {
+        def components = resolveRuntimeComponents()
+
+        def text = new StringBuilder()
+        text << """\
+THIRD-PARTY NOTICES
+===================
+
+This product includes software developed by third parties. The components
+below are redistributed with the product; each remains under its own licence
+and copyright, held by its respective authors.
+
+This file is generated from the resolved runtime classpath by the Gradle
+task `generateAttribution`. Do not edit it by hand — edit the dependency
+declarations instead and regenerate. The build fails if this file is stale.
+
+Components: ${components.size()}
+
+"""
+        // Grouping by licence keeps the file readable as the dependency count
+        // grows, and makes the licence mix obvious at a glance during an
+        // audit rather than requiring the reader to tally it.
+        // "OR" rather than "AND": several licences on one POM means the
+        // consumer may choose between them, which is also how checkLicences
+        // evaluates them.
+        components.groupBy { it.licences ? it.licences.join(' OR ') : 'UNDECLARED' }
+            .sort { it.key }
+            .each { licence, members ->
+                text << '-' * 72 << '\n'
+                text << "${licence}\n"
+                text << '-' * 72 << '\n\n'
+                members.each { component ->
+                    text << "  ${component.group}:${component.name}:${component.version}\n"
+                }
+                text << '\n'
+            }
+
+        outputFile.text = text.toString()
+        logger.lifecycle("Wrote ${outputFile} (${components.size()} components)")
+    }
+}
+
+tasks.register('checkLicences') {
+    group = 'verification'
+    description = 'Fails on a forbidden licence, an undeclared licence, or a licence change'
+
+    def baselineFile = rootProject.file('gradle/licence-baseline.txt')
+
+    doLast {
+        def components = resolveRuntimeComponents()
+        def failures = []
+
+        components.each { component ->
+            def coordinate = "${component.group}:${component.name}"
+            def versioned = "${coordinate}:${component.version}"
+
+            if (!component.licences) {
+                failures << "UNDECLARED  ${versioned} declares no licence this build " +
+                    "recognises — resolve it by hand and record it in docs/licences.md (CLAUDE.md 17.2)"
+                return
+            }
+
+            // Maven's POM reference states that where several licences are
+            // listed, the consumer may choose any one of them rather than
+            // having to satisfy all. So a component passes if *any* declared
+            // licence is acceptable: logback offers EPL-1.0 or LGPL-2.1, and
+            // taking EPL-1.0 discharges the obligation entirely.
+            def acceptable = component.licences.findAll { allowedLicences.contains(it) }
+            if (acceptable) return
+
+            def approval = approvedLicenceExceptions[coordinate.toString()]
+            if (approval) {
+                logger.info("Licence exception in force for ${versioned}: ${approval}")
+                return
+            }
+
+            def forbidden = component.licences.findAll { identifier ->
+                forbiddenLicencePatterns.any { pattern ->
+                    identifier.toLowerCase().contains(pattern.toLowerCase())
+                }
+            }
+            if (forbidden) {
+                failures << "FORBIDDEN   ${versioned} offers only ${component.licences.join(' OR ')}, " +
+                    "including ${forbidden.join(', ')}, with no permissive alternative (CLAUDE.md 2.1)"
+            } else {
+                failures << "NOT ALLOWED ${versioned} offers only ${component.licences.join(' OR ')}, " +
+                    "none of which is on the CLAUDE.md 2.1 allow-list. If this is a dynamically linked, " +
+                    "unmodified LGPL library, grant it case by case in approvedLicenceExceptions " +
+                    "and record the reasoning in docs/licences.md"
+            }
+        }
+
+        // A licence that changed under an existing dependency is the
+        // supply-chain signal worth catching (§17.2). Comparing against a
+        // committed baseline turns a re-licence into a failing build at the
+        // upgrade PR rather than a discovery during procurement.
+        def current = components.collectEntries {
+            ["${it.group}:${it.name}".toString(), it.licences.join(',')]
+        }
+        if (baselineFile.exists()) {
+            def baseline = [:]
+            baselineFile.eachLine { line ->
+                if (line.trim() && !line.startsWith('#')) {
+                    def parts = line.split('=', 2)
+                    if (parts.length == 2) baseline[parts[0].trim()] = parts[1].trim()
+                }
+            }
+            current.each { coordinate, licence ->
+                def recorded = baseline[coordinate]
+                if (recorded != null && recorded != licence) {
+                    failures << "CHANGED    ${coordinate} was ${recorded}, is now ${licence}. " +
+                        "Review the re-licence, then update gradle/licence-baseline.txt (CLAUDE.md 17.2)"
+                }
+            }
+        } else {
+            logger.warn("No licence baseline at ${baselineFile}; run writeLicenceBaseline to create it")
+        }
+
+        if (failures) {
+            throw new GradleException(
+                "Licence policy violations (CLAUDE.md 2.1, 17.2):\n  " + failures.join('\n  '))
+        }
+        logger.lifecycle("Licence check passed: ${components.size()} components, no policy violation")
+    }
+}
+
+tasks.register('writeLicenceBaseline') {
+    group = 'documentation'
+    description = 'Records the current licence of every dependency as the comparison baseline'
+
+    doLast {
+        def components = resolveRuntimeComponents()
+        def baselineFile = rootProject.file('gradle/licence-baseline.txt')
+        def text = new StringBuilder()
+        text << "# Recorded licence per dependency. checkLicences fails if any of these change.\n"
+        text << "# Regenerate deliberately, only after reviewing why a licence moved (CLAUDE.md 17.2).\n"
+        components.sort { "${it.group}:${it.name}" }.each { component ->
+            text << "${component.group}:${component.name}=${component.licences.join(',')}\n"
+        }
+        baselineFile.text = text.toString()
+        logger.lifecycle("Wrote ${baselineFile} (${components.size()} components)")
+    }
+}
+
+// The attribution file is only useful if it is current, so staleness fails
+// the build the same way a stale OpenAPI spec does.
+tasks.register('checkAttribution') {
+    group = 'verification'
+    description = 'Fails if THIRD-PARTY-NOTICES.txt does not match the resolved classpath'
+    dependsOn 'generateAttribution'
+
+    doLast {
+        def outputFile = rootProject.file('THIRD-PARTY-NOTICES.txt')
+        if (!outputFile.exists()) {
+            throw new GradleException('THIRD-PARTY-NOTICES.txt is missing (CLAUDE.md 17.2)')
+        }
+        // generateAttribution has just rewritten the file; git decides whether
+        // that rewrite changed anything, which is what "stale" means here.
+        //
+        // `git status --porcelain` rather than `git diff`: diff only considers
+        // tracked files, so a never-committed attribution file would produce
+        // no diff and pass — the gate would report success in exactly the case
+        // it exists to catch.
+        def process = ['git', 'status', '--porcelain', '--', outputFile.absolutePath]
+            .execute(null, rootProject.projectDir)
+        def status = process.text.trim()
+        process.waitFor()
+
+        if (!status.isEmpty()) {
+            // The porcelain code says which of the three states it is in, and
+            // they need different fixes: regenerate, or just commit.
+            String state = status.startsWith('??') ? 'is not tracked by git'
+                         : status.startsWith(' M') ? 'has uncommitted changes'
+                         : 'is staged but not committed'
+            throw new GradleException(
+                "THIRD-PARTY-NOTICES.txt ${state}. It ships with every distribution, " +
+                'so it has to be committed, and it has to match the dependencies it ' +
+                'describes. Run `./gradlew generateAttribution` and commit the result ' +
+                'in the same change as the dependency edit (CLAUDE.md 17.2).')
+        }
+    }
+}

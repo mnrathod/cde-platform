@@ -238,7 +238,11 @@ tasks.register('openApiLint', Exec) {
     }
 }
 
+// Licence policy and attribution generation (§2.1, §17.2).
+apply from: 'gradle/licences.gradle'
+
 tasks.named('check') {
-    dependsOn 'converterTest', 'passwordHashingPolicyCheck', 'openApiLint'
+    dependsOn 'converterTest', 'passwordHashingPolicyCheck', 'openApiLint',
+               'checkLicences', 'checkAttribution'
 }
 

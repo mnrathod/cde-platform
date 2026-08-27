@@ -1,0 +1,67 @@
+CDE Platform
+Copyright (c) 2026 <<< COPYRIGHT HOLDER NOT YET SET >>>. All rights reserved.
+
+See LICENSE for the terms governing this software, and for why the copyright
+holder above is still a placeholder.
+
+────────────────────────────────────────────────────────────────────────────
+THIRD-PARTY ATTRIBUTION
+────────────────────────────────────────────────────────────────────────────
+
+This product includes software developed by third parties under open-source
+licences. The complete list — every component, its version, and its licence —
+is in THIRD-PARTY-NOTICES.txt, which is generated from the resolved runtime
+classpath rather than maintained by hand, and is shipped with every
+distribution.
+
+Attribution is a licence obligation, not a courtesy: Apache-2.0 section 4(d)
+and the attribution clauses of the MIT and BSD licences require it, so a
+distribution missing that file is in breach.
+
+Notable components and their upstream projects:
+
+  Spring Framework and Spring Boot     Apache-2.0   https://spring.io
+  Hibernate ORM                        LGPL-2.1     https://hibernate.org
+  PostgreSQL JDBC Driver               BSD-2-Clause https://jdbc.postgresql.org
+  Flyway                               Apache-2.0   https://flywaydb.org
+  Apache PDFBox                        Apache-2.0   https://pdfbox.apache.org
+  Apache Tika                          Apache-2.0   https://tika.apache.org
+  Bouncy Castle                        MIT          https://bouncycastle.org
+  Logback                              EPL-1.0      https://logback.qos.ch
+  SLF4J                                MIT          https://slf4j.org
+  Jackson                              Apache-2.0   https://github.com/FasterXML
+  Micrometer                           Apache-2.0   https://micrometer.io
+  springdoc-openapi                    Apache-2.0   https://springdoc.org
+  JJWT                                 Apache-2.0   https://github.com/jwtk/jjwt
+  Angular                              MIT          https://angular.dev
+
+────────────────────────────────────────────────────────────────────────────
+SEPARATE PROCESSES, NOT LINKED
+────────────────────────────────────────────────────────────────────────────
+
+The following are invoked as separate out-of-process services over a socket
+or command line. They are not linked into, embedded in, or bundled with the
+application artifact, so no combined work is created and their copyleft terms
+do not reach this software:
+
+  ClamAV                               GPL-2.0      https://clamav.net
+  LibreDWG                             GPL-3.0      https://gnu.org/software/libredwg
+  LibreOffice (headless conversion)    MPL-2.0      https://libreoffice.org
+
+Keeping them out-of-process is a licence requirement, not an implementation
+preference. Linking any of them into the application would change the
+licensing position of the whole product.
+
+────────────────────────────────────────────────────────────────────────────
+STANDARDS
+────────────────────────────────────────────────────────────────────────────
+
+This product implements requirements from ISO 19650 and other published
+standards. Standards documents are copyrighted by their publishing bodies.
+No text, table, or code list from any standard is reproduced in this product
+or its documentation. ISO 19650 suitability and revision code lists are
+populated by each customer rather than shipped, for exactly this reason.
+
+ISO 19650 is a standard published by the International Organization for
+Standardization. Reference to it here describes what this product implements
+and implies no endorsement, certification, or affiliation.

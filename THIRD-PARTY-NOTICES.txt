@@ -1,0 +1,182 @@
+THIRD-PARTY NOTICES
+===================
+
+This product includes software developed by third parties. The components
+below are redistributed with the product; each remains under its own licence
+and copyright, held by its respective authors.
+
+This file is generated from the resolved runtime classpath by the Gradle
+task `generateAttribution`. Do not edit it by hand — edit the dependency
+declarations instead and regenerate. The build fails if this file is stale.
+
+Components: 114
+
+------------------------------------------------------------------------
+Apache-2.0
+------------------------------------------------------------------------
+
+  com.fasterxml.jackson.core:jackson-annotations:2.17.2
+  com.fasterxml.jackson.core:jackson-core:2.17.2
+  com.fasterxml.jackson.core:jackson-databind:2.17.2
+  com.fasterxml.jackson.dataformat:jackson-dataformat-toml:2.17.2
+  com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.2
+  com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.17.2
+  com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2
+  com.fasterxml.jackson.module:jackson-module-parameter-names:2.17.2
+  com.fasterxml:classmate:1.7.0
+  com.google.code.gson:gson:2.10.1
+  com.zaxxer:HikariCP:5.1.0
+  commons-io:commons-io:2.15.1
+  commons-logging:commons-logging:1.3.3
+  io.jsonwebtoken:jjwt-api:0.12.5
+  io.jsonwebtoken:jjwt-impl:0.12.5
+  io.jsonwebtoken:jjwt-jackson:0.12.5
+  io.micrometer:micrometer-commons:1.13.2
+  io.micrometer:micrometer-core:1.13.2
+  io.micrometer:micrometer-jakarta9:1.13.2
+  io.micrometer:micrometer-observation:1.13.2
+  io.micrometer:micrometer-registry-prometheus:1.13.2
+  io.prometheus:prometheus-metrics-config:1.2.1
+  io.prometheus:prometheus-metrics-core:1.2.1
+  io.prometheus:prometheus-metrics-exposition-formats:1.2.1
+  io.prometheus:prometheus-metrics-model:1.2.1
+  io.prometheus:prometheus-metrics-shaded-protobuf:1.2.1
+  io.prometheus:prometheus-metrics-tracer-common:1.2.1
+  io.smallrye:jandex:3.1.2
+  io.swagger.core.v3:swagger-annotations-jakarta:2.2.22
+  io.swagger.core.v3:swagger-core-jakarta:2.2.22
+  io.swagger.core.v3:swagger-models-jakarta:2.2.22
+  jakarta.inject:jakarta.inject-api:2.0.1
+  jakarta.validation:jakarta.validation-api:3.0.2
+  net.bytebuddy:byte-buddy:1.14.18
+  org.apache.commons:commons-lang3:3.14.0
+  org.apache.logging.log4j:log4j-api:2.23.1
+  org.apache.logging.log4j:log4j-to-slf4j:2.23.1
+  org.apache.pdfbox:fontbox:3.0.3
+  org.apache.pdfbox:pdfbox:3.0.3
+  org.apache.pdfbox:pdfbox-io:3.0.3
+  org.apache.tika:tika-core:2.9.1
+  org.apache.tomcat.embed:tomcat-embed-core:10.1.26
+  org.apache.tomcat.embed:tomcat-embed-el:10.1.26
+  org.apache.tomcat.embed:tomcat-embed-websocket:10.1.26
+  org.flywaydb:flyway-core:10.10.0
+  org.flywaydb:flyway-database-postgresql:10.10.0
+  org.hibernate.validator:hibernate-validator:8.0.1.Final
+  org.jboss.logging:jboss-logging:3.5.3.Final
+  org.springdoc:springdoc-openapi-starter-common:2.6.0
+  org.springdoc:springdoc-openapi-starter-webmvc-api:2.6.0
+  org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0
+  org.springframework.boot:spring-boot:3.3.2
+  org.springframework.boot:spring-boot-actuator:3.3.2
+  org.springframework.boot:spring-boot-actuator-autoconfigure:3.3.2
+  org.springframework.boot:spring-boot-autoconfigure:3.3.2
+  org.springframework.boot:spring-boot-starter:3.3.2
+  org.springframework.boot:spring-boot-starter-actuator:3.3.2
+  org.springframework.boot:spring-boot-starter-aop:3.3.2
+  org.springframework.boot:spring-boot-starter-data-jpa:3.3.2
+  org.springframework.boot:spring-boot-starter-jdbc:3.3.2
+  org.springframework.boot:spring-boot-starter-json:3.3.2
+  org.springframework.boot:spring-boot-starter-logging:3.3.2
+  org.springframework.boot:spring-boot-starter-security:3.3.2
+  org.springframework.boot:spring-boot-starter-tomcat:3.3.2
+  org.springframework.boot:spring-boot-starter-validation:3.3.2
+  org.springframework.boot:spring-boot-starter-web:3.3.2
+  org.springframework.boot:spring-boot-starter-websocket:3.3.2
+  org.springframework.data:spring-data-commons:3.3.2
+  org.springframework.data:spring-data-jpa:3.3.2
+  org.springframework.security:spring-security-config:6.3.1
+  org.springframework.security:spring-security-core:6.3.1
+  org.springframework.security:spring-security-crypto:6.3.1
+  org.springframework.security:spring-security-web:6.3.1
+  org.springframework:spring-aop:6.1.11
+  org.springframework:spring-aspects:6.1.11
+  org.springframework:spring-beans:6.1.11
+  org.springframework:spring-context:6.1.11
+  org.springframework:spring-core:6.1.11
+  org.springframework:spring-expression:6.1.11
+  org.springframework:spring-jcl:6.1.11
+  org.springframework:spring-jdbc:6.1.11
+  org.springframework:spring-messaging:6.1.11
+  org.springframework:spring-orm:6.1.11
+  org.springframework:spring-tx:6.1.11
+  org.springframework:spring-web:6.1.11
+  org.springframework:spring-webmvc:6.1.11
+  org.springframework:spring-websocket:6.1.11
+  org.webjars:swagger-ui:5.17.14
+  org.yaml:snakeyaml:2.2
+
+------------------------------------------------------------------------
+BSD-2-Clause
+------------------------------------------------------------------------
+
+  org.postgresql:postgresql:42.7.3
+
+------------------------------------------------------------------------
+BSD-3-Clause
+------------------------------------------------------------------------
+
+  com.sun.istack:istack-commons-runtime:4.1.2
+  jakarta.activation:jakarta.activation-api:2.1.3
+  jakarta.xml.bind:jakarta.xml.bind-api:4.0.2
+  org.antlr:antlr4-runtime:4.13.0
+  org.eclipse.angus:angus-activation:2.0.2
+  org.glassfish.jaxb:jaxb-core:4.0.5
+  org.glassfish.jaxb:jaxb-runtime:4.0.5
+  org.glassfish.jaxb:txw2:4.0.5
+
+------------------------------------------------------------------------
+CC0-1.0
+------------------------------------------------------------------------
+
+  org.latencyutils:LatencyUtils:2.0.3
+
+------------------------------------------------------------------------
+CC0-1.0 OR BSD-2-Clause
+------------------------------------------------------------------------
+
+  org.hdrhistogram:HdrHistogram:2.2.2
+
+------------------------------------------------------------------------
+EPL-1.0 OR LGPL-2.1
+------------------------------------------------------------------------
+
+  ch.qos.logback:logback-classic:1.5.6
+  ch.qos.logback:logback-core:1.5.6
+
+------------------------------------------------------------------------
+EPL-2.0
+------------------------------------------------------------------------
+
+  org.aspectj:aspectjweaver:1.9.22.1
+
+------------------------------------------------------------------------
+EPL-2.0 OR BSD-3-Clause
+------------------------------------------------------------------------
+
+  jakarta.persistence:jakarta.persistence-api:3.1.0
+
+------------------------------------------------------------------------
+EPL-2.0 OR GPL-2.0-with-classpath-exception
+------------------------------------------------------------------------
+
+  jakarta.annotation:jakarta.annotation-api:2.1.1
+  jakarta.transaction:jakarta.transaction-api:2.0.1
+
+------------------------------------------------------------------------
+LGPL-2.1
+------------------------------------------------------------------------
+
+  org.hibernate.common:hibernate-commons-annotations:6.0.6.Final
+  org.hibernate.orm:hibernate-core:6.5.2.Final
+
+------------------------------------------------------------------------
+MIT
+------------------------------------------------------------------------
+
+  org.bouncycastle:bcpkix-jdk18on:1.78.1
+  org.bouncycastle:bcprov-jdk18on:1.78.1
+  org.bouncycastle:bcutil-jdk18on:1.78.1
+  org.checkerframework:checker-qual:3.42.0
+  org.slf4j:jul-to-slf4j:2.0.13
+  org.slf4j:slf4j-api:2.0.13
+

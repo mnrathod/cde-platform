@@ -1,0 +1,81 @@
+PROPRIETARY SOFTWARE LICENCE
+
+Copyright (c) 2026 <<< COPYRIGHT HOLDER NOT YET SET >>>. All rights reserved.
+
+    ACTION REQUIRED BEFORE DISTRIBUTION
+    ───────────────────────────────────
+    The copyright holder above is a placeholder. No legal entity name is
+    recorded anywhere in this repository, and inventing one would put a
+    false owner on the copyright notice of every file that references it.
+
+    Replace the placeholder with the registered legal entity that owns this
+    work, in this file, in NOTICE, and in the source-file header template at
+    docs/licences.md, before the software is distributed to anyone outside
+    the organisation. Have counsel confirm the terms below suit the
+    contracts this product is sold under (CLAUDE.md section 18, open item 2:
+    legal review ownership is unassigned).
+
+This software and its accompanying documentation are the confidential and
+proprietary property of the copyright holder. They are licensed, not sold.
+
+PERMITTED USE
+
+Use of this software is governed solely by the written agreement between the
+copyright holder and the customer. In the absence of such an agreement, no
+licence of any kind is granted, and any use, reproduction, modification,
+distribution, or disclosure is prohibited.
+
+RESTRICTIONS
+
+Except to the extent expressly permitted by a written agreement or by
+applicable law that cannot be excluded by contract, you may not:
+
+  (a) copy, reproduce, or distribute this software or any part of it;
+  (b) modify, adapt, translate, or create derivative works from it;
+  (c) reverse engineer, decompile, or disassemble it;
+  (d) remove, obscure, or alter any proprietary notice; or
+  (e) sublicense, rent, lease, lend, or transfer any rights in it.
+
+CUSTOMER DATA
+
+Customer data processed by this software remains the property of the
+customer. The copyright holder holds only the limited licence to process it
+necessary to deliver the service, and does not use it for product
+development, benchmarking, demonstration, testing, or model training without
+the customer's explicit written permission.
+
+THIRD-PARTY COMPONENTS
+
+This software incorporates third-party open-source components, each governed
+by its own licence and copyright. Those licences are not superseded by this
+one. The components and their licences are listed in THIRD-PARTY-NOTICES.txt,
+which is generated from the resolved dependency graph and ships with every
+distribution. Where a third-party licence grants you rights that this licence
+would otherwise restrict, that licence governs for that component.
+
+EXPORT CONTROL
+
+This software contains cryptographic functionality and may be subject to
+export control law in several jurisdictions, including the US Export
+Administration Regulations, the Australian Defence Trade Controls Act, and
+UK export control law. You are responsible for complying with the law
+applicable to you before exporting, re-exporting, or making it available to
+any person or in any jurisdiction.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT, EXCEPT TO THE EXTENT
+SUCH WARRANTIES CANNOT BE EXCLUDED UNDER APPLICABLE LAW.
+
+LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+Nothing in this licence excludes or limits liability that cannot lawfully be
+excluded or limited, including under the Australian Consumer Law or the UK
+Consumer Rights Act where those apply.
