@@ -322,6 +322,166 @@ API key gets (§4.6).
 
 ---
 
+## Browser hardening and cross-origin access
+
+### `cde.web.allowed-origins`
+
+| | |
+|---|---|
+| Type | Comma-separated list of full origins |
+| Default | *(empty — no cross-origin caller is allowed)* |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_ALLOWED_ORIGINS` |
+
+Which other origins a browser may let call this API.
+
+**Empty means none, and none means no CORS configuration is registered at all**
+— not one that allows everything. This was previously `allowedOrigins("*")`
+with every request header reflected, which is the configuration that makes the
+browser's same-origin policy stop applying: any page a user visited could call
+this API from their browser and read the reply.
+
+A same-origin deployment — the Angular build and this API behind one web tier,
+which is how it is meant to run — needs nothing set here. Only a genuinely
+separate front-end origin does.
+
+Name each origin in full, including scheme and any non-default port. **A
+wildcard is refused at startup**, because a wildcard that is never exercised in
+testing is a wildcard that reaches production:
+
+```bash
+CDE_WEB_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+```
+
+Permitted request headers are enumerated (`Authorization`, `Content-Type`,
+`Accept`, `X-Requested-With`, `Idempotency-Key`) rather than reflected;
+reflecting whatever the caller asks for makes the allow-list a formality.
+
+### `cde.web.hsts-enabled`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `true` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_HSTS_ENABLED` |
+
+Whether responses carry `Strict-Transport-Security`.
+
+The header is only written on requests that arrived over TLS — a browser
+ignores it otherwise — so leaving it on costs a plain-HTTP local deployment
+nothing. It is on by default because switching it off in the one environment
+that terminates TLS is the mistake worth preventing.
+
+### `cde.web.hsts-max-age-seconds`
+
+| | |
+|---|---|
+| Type | Long (seconds) |
+| Default | `31536000` (one year) |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_HSTS_MAX_AGE_SECONDS` |
+
+One year is the minimum most browser preload lists accept. Lower it only while
+deliberately unwinding an HSTS commitment.
+
+### `cde.web.csp-report-uri`
+
+| | |
+|---|---|
+| Type | String (URL) |
+| Default | *(empty — no reporting directive)* |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_CSP_REPORT_URI` |
+
+Where a browser posts content-security-policy violation reports. Blank adds no
+reporting directive: the policy still blocks, it just tells nobody that it did.
+
+Two policies are served, chosen by path. The API's own is `default-src 'none'`
+— this server answers with JSON and has no legitimate need to load a script,
+stylesheet, frame or plugin. The documentation page at `/api/docs` gets a
+narrower relaxation (`style-src 'self' 'unsafe-inline'`) because Swagger UI
+applies inline styles as it renders; the concession is to styles, not scripts,
+so an injected script is still refused.
+
+---
+
+## Demonstration data
+
+### `cde.seed.enabled`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `false` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_SEED_ENABLED` |
+
+Whether to create a demonstration administrator and two sample projects at
+startup.
+
+**Off by default.** This used to run unconditionally and create an
+administrator whose username and password were both written in the source, in
+every environment including production — the default-credentials finding that
+appears in every penetration-test report ever written, not mitigated by the
+account being undocumented, because a value in a public repository is a known
+value.
+
+A deployment that says nothing starts with an empty database. The first
+organisation is created by registering an account, which is the path a real
+tenant takes (see `cde.tenancy.self-registration`).
+
+### `cde.seed.admin-password`
+
+| | |
+|---|---|
+| Type | String |
+| Default | *(none — no fallback)* |
+| Required | **Yes, when `cde.seed.enabled` is `true`** |
+| Secret | **Yes** |
+| Environment variable | `CDE_SEED_ADMIN_PASSWORD` |
+
+The password for the seeded administrator.
+
+There is no default, for the same reason `cde.jwt.secret` has none: a default
+that exists is a default that ships. The application **refuses to start** when
+seeding is on and this is missing, shorter than the 12-character policy
+minimum, or equal to the value this seeder used to hard-code — that value is in
+the repository's history permanently and is therefore public, so it is refused
+by name.
+
+```bash
+export CDE_SEED_ENABLED=true
+export CDE_SEED_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+```
+
+The password is never written to a log, including at startup.
+
+### `cde.seed.admin-username` / `cde.seed.admin-email`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `admin` / `admin@cde.invalid` |
+| Required | No |
+| Secret | No |
+| Environment variables | `CDE_SEED_ADMIN_USERNAME`, `CDE_SEED_ADMIN_EMAIL` |
+
+Identity of the seeded administrator. The default email uses the reserved
+`.invalid` top-level domain so it can never route to a real mailbox.
+
+Only one account is seeded. A second existed so that a sample project could
+have a different owner, which cost a second credential to keep out of the
+repository; a deployment that wants a second role now invites one, which
+demonstrates the product rather than working around it.
+
+---
+
 ## Database
 
 ### `spring.datasource.url` / `username` / `password`

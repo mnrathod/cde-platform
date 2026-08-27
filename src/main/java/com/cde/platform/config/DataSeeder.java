@@ -4,6 +4,8 @@ import com.cde.platform.model.*;
 import com.cde.platform.repository.*;
 import com.cde.platform.tenancy.TenancyProperties;
 import com.cde.platform.tenancy.TenantContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
@@ -17,8 +19,17 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.UUID;
 
+/**
+ * Demonstration data for a deployment that has asked for it.
+ *
+ * <p>This used to run unconditionally and create two accounts whose passwords
+ * were written here in the source. See {@link SeedProperties} for why it no
+ * longer does either.
+ */
 @Configuration
 public class DataSeeder {
+
+    private static final Logger log = LoggerFactory.getLogger(DataSeeder.class);
 
     @Value("${cde.storage.upload-dir}")
     private String uploadDir;
@@ -26,8 +37,14 @@ public class DataSeeder {
     @Bean
     CommandLineRunner seed(UserRepository userRepo, ProjectRepository projectRepo,
                            DocumentRepository documentRepo, PasswordEncoder encoder,
-                           TenantRepository tenantRepo, TenancyProperties tenancyProperties) {
+                           TenantRepository tenantRepo, TenancyProperties tenancyProperties,
+                           SeedProperties seedProperties) {
         return args -> {
+            if (!seedProperties.isEnabled()) {
+                log.info("Seeding is disabled (cde.seed.enabled=false); "
+                       + "the first organisation is created by registering an account.");
+                return;
+            }
             // Seeding is background work, so it must establish tenant context
             // explicitly (§5.6). Without it every read returns nothing — the
             // count below would report zero on a populated database and seed a
@@ -40,25 +57,31 @@ public class DataSeeder {
                 .getId();
 
             TenantContext.runAsTenant(defaultTenantId, () -> seedDefaultTenant(
-                userRepo, projectRepo, documentRepo, encoder));
+                userRepo, projectRepo, documentRepo, encoder, seedProperties));
         };
     }
 
     private void seedDefaultTenant(UserRepository userRepo, ProjectRepository projectRepo,
-                                   DocumentRepository documentRepo, PasswordEncoder encoder) {
+                                   DocumentRepository documentRepo, PasswordEncoder encoder,
+                                   SeedProperties seedProperties) {
         try {
             if (userRepo.count() > 0) return;
 
+            // One account, not two. The second existed only so a sample
+            // project could have a different owner, which cost a second
+            // credential to maintain and to keep out of the repository. A
+            // deployment that wants a second role now invites one — which is
+            // the mechanism a real tenant uses, so it demonstrates the product
+            // rather than working around it.
             var admin = User.builder()
-                .username("admin").email("admin@cde.io")
-                .password(encoder.encode("admin123"))
+                .username(seedProperties.getAdminUsername())
+                .email(seedProperties.getAdminEmail())
+                .password(encoder.encode(seedProperties.getAdminPassword()))
                 .role(User.Role.ADMIN).build();
-            var engineer = User.builder()
-                .username("engineer1").email("eng1@cde.io")
-                .password(encoder.encode("pass123"))
-                .role(User.Role.ENGINEER).build();
             userRepo.save(admin);
-            userRepo.save(engineer);
+            log.info("Seeded the demonstration administrator '{}'. "
+                   + "Its password is the configured cde.seed.admin-password and is not logged.",
+                     seedProperties.getAdminUsername());
 
             var proj1 = Project.builder()
                 .name("City Bridge Expansion")
@@ -71,7 +94,7 @@ public class DataSeeder {
                 .description("Seismic retrofit and accessibility upgrades")
                 .location("Station Central")
                 .phase(Project.ProjectPhase.CONSTRUCTION)
-                .owner(engineer).build();
+                .owner(admin).build();
             projectRepo.save(proj1);
             projectRepo.save(proj2);
 
@@ -132,7 +155,7 @@ public class DataSeeder {
                 .fileName("CBE-ST-001-RevA.svg").fileType("image/svg+xml").fileSize((long) svgDrawing.length())
                 .documentType(Document.DocumentType.DRAWING).revision("A").drawingNumber("CBE-ST-001")
                 .filePath(filePath.toString())
-                .vectorData(svgDrawing).project(proj1).uploadedBy(engineer).build();
+                .vectorData(svgDrawing).project(proj1).uploadedBy(admin).build();
 
             documentRepo.save(doc1);
         } catch (IOException e) {

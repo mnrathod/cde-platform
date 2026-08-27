@@ -167,7 +167,7 @@ REM ── Start Spring Boot ─────────────────
 echo.
 echo ========================================
 echo  Open:  http://localhost:8080
-echo  Login: admin / admin123
+echo  Register an account to create your organisation.
 echo  Ctrl+C to stop
 echo ========================================
 echo.

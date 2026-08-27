@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["src/app/features/projects/project-list.component.ts"],
-  "sourcesContent": ["import { Component } from '@angular/core';\nimport { RouterOutlet } from '@angular/router';\n\n@Component({\n  selector: 'app-project-list',\n  standalone: true,\n  imports: [RouterOutlet],\n  template: '<router-outlet />'\n})\nexport class ProjectListComponent {}\n"],
-  "mappings": ";;;;;;;;;;AASM,IAAO,uBAAP,MAAO,sBAAoB;;qCAApB,uBAAoB;EAAA;yEAApB,uBAAoB,WAAA,CAAA,CAAA,kBAAA,CAAA,GAAA,OAAA,GAAA,MAAA,GAAA,UAAA,SAAA,8BAAA,IAAA,KAAA;AAAA,QAAA,KAAA,GAAA;AAFpB,MAAA,oBAAA,GAAA,eAAA;;oBADD,YAAY,GAAA,eAAA,EAAA,CAAA;;;sEAGX,sBAAoB,CAAA;UANhC;WAAU;MACT,UAAU;MACV,YAAY;MACZ,SAAS,CAAC,YAAY;MACtB,UAAU;KACX;;;;6EACY,sBAAoB,EAAA,WAAA,wBAAA,UAAA,uDAAA,YAAA,GAAA,CAAA;AAAA,GAAA;",
-  "names": []
-}

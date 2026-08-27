@@ -67,7 +67,19 @@ gradle bootRun
 
 Then open: **http://localhost:8080**
 
-**Demo credentials:** `admin` / `admin123` · `engineer1` / `pass123`
+**There are no demo credentials.** A fresh deployment starts empty; register an
+account and it creates an organisation with you administering it. Nothing is
+visible across organisations, so a second registration sees none of the first's
+work.
+
+To seed a demonstration organisation instead, supply your own password — there
+is no default, and the application refuses to start if seeding is on without
+one:
+
+```bash
+export CDE_SEED_ENABLED=true
+export CDE_SEED_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+```
 
 ### DXF/DWG support
 

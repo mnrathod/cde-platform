@@ -140,8 +140,9 @@ fi
 # ── Start Spring Boot ────────────────────────────────────────
 echo ""
 echo "========================================"
-echo " Open: http://localhost:8080"
-echo " Login: admin / admin123"
+echo " API:  http://localhost:8080"
+echo " Docs: http://localhost:8080/api/docs"
+echo " Register an account to create your organisation."
 echo " Press Ctrl+C to stop"
 echo "========================================"
 echo ""

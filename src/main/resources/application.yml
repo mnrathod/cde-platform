@@ -115,6 +115,40 @@ cde:
     #   export CDE_JWT_SECRET="$(openssl rand -base64 48)"
     secret: ${CDE_JWT_SECRET:}
     expiration-ms: ${CDE_JWT_EXPIRATION_MS:86400000}   # 24 hours
+  seed:
+    # Off. This used to run unconditionally and create an administrator whose
+    # username and password were both written in the source, which meant every
+    # deployment shipped with a known credential. A deployment that wants
+    # demonstration data asks for it and supplies its own password; one that
+    # says nothing starts empty and creates its first organisation by
+    # registering. See SeedProperties.
+    enabled: ${CDE_SEED_ENABLED:false}
+    admin-username: ${CDE_SEED_ADMIN_USERNAME:admin}
+    admin-email: ${CDE_SEED_ADMIN_EMAIL:admin@cde.invalid}
+    # No default. Required only when enabled is true, and refused if it is
+    # shorter than the password policy's minimum or equal to the value this
+    # seeder used to hard-code.
+    admin-password: ${CDE_SEED_ADMIN_PASSWORD:}
+
+  web:
+    # Which other origins a browser may let call this API. Empty means none,
+    # and none means no CORS configuration is registered at all — not one that
+    # allows everything, which is what `allowedOrigins("*")` used to do here.
+    #
+    # A same-origin deployment (Angular and this API behind one web tier) needs
+    # nothing set. Name each origin in full; a wildcard is refused at startup.
+    #
+    #   CDE_WEB_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+    allowed-origins: ${CDE_WEB_ALLOWED_ORIGINS:}
+    # Inert over plain HTTP, so it costs a local deployment nothing and is on
+    # by default — switching it off in the one environment that terminates TLS
+    # is the mistake worth preventing.
+    hsts-enabled: ${CDE_WEB_HSTS_ENABLED:true}
+    hsts-max-age-seconds: ${CDE_WEB_HSTS_MAX_AGE_SECONDS:31536000}
+    # Where a browser posts content-security-policy violations. Blank adds no
+    # reporting directive; the policy still blocks, it just tells nobody.
+    csp-report-uri: ${CDE_WEB_CSP_REPORT_URI:}
+
   storage:
     upload-dir: ./uploads
   upload:
