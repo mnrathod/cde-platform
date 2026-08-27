@@ -163,6 +163,24 @@ cde:
     max-chunk-size: 8MB
     max-chunks: 4096
     staging-expiry: PT24H
+    # What an unreachable malware scanner means (§5.13.4/5). Every upload is
+    # written to quarantine, examined there, and only promoted once it is
+    # clean — so this decides what happens when the examination cannot happen.
+    #
+    #   required     refuse the upload; a scanner that is down stops uploads
+    #   best-effort  admit it with a logged warning (the default)
+    #   disabled     do not scan at all — a documented risk acceptance
+    #
+    # A shared Common Data Environment should be `required`: a file admitted
+    # unscanned is one every appointed party on the project will open.
+    scanning: ${CDE_UPLOAD_SCANNING:best-effort}
+    # A ClamAV daemon, reached over a socket and never linked or embedded —
+    # ClamAV is GPLv2, and out-of-process is what keeps it licence-compatible.
+    # With `scanning: required` and no host set, the application refuses to
+    # start rather than refusing every upload at runtime.
+    scanner-host: ${CDE_UPLOAD_SCANNER_HOST:}
+    scanner-port: ${CDE_UPLOAD_SCANNER_PORT:3310}
+    scanner-timeout: ${CDE_UPLOAD_SCANNER_TIMEOUT:PT30S}
   converter:
     url: http://localhost:5001
   ai:

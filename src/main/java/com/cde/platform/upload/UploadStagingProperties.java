@@ -62,6 +62,60 @@ public class UploadStagingProperties {
     @NotNull
     private Duration stagingExpiry = Duration.ofHours(24);
 
+    /**
+     * What an unreachable malware scanner means.
+     *
+     * <p>Defaults to BEST_EFFORT so that a deployment with no scanner
+     * configured still works, and says so in its logs on every upload. A shared
+     * Common Data Environment should set REQUIRED: a file admitted unscanned is
+     * one every appointed party on the project will open.
+     */
+    private UploadScanningPolicy scanning = UploadScanningPolicy.BEST_EFFORT;
+
+    /** Where a ClamAV daemon is listening, when one is configured. */
+    private String scannerHost = "";
+
+    private int scannerPort = 3310;
+
+    private Duration scannerTimeout = Duration.ofSeconds(30);
+
+    public UploadScanningPolicy getScanning() {
+        return scanning;
+    }
+
+    public void setScanning(UploadScanningPolicy scanning) {
+        this.scanning = scanning;
+    }
+
+    public String getScannerHost() {
+        return scannerHost;
+    }
+
+    public void setScannerHost(String scannerHost) {
+        this.scannerHost = scannerHost == null ? "" : scannerHost.trim();
+    }
+
+    public int getScannerPort() {
+        return scannerPort;
+    }
+
+    public void setScannerPort(int scannerPort) {
+        this.scannerPort = scannerPort;
+    }
+
+    public Duration getScannerTimeout() {
+        return scannerTimeout;
+    }
+
+    public void setScannerTimeout(Duration scannerTimeout) {
+        this.scannerTimeout = scannerTimeout;
+    }
+
+    /** Whether a scanner endpoint has actually been named. */
+    public boolean hasScannerConfigured() {
+        return !scannerHost.isBlank();
+    }
+
     public DataSize getMaxFileSize() {
         return maxFileSize;
     }

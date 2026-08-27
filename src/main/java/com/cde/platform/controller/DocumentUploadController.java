@@ -8,6 +8,7 @@ import com.cde.platform.openapi.ApiDocumentation;
 import com.cde.platform.openapi.StandardErrorResponses;
 import com.cde.platform.repository.*;
 import com.cde.platform.upload.ChunkedUploadStaging;
+import com.cde.platform.upload.UploadAdmissionService;
 import com.cde.platform.upload.StoredFileName;
 import com.cde.platform.upload.UploadRejectedException;
 import com.cde.platform.upload.UploadedMediaType;
@@ -61,16 +62,19 @@ public class DocumentUploadController {
     private final ProjectRepository projectRepo;
     private final UserRepository userRepo;
     private final ChunkedUploadStaging staging;
+    private final UploadAdmissionService admission;
 
     @Value("${cde.storage.upload-dir}")
     private String uploadDir;
 
     public DocumentUploadController(DocumentRepository documentRepo, ProjectRepository projectRepo,
-                                    UserRepository userRepo, ChunkedUploadStaging staging) {
+                                    UserRepository userRepo, ChunkedUploadStaging staging,
+                                    UploadAdmissionService admission) {
         this.documentRepo = documentRepo;
         this.projectRepo = projectRepo;
         this.userRepo = userRepo;
         this.staging = staging;
+        this.admission = admission;
     }
 
     @Operation(
@@ -148,17 +152,32 @@ public class DocumentUploadController {
             String displayName = StoredFileName.forDisplay(file.getOriginalFilename());
             Path dest = Paths.get(uploadDir, projectId.toString()).resolve(storedName);
 
+            // Quarantine first. The bytes are written somewhere nothing can
+            // reach, examined there, and only then moved into place. Writing
+            // straight to `dest` and checking afterwards leaves a window in
+            // which the file is referenced, downloadable and unexamined — and
+            // that window is the vulnerability, not the checking.
+            Path quarantined = staging.quarantinePathFor(storedName);
+
             long storedBytes;
             try (var incoming = file.getInputStream()) {
-                storedBytes = staging.streamTo(incoming, dest);
+                storedBytes = staging.streamTo(incoming, quarantined);
             }
             if (storedBytes > staging.maxFileSizeBytes()) {
-                Files.deleteIfExists(dest);
+                Files.deleteIfExists(quarantined);
                 throw new UploadRejectedException(
                     "The file is larger than this deployment accepts.");
             }
 
+            // Inspects the bytes and scans them. Throws, having already deleted
+            // the file, if either refuses it.
+            var admitted = admission.admit(quarantined, dest, displayName);
+
             var uploader = userRepo.findByUsername(principal.getUsername()).orElseThrow();
+            // The extension still decides the renderer — detection reports a
+            // DWG and an IFC alike as generic binary, so it cannot. What
+            // detection decided is whether the file is admitted at all, and
+            // whether it is active content.
             String ct = UploadedMediaType.of(displayName, file.getContentType());
 
             // Only an SVG keeps its source, and only a small one: the viewer
@@ -329,7 +348,14 @@ public class DocumentUploadController {
             String displayName = StoredFileName.forDisplay(fileName);
             Path dest = Paths.get(uploadDir, projectId.toString()).resolve(storedName);
 
-            long storedBytes = staging.assembleInto(uploadId, totalChunks, dest);
+            // Assembled into quarantine, not into place. This path is the one
+            // that matters most: it exists for large files, so it is the route
+            // a two-gigabyte model takes, and assembling straight to `dest`
+            // would leave the largest and least-inspected uploads referenced
+            // before anything had looked at them.
+            Path quarantined = staging.quarantinePathFor(storedName);
+            long storedBytes = staging.assembleInto(uploadId, totalChunks, quarantined);
+            admission.admit(quarantined, dest, displayName);
 
             var uploader = userRepo.findByUsername(principal.getUsername()).orElseThrow();
 

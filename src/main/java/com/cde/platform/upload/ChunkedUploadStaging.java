@@ -335,6 +335,22 @@ public class ChunkedUploadStaging {
         return limits.getMaxFileSize().toBytes();
     }
 
+    /**
+     * Where an upload is written while it is being examined.
+     *
+     * <p>Under the staging root rather than beside the file's eventual home, so
+     * that nothing serving project files can reach it. That is the point of
+     * quarantining at all: between "the bytes have arrived" and "the bytes have
+     * been examined" there must be no path by which anything can read them.
+     *
+     * <p>A distinct subdirectory from the chunk staging area, so the sweeper
+     * that expires abandoned chunk uploads does not have to reason about two
+     * kinds of file.
+     */
+    public Path quarantinePathFor(String storedName) {
+        return stagingRoot.resolve("quarantine").resolve(storedName);
+    }
+
     /** Copies a stream to a destination without holding it in memory. */
     public long streamTo(InputStream source, Path destination) throws IOException {
         Files.createDirectories(destination.getParent());

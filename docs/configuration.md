@@ -532,6 +532,83 @@ The CAD/Office conversion service. Its reachability is reported by
 still worth routing traffic to without it, so it is deliberately excluded from
 the readiness group.
 
+## Upload admission
+
+Every upload is streamed to a **quarantine** directory, examined there, and
+only moved into place once it passes. Writing to the final location and
+checking afterwards would leave a window in which the file is referenced,
+downloadable and unexamined — and that window is the vulnerability, not the
+checking.
+
+Two examinations run, in order:
+
+1. **What the bytes are.** The content type is detected from the leading bytes,
+   not from the file name or the client's `Content-Type` header — an attacker
+   chooses both of those. Executables and scripts are refused whatever they are
+   called; anything outside the permitted set is refused. Markup carrying a
+   script or an event handler is **refused rather than sanitised**: a small SVG
+   is stored inline and rendered as markup on the application's own origin, so a
+   scripted one is stored cross-site scripting, and a CAD export has no scripts
+   in it.
+2. **Whether a scanner objects.** See `cde.upload.scanning`.
+
+A refused file is deleted rather than retained. Keeping malware means storing
+it, backing it up and replicating it; the signature in the audit record is what
+an investigation needs.
+
+### `cde.upload.scanning`
+
+| | |
+|---|---|
+| Type | enum: `required` \| `best-effort` \| `disabled` |
+| Default | `best-effort` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_UPLOAD_SCANNING` |
+
+What an unreachable scanner means. Three values rather than a boolean, because
+"no scanner configured" and "the scanner is down right now" need opposite
+treatment — the first is a deployment that chose not to scan, the second is one
+that chose to scan and currently cannot.
+
+- **`required`** — uploads are refused unless a scanner confirms them clean. A
+  scanner that is down stops uploads. **This is the correct setting for a
+  shared Common Data Environment**: a file admitted unscanned is one every
+  appointed party on the project will open.
+- **`best-effort`** — scan when the scanner answers, admit with a logged
+  warning when it does not. Availability over certainty; defensible for a
+  single-tenant internal deployment, not for a shared one.
+- **`disabled`** — do not scan. A deliberate choice with a documented risk
+  acceptance, which is why it has to be named rather than reached by leaving
+  something unset.
+
+With `required` and no `scanner-host`, **the application refuses to start** —
+that configuration accepts no uploads at all, and finding out in front of
+whoever deployed it beats finding out from a user.
+
+### `cde.upload.scanner-host` / `scanner-port` / `scanner-timeout`
+
+| | |
+|---|---|
+| Type | String / Integer / Duration |
+| Default | *(empty)* / `3310` / `PT30S` |
+| Required | When `scanning` is `required` |
+| Secret | No |
+| Environment variables | `CDE_UPLOAD_SCANNER_HOST`, `CDE_UPLOAD_SCANNER_PORT`, `CDE_UPLOAD_SCANNER_TIMEOUT` |
+
+A ClamAV daemon, reached over its INSTREAM protocol on a socket.
+
+Out of process by design, not by accident: **ClamAV is GPLv2**, and using it as
+a separate service over a socket is what keeps it out of this application's
+licensing. Linking or embedding it would create a combined work.
+
+INSTREAM rather than SCAN because SCAN takes a path, which requires the daemon
+to see the same filesystem — it cannot when the two run in separate containers,
+which is the arrangement this is deployed in. The file is streamed in bounded
+chunks, so scanning a two-gigabyte model costs one buffer.
+
+---
+
 ## Assisted summaries
 
 Three checks decide whether anything reaches a model provider, and all three
