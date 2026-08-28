@@ -7,7 +7,7 @@ import com.cde.platform.audit.AuditableChange;
 import com.cde.platform.audit.RequestAuditor;
 import com.cde.platform.exception.ApiProblem;
 import com.cde.platform.openapi.ApiDocumentation;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;

@@ -4,8 +4,8 @@ import com.cde.platform.repository.UserRepository;
 import com.cde.platform.security.JwtFilter;
 import com.cde.platform.security.RolePermissions;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
-import org.springframework.boot.actuate.health.HealthEndpoint;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
+import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
 import org.springframework.context.annotation.*;
 import org.springframework.security.authentication.*;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -24,7 +24,7 @@ import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHe
 import org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy;
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import static org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher.pathPattern;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -181,10 +181,10 @@ public class SecurityConfig {
 
     /** Paths whose responses are markup rendered by a browser. */
     private static final RequestMatcher DOCUMENTATION_PAGES =
-        new OrRequestMatcher(new AntPathRequestMatcher("/api/docs/**"),
-                             new AntPathRequestMatcher("/api/docs"),
-                             new AntPathRequestMatcher("/api/swagger-ui/**"),
-                             new AntPathRequestMatcher("/swagger-ui/**"));
+        new OrRequestMatcher(pathPattern("/api/docs/**"),
+                             pathPattern("/api/docs"),
+                             pathPattern("/api/swagger-ui/**"),
+                             pathPattern("/swagger-ui/**"));
 
     /**
      * The response headers a browser needs in order to apply the protections

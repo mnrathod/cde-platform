@@ -4,7 +4,7 @@ import com.cde.platform.tenancy.TenancyProperties;
 import com.cde.platform.tenancy.TenantAwareDataSource;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -41,7 +41,7 @@ public class DataSourceConfig {
     }
 
     @Bean
-    @org.springframework.boot.autoconfigure.flyway.FlywayDataSource
+    @org.springframework.boot.flyway.autoconfigure.FlywayDataSource
     public DataSource flywayDataSource(@Qualifier("unrestrictedDataSource") HikariDataSource pool) {
         return pool;
     }

@@ -106,11 +106,17 @@ ext.toSpdxIdentifier = { String name, String url ->
  * the enforcement half, that file is the record.
  */
 ext.approvedLicenceExceptions = [
-    'org.hibernate.orm:hibernate-core':
-        'LGPL-2.1, dynamically linked and unmodified. Reached through ' +
-        'spring-boot-starter-data-jpa, not chosen directly.',
-    'org.hibernate.common:hibernate-commons-annotations':
-        'LGPL-2.1, dynamically linked and unmodified. Transitive under hibernate-core.'
+    // Empty, and that is the true current state rather than an oversight.
+    //
+    // The two Hibernate entries that lived here were retired on the Spring
+    // Boot 4 upgrade: hibernate-core re-licensed to Apache-2.0 in its 7.x
+    // line, and hibernate-commons-annotations left the dependency set
+    // altogether, replaced by hibernate-models. Both are Apache-2.0 now, so
+    // no exception is required. See docs/licences.md §3.1.
+    //
+    // An empty map is not a licence to add one casually: a new LGPL
+    // dependency fails the build until someone records the reasoning in
+    // docs/licences.md and adds it here.
 ]
 
 /**

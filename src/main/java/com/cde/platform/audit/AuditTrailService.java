@@ -1,8 +1,8 @@
 package com.cde.platform.audit;
 
 import com.cde.platform.tenancy.TenantContext;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -189,7 +189,7 @@ public class AuditTrailService {
         }
         try {
             return objectMapper.writeValueAsString(change.fields());
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             // Recorded as an explicit marker rather than dropped: a record
             // whose summary silently vanished looks identical to one that
             // never had a change to describe.

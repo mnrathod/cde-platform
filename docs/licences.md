@@ -54,11 +54,11 @@ approve real ones.
 | Apache-2.0 | 89 | Spring, Jackson, Tika, PDFBox, Micrometer, Flyway, JJWT |
 | BSD-3-Clause | 8 | Includes the Eclipse Distribution Licence, which is the BSD-3 text |
 | MIT | 6 | SLF4J, Bouncy Castle, checker-qual |
-| EPL-1.0 OR LGPL-2.1 | 2 | Logback — **we take EPL-1.0** |
+| EPL-2.0 OR LGPL-2.1 | 2 | Logback — **we take EPL-2.0** (was EPL-1.0 before Spring Boot 4) |
 | EPL-2.0 OR GPL-2.0-w-CPE | 2 | Jakarta annotation and transaction APIs — **we take EPL-2.0** |
 | EPL-2.0 | 1 | AspectJ weaver |
 | EPL-2.0 OR BSD-3-Clause | 1 | Jakarta Persistence API |
-| **LGPL-2.1** | **2** | **Hibernate — exception granted, see §3** |
+| Apache-2.0 | — | Hibernate, counted in the Apache-2.0 row above since its 7.x re-licence |
 | BSD-2-Clause | 1 | PostgreSQL JDBC driver |
 | CC0-1.0 | 1 | HdrHistogram |
 | CC0-1.0 OR BSD-2-Clause | 1 | LatencyUtils |
@@ -105,21 +105,21 @@ permissive.
 
 ## 3. Exceptions granted
 
-### 3.1 Hibernate ORM — LGPL-2.1
+### 3.1 Hibernate ORM — LGPL-2.1 — **RETIRED 2026-08-28**
+
+No exception is in force. This entry is kept as the record of one that was.
 
 | | |
 |---|---|
 | Components | `org.hibernate.orm:hibernate-core`, `org.hibernate.common:hibernate-commons-annotations` |
-| Licence | LGPL-2.1 |
-| Basis | §2.1: dynamically linked, unmodified library |
-| Modified? | **No.** No fork, no patch, no shaded repackaging. |
-| How it arrives | Transitively, via `spring-boot-starter-data-jpa`. Not selected directly. |
-| Obligation | Keep it unmodified and separately linked. If we ever patch it, the modified files must be released under LGPL-2.1. |
-| Enforcement | `approvedLicenceExceptions` in `gradle/licences.gradle`, keyed by coordinate so a version bump keeps the approval but a *new* LGPL dependency fails the build. |
-| Review | Hibernate ORM 7 is reported to have moved to Apache-2.0. Confirm on the next Spring Boot major upgrade; if so, this exception can be retired. |
+| Was | LGPL-2.1, permitted under §2.1 as a dynamically linked, unmodified library |
+| Now | **Apache-2.0**, from Hibernate ORM 7.x, which Spring Boot 4 brings in at 7.4.5 |
+| How it was confirmed | The §17.2 licence-change gate failed the build on the Spring Boot 4 upgrade, reporting `hibernate-core was LGPL-2.1, is now Apache-2.0`. That is the detector working as designed: a re-licence surfaced at the upgrade rather than at an audit. |
+| Effect | Apache-2.0 is on the §2.1 allowed list and carries an express patent grant, which §17.3 prefers. The library was never modified, so no LGPL obligation was ever incurred and none survives. |
+| Removed from | `approvedLicenceExceptions` in `gradle/licences.gradle` |
 
-Recorded, not decided by engineering: this exception should be confirmed by
-counsel as part of resolving CLAUDE.md §18 open item 2.
+The previous entry noted this move was expected and should be confirmed on the
+next Spring Boot major upgrade. That upgrade is this one, and it is confirmed.
 
 ---
 

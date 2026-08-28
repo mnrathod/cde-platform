@@ -2,8 +2,8 @@ plugins {
     id 'java'
     // Core Gradle plugin, versioned with Gradle itself — nothing to pin.
     id 'jacoco'
-    id 'org.springframework.boot' version '3.3.2'
-    id 'io.spring.dependency-management' version '1.1.5'
+    id 'org.springframework.boot' version '4.1.1'
+    id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'com.cde'
@@ -13,15 +13,6 @@ version = '0.0.1-SNAPSHOT'
 // running. Without it, "which version is deployed?" is answered by guesswork.
 springBoot {
     buildInfo()
-}
-
-ext {
-    // Spring Boot 3.3 manages Testcontainers 1.19.x, whose bundled docker-java
-    // negotiates Docker API 1.32. Engines from 25 onward refuse anything below
-    // 1.40, so the managed version cannot talk to a current daemon at all —
-    // it reports "could not find a valid Docker environment", which reads like
-    // a missing daemon rather than a version mismatch.
-    set('testcontainers.version', '1.21.4')
 }
 
 java {
@@ -37,12 +28,19 @@ repositories {
 dependencies {
     // Web
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // Jackson 3. Boot 4's JacksonAutoConfiguration produces a
+    // tools.jackson.databind.json.JsonMapper and no longer registers a
+    // Jackson 2 ObjectMapper bean, so this is what the application actually
+    // serialises with. Jackson 2 still arrives transitively via springdoc's
+    // swagger-core; that copy is an implementation detail of springdoc and
+    // must not be what our code binds to.
+    implementation 'org.springframework.boot:spring-boot-starter-jackson'
     // OpenAPI 3.1, generated from the controller and DTO annotations rather
     // than hand-written, so the specification cannot drift from the code
-    // (§3.5). 2.6.0 is the line built against Spring Boot 3.3; the 2.7+ and
-    // 2.8+ lines are built against 3.4 and 3.5 and pull a Swagger Core that
-    // expects APIs this Boot version does not have.
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
+    // (§3.5). The 3.x line is the one built against Spring Boot 4 / Spring
+    // Framework 7; the 2.x lines target Boot 3 and pull a Swagger Core that
+    // expects APIs Framework 7 no longer has.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
     // Health, metrics and the liveness/readiness probes Kubernetes needs
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     // Exposes those metrics in the format Prometheus scrapes
@@ -60,20 +58,29 @@ dependencies {
     // Schema is owned by migrations, not by Hibernate.
     implementation 'org.flywaydb:flyway-core'
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+    // Spring Boot 4 split autoconfiguration out of spring-boot-autoconfigure
+    // into a module per technology. Flyway's lives here, and DataSourceConfig
+    // needs @FlywayDataSource from it to hand migrations the unrestricted
+    // DataSource. Version comes from the Boot BOM.
+    implementation 'org.springframework.boot:spring-boot-flyway'
 
     // Security + JWT
     implementation 'org.springframework.boot:spring-boot-starter-security'
-    implementation 'io.jsonwebtoken:jjwt-api:0.12.5'
-    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.5'
-    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.5'
+    implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
 
     // File handling
-    implementation 'commons-io:commons-io:2.15.1'
-    // Digital signatures (PKI) and embedding them into the PDF itself
+    implementation 'commons-io:commons-io:2.22.0'
+    // Digital signatures (PKI) and embedding them into the PDF itself.
+    // The two versions differ deliberately: 1.85.2 is a patch release of the
+    // provider alone, and bcpkix has no matching build. bcpkix 1.85 resolves
+    // bcprov transitively at 1.85, so declaring the provider explicitly is what
+    // pulls the patch in.
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
     implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
-    implementation 'org.apache.pdfbox:pdfbox:3.0.3'
-    implementation 'org.apache.tika:tika-core:2.9.1'
+    implementation 'org.apache.pdfbox:pdfbox:3.0.8'
+    implementation 'org.apache.tika:tika-core:4.0.0'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
@@ -81,12 +88,30 @@ dependencies {
 
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // @AutoConfigureMockMvc moved out of spring-boot-test-autoconfigure in
+    // Boot 4, along with the rest of the per-technology split. The starter no
+    // longer brings it, so the MockMvc-based suites need it declared.
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    // Boot disables metrics export in tests, so ActuatorEndpointSecurityTest
+    // needs @AutoConfigureMetrics to assert the Prometheus endpoint's exposure
+    // as production sees it. Boot 4 renamed it from @AutoConfigureObservability
+    // and moved it here.
+    testImplementation 'org.springframework.boot:spring-boot-micrometer-metrics-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    // Boot 4's @AutoConfigureMockMvc imports only the three MockMvc
+    // autoconfigurations; the Spring Security integration that used to come
+    // with it lives here now. Without it @WithMockUser has no effect and every
+    // authenticated MockMvc test gets a 401 — including the cross-tenant
+    // isolation suite, which would then pass for the wrong reason.
+    testImplementation 'org.springframework.boot:spring-boot-security-test'
     // Every test runs against a real PostgreSQL, started once per JVM by
     // PostgresTestSessionListener.
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
-    testImplementation 'org.testcontainers:junit-jupiter'
-    testImplementation 'org.testcontainers:postgresql'
+    // Testcontainers 2.x renamed its modules with a testcontainers- prefix;
+    // the old coordinates stopped publishing at 1.21.4. Versions come from the
+    // Boot BOM, which manages the 2.x line.
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
     // Compile-scope, not runtime: PostgresTestSessionListener implements
     // LauncherSessionListener and so needs the API at compile time.
     testImplementation 'org.junit.platform:junit-platform-launcher'

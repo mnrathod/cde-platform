@@ -2,8 +2,8 @@ package com.cde.platform.service;
 
 import com.cde.platform.model.Annotation;
 import com.cde.platform.service.XfdfService.ImportedAnnotation;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;

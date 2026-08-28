@@ -1,9 +1,9 @@
 package com.cde.platform.audit;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,17 +42,17 @@ final class CanonicalJson {
         }
         try {
             return objectMapper.writeValueAsString(sortKeys(objectMapper.readTree(json)));
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             return json;
         }
     }
 
     private static JsonNode sortKeys(JsonNode node) {
         if (node.isObject()) {
-            ObjectNode sorted = new ObjectNode(com.fasterxml.jackson.databind.node
+            ObjectNode sorted = new ObjectNode(tools.jackson.databind.node
                 .JsonNodeFactory.instance);
             List<String> names = new ArrayList<>();
-            node.fieldNames().forEachRemaining(names::add);
+            names.addAll(node.propertyNames());
             names.sort(String::compareTo);
             names.forEach(name -> sorted.set(name, sortKeys(node.get(name))));
             return sorted;
@@ -62,7 +62,7 @@ final class CanonicalJson {
             // are canonicalised.
             var array = node.deepCopy();
             for (int index = 0; index < node.size(); index++) {
-                ((com.fasterxml.jackson.databind.node.ArrayNode) array)
+                ((tools.jackson.databind.node.ArrayNode) array)
                     .set(index, sortKeys(node.get(index)));
             }
             return array;

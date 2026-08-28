@@ -8,9 +8,9 @@ import com.cde.platform.model.Document;
 import com.cde.platform.openapi.ApiDocumentation;
 import com.cde.platform.openapi.StandardErrorResponses;
 import com.cde.platform.repository.DocumentRepository;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -170,7 +170,7 @@ public class CompareController {
     /** The converter's own members, minus the ones lifted into named fields. */
     private Map<String, Object> toMap(JsonNode comparison) {
         Map<String, Object> members = new LinkedHashMap<>();
-        comparison.fields().forEachRemaining(entry -> {
+        comparison.properties().forEach(entry -> {
             if (!"success".equals(entry.getKey()) && !"error".equals(entry.getKey())) {
                 members.put(entry.getKey(), mapper.convertValue(entry.getValue(), Object.class));
             }

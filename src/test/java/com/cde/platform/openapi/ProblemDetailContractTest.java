@@ -1,13 +1,13 @@
 package com.cde.platform.openapi;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -78,7 +78,7 @@ class ProblemDetailContractTest {
 
         List<String> documented = documentedMembers();
         List<String> undocumented = new ArrayList<>();
-        problem.fieldNames().forEachRemaining(member -> {
+        problem.propertyNames().forEach(member -> {
             if (!documented.contains(member)) undocumented.add(member);
         });
 
@@ -197,7 +197,7 @@ class ProblemDetailContractTest {
     private List<String> documentedMembers() throws Exception {
         JsonNode properties = publishedProblemSchema().get("properties");
         List<String> members = new ArrayList<>();
-        properties.fieldNames().forEachRemaining(members::add);
+        members.addAll(properties.propertyNames());
         return members;
     }
 

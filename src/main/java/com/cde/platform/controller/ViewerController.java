@@ -12,7 +12,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import com.cde.platform.service.ConverterService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -139,7 +139,7 @@ public class ViewerController {
                 resp.put("name",doc.getName());
                 resp.put("fileName",s(doc.getFileName()));
                 if (result.rawJson() != null) {
-                    result.rawJson().fields().forEachRemaining(e ->
+                    result.rawJson().properties().forEach(e ->
                         resp.put(e.getKey(), e.getValue().isBoolean()
                             ? e.getValue().asBoolean() : e.getValue().asText()));
                 } else {
@@ -353,7 +353,7 @@ public class ViewerController {
             // IFC — JSON with geometry data
             java.net.http.HttpResponse<String> resp =
                 http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
-            com.fasterxml.jackson.databind.JsonNode json = mapper.readTree(resp.body());
+            tools.jackson.databind.JsonNode json = mapper.readTree(resp.body());
             if (!json.path("success").asBoolean(false)) {
                 return ResponseEntity.ok(Map.of(
                     "type", "error",
