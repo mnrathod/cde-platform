@@ -59,19 +59,40 @@ user's first upload.
 start.bat
 ```
 
-### Manual startup
+### Manual startup (for iterating on the backend)
 
-**Terminal 1 — Python DXF converter (ezdxf):**
-```cmd
-REM Windows — always use "python -m pip", never "pip3"
-python -m pip install "ezdxf[draw]"
-python converter\app.py
+Faster than rebuilding the image on every change, but you supply the three
+things compose otherwise provides: a database, the converter, and the secrets.
+
+**Terminal 1 — PostgreSQL.** There is no in-memory fallback; Row-Level Security
+is a security control the application depends on, and H2 does not implement it.
+
+```bash
+docker compose up db
 ```
 
-**Terminal 2 — Spring Boot:**
-```cmd
-gradle bootRun
+**Terminal 2 — the converter.** It shells out to LibreOffice, LibreDWG and
+Tesseract, so running it from source needs all three on `PATH`. Unless you are
+changing `converter/app.py`, run the container instead and skip the toolchain:
+
+```bash
+docker compose up converter
+# or, from source, with the toolchain already installed:
+python -m pip install -r converter/requirements.txt && python converter/app.py
 ```
+
+`GET http://localhost:5001/health` reports which binaries were found.
+
+**Terminal 3 — Spring Boot:**
+
+```bash
+export CDE_JWT_SECRET=$(openssl rand -base64 48)
+export CDE_STORAGE_SIGNING_KEY=$(openssl rand -base64 32)
+./gradlew bootRun
+```
+
+Both variables are required and the application fails fast without them. The
+datasource defaults in `application.yml` already point at the compose database.
 
 Then open: **http://localhost:8080**
 
