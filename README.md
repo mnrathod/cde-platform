@@ -22,14 +22,22 @@ A full-stack Spring Boot application providing a Common Data Environment (CDE) f
 ### Docker (recommended — brings the full toolchain with it)
 
 ```bash
-export CDE_JWT_SECRET='<a long random string>'
+export CDE_JWT_SECRET=$(openssl rand -base64 48)
+export CDE_STORAGE_SIGNING_KEY=$(openssl rand -base64 32)
+export POSTGRES_PASSWORD=$(openssl rand -base64 24)
 docker compose up --build
 ```
 
 Then open **http://localhost:8080**.
 
-`CDE_JWT_SECRET` is required and compose refuses to start without it — the
-value in `application.yml` is a placeholder, not a default.
+All three are required and have no defaults. Compose refuses to start without
+`CDE_JWT_SECRET` or `POSTGRES_PASSWORD`; the application itself refuses to
+start without `CDE_STORAGE_SIGNING_KEY`, which signs the time-limited download
+URLs — a shipped default would be a published key able to mint a URL for any
+object in any tenant.
+
+Generate them once and keep them, or the database volume and every issued
+token become unreadable on the next start.
 
 This runs two containers:
 

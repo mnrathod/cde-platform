@@ -67,6 +67,11 @@ services:
       # Override in deployment. The application.yml default is a shipped
       # placeholder and must not be used anywhere real.
       CDE_JWT_SECRET: ${CDE_JWT_SECRET:?set CDE_JWT_SECRET before starting}
+      # Signs the local storage provider's time-limited download URLs. The
+      # application refuses to start without it (StorageProperties), so this
+      # is required rather than defaulted — a built-in key is a published one,
+      # and whoever holds it can mint a URL for any object in any tenant.
+      CDE_STORAGE_SIGNING_KEY: ${CDE_STORAGE_SIGNING_KEY:?set CDE_STORAGE_SIGNING_KEY before starting}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-cdedb}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-cde}
