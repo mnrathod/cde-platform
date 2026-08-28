@@ -15,6 +15,12 @@ Operating manual for Claude Code on this repository. Read this before writing, r
 >    specific lines have been translated rather than dropped.
 > 2. **The backend builds with Gradle**, not Maven. §9.2's build stage is
 >    written accordingly.
+> 3. **The backend is on Spring Boot 4.x, not 3.x.** §2 originally specified
+>    3.x. By August 2026 the 3.3 line the code was pinned to had been out of
+>    OSS support for over a year, which §0.2 forbids outright, and 3.x as a
+>    whole was a generation behind. Staying on 3.x to satisfy the letter of
+>    the table would have meant shipping an EOL framework to satisfy a
+>    document — so the table moved. Everything else in §2 is unchanged.
 >
 > Anything else that conflicts with the code is a defect in the code, not a
 > licence to ignore this document.
@@ -146,7 +152,7 @@ Verify the current version of each before a bid — these move, and the EU/UK po
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Backend | **Spring Boot 3.x** on current Java LTS | Verify exact versions via Context7 / endoflife.date |
+| Backend | **Spring Boot 4.x** on current Java LTS | Verify exact versions via Context7 / endoflife.date; see amendment 3 |
 | Frontend | **Angular** (TypeScript, strict mode) | Standalone components; see the amendment note above |
 | Database | **PostgreSQL** (current supported major) | Row-Level Security for tenant isolation |
 | Web tier | **Apache HTTP Server** | TLS termination, reverse proxy, compression, static assets |
