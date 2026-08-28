@@ -203,6 +203,19 @@ tasks.register('generateAttribution') {
     def outputFile = rootProject.file('THIRD-PARTY-NOTICES.txt')
     outputs.file(outputFile)
 
+    // The resolved classpath is the input, and declaring it is not optional.
+    // With only an output declared, Gradle called this task UP-TO-DATE
+    // whenever the file merely existed — so a dependency upgrade left the
+    // notices describing the previous versions, and checkAttribution then
+    // validated that stale file and passed. Bouncy Castle went 1.78.1 -> 1.85
+    // with the shipped attribution still naming 1.78.1 and every gate green.
+    //
+    // Naming the configuration rather than build.gradle catches a transitive
+    // change too, which a file input would miss entirely.
+    inputs.files(configurations.named('runtimeClasspath'))
+          .withPropertyName('runtimeClasspath')
+          .withNormalizer(ClasspathNormalizer)
+
     doLast {
         def components = resolveRuntimeComponents()
 

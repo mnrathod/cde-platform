@@ -4,6 +4,9 @@ import com.cde.platform.service.DigitalSignatureService.SelfSignedCert;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.cms.ContentInfo;
 import org.bouncycastle.cert.jcajce.JcaCertStore;
 import org.bouncycastle.cms.CMSException;
 import org.bouncycastle.cms.CMSProcessableByteArray;
@@ -19,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -118,7 +122,8 @@ public class PdfSignatureEmbedder {
 
     private EmbeddedSignatureCheck check(PDSignature signature, byte[] signed, byte[] container) {
         try {
-            CMSSignedData signedData = new CMSSignedData(new CMSProcessableByteArray(signed), container);
+            CMSSignedData signedData =
+                new CMSSignedData(new CMSProcessableByteArray(signed), readContainer(container));
             SignerInformation signer = signedData.getSignerInfos().getSigners().iterator().next();
 
             @SuppressWarnings("unchecked")
@@ -138,7 +143,8 @@ public class PdfSignatureEmbedder {
                 valid ? "The embedded signature is valid."
                       : "The document has been modified since it was signed.");
 
-        } catch (CMSException | org.bouncycastle.operator.OperatorCreationException
+        } catch (IOException | IllegalArgumentException | CMSException
+                 | org.bouncycastle.operator.OperatorCreationException
                  | java.security.cert.CertificateException e) {
             // A malformed container is a failed verification, not a server
             // error — the caller asked whether the signature holds, and it
@@ -146,6 +152,35 @@ public class PdfSignatureEmbedder {
             log.warn("Embedded signature could not be checked: {}", e.getMessage());
             return new EmbeddedSignatureCheck(false, signature.getName(), signature.getReason(),
                 "The embedded signature could not be read.");
+        }
+    }
+
+    /**
+     * Reads the PKCS#7 structure out of the fixed-width slot a PDF reserves
+     * for it.
+     *
+     * <p>A signature's {@code /Contents} is a fixed-size slot — PDFBox has to
+     * reserve the space before it knows how large the container will be, so
+     * whatever is left over is zero padding. In practice that is most of it:
+     * a 1.3 KB container inside a 9.5 KB slot, with over 8 KB of trailing
+     * zeros. The padding is part of the PDF, not part of the signature.
+     *
+     * <p>Handing those bytes to {@code CMSSignedData} whole used to work
+     * because Bouncy Castle stopped reading at the end of the structure and
+     * ignored the rest. From 1.85 it rejects the trailing bytes outright, and
+     * verification failed with "IOException reading content" — for a
+     * signature that was perfectly valid, in a document any conforming reader
+     * accepted. Reading exactly one ASN.1 object is what the format actually
+     * calls for, so this holds on either version rather than tracking the
+     * library's tolerance.
+     */
+    private static ContentInfo readContainer(byte[] slotContents) throws IOException {
+        try (ASN1InputStream asn1 = new ASN1InputStream(new ByteArrayInputStream(slotContents))) {
+            ASN1Primitive structure = asn1.readObject();
+            if (structure == null) {
+                throw new IOException("The signature slot holds no PKCS#7 structure.");
+            }
+            return ContentInfo.getInstance(structure);
         }
     }
 

@@ -77,8 +77,8 @@ dependencies {
     // provider alone, and bcpkix has no matching build. bcpkix 1.85 resolves
     // bcprov transitively at 1.85, so declaring the provider explicitly is what
     // pulls the patch in.
-    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
-    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.85.2'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.85'
     implementation 'org.apache.pdfbox:pdfbox:3.0.8'
     implementation 'org.apache.tika:tika-core:4.0.0'
 

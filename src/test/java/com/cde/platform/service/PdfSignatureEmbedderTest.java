@@ -8,11 +8,13 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.bouncycastle.asn1.ASN1InputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -87,6 +89,44 @@ class PdfSignatureEmbedderTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.signerName()).isEqualTo("ada");
+    }
+
+    @Test
+    @DisplayName("the signature slot is mostly zero padding, and it verifies anyway")
+    void verifiesDespiteThePaddingInTheSignatureSlot() throws IOException {
+        // The reason this test exists rather than being covered by the one
+        // above: a PDF reserves a fixed-width slot for the signature before
+        // it knows how big the container is, so most of that slot is trailing
+        // zeros. Bouncy Castle used to skip them and from 1.85 refuses them,
+        // which broke verification of signatures that were entirely valid.
+        //
+        // Asserting the padding is really there is the point. Without it this
+        // is just another "does it verify" test, and reverting the fix to
+        // pass the raw slot straight to CMSSignedData would keep passing on
+        // an older Bouncy Castle and fail on a newer one.
+        Path signed = sign();
+        byte[] fileBytes = Files.readAllBytes(signed);
+
+        int slotSize;
+        int derSize;
+        try (PDDocument document = Loader.loadPDF(signed.toFile())) {
+            byte[] slot = document.getSignatureDictionaries().get(0).getContents(fileBytes);
+            slotSize = slot.length;
+            try (ASN1InputStream asn1 = new ASN1InputStream(new ByteArrayInputStream(slot))) {
+                derSize = asn1.readObject().getEncoded().length;
+            }
+        }
+
+        assertThat(slotSize)
+            .as("the reserved slot is larger than the container it holds")
+            .isGreaterThan(derSize);
+        assertThat(slotSize - derSize)
+            .as("trailing padding, in bytes, that is not part of the PKCS#7 structure")
+            .isGreaterThan(1000);
+
+        assertThat(embedder.verifyEmbedded(signed).orElseThrow().valid())
+            .as("verification reads one ASN.1 object and ignores the padding")
+            .isTrue();
     }
 
     @Test
