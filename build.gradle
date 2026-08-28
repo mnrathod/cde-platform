@@ -174,18 +174,20 @@ tasks.register('converterTest', Exec) {
     args = ['-m', 'pytest', '-q']
 
     onlyIf {
-        def probe = new ByteArrayOutputStream()
-        def result = exec {
-            commandLine 'python3', '-c', 'import pytest'
-            ignoreExitValue = true
-            standardOutput = probe
-            errorOutput = probe
-        }
-        if (result.exitValue != 0) {
+        // ProcessBuilder rather than Gradle's exec {}: that method was
+        // deprecated in Gradle 8 and removed in 9, and an onlyIf predicate
+        // that throws does not skip the task — it fails the whole build
+        // before a single test runs.
+        def probe = new ProcessBuilder('python3', '-c', 'import pytest')
+                .redirectErrorStream(true)
+                .start()
+        probe.inputStream.text          // drain, or the process can block on a full pipe
+        boolean available = probe.waitFor() == 0
+        if (!available) {
             logger.lifecycle('converterTest SKIPPED: pytest not installed ' +
                              '(pip install -r converter/requirements-dev.txt)')
         }
-        result.exitValue == 0
+        available
     }
 }
 
@@ -254,10 +256,13 @@ tasks.register('openApiLint', Exec) {
     inputs.file('.spectral.yaml')
 
     onlyIf {
-        def available = exec {
-            commandLine 'sh', '-c', 'command -v npx > /dev/null'
-            ignoreExitValue = true
-        }.exitValue == 0
+        // See converterTest above: Gradle 9 removed exec {}, and a throwing
+        // onlyIf fails the build rather than skipping the task.
+        def probe = new ProcessBuilder('sh', '-c', 'command -v npx')
+                .redirectErrorStream(true)
+                .start()
+        probe.inputStream.text
+        boolean available = probe.waitFor() == 0
         if (!available) {
             logger.lifecycle('openApiLint SKIPPED: npx not on PATH')
         }
