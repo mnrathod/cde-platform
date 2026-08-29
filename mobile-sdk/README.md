@@ -110,6 +110,17 @@ cd ios && docker run --rm -v "$PWD":/pkg -w /pkg swift:6.3.3-noble swift test
 cd tools/jvm-verify && ./gradlew test
 ```
 
+Both are also wired into the backend's `./gradlew check`, as `androidSdkTest`
+and `iosSdkTest`, so a change to a server DTO cannot pass its own build while
+breaking the clients that read it. That gap was real: the Spring Boot 4
+upgrade — which moved Jackson from 2 to 3, the library that produces the JSON
+these SDKs parse — went in with nothing running them.
+
+`iosSdkTest` skips itself when no Swift toolchain is present, because Swift is
+not on every platform and the backend still has to build without it. The
+Jenkins stage treats that skip as a failure, since "not checked" must not read
+as "checked and fine".
+
 `tools/jvm-verify` exists because the Android Gradle Plugin is published only
 to Google's Maven repository, which some networks block. It
 compiles the SDK's own sources — not a copy — against Robolectric's

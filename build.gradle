@@ -342,8 +342,67 @@ jacocoTestCoverageVerification {
 // Licence policy and attribution generation (§2.1, §17.2).
 apply from: 'gradle/licences.gradle'
 
+/**
+ * The mobile SDKs bind to what this server puts on the wire, and until now
+ * nothing ran them alongside it — they sit outside settings.gradle, so a DTO
+ * change here could not fail anything there. The Spring Boot 4 upgrade went in
+ * with the SDKs last touched two days earlier and unverified against it;
+ * Jackson 2 -> 3 could have changed the JSON they parse and no gate would have
+ * noticed.
+ *
+ * Both harnesses are the ones the SDK README documents, invoked rather than
+ * reimplemented, and both compile the real SDK sources rather than a copy.
+ *
+ * Inputs are declared deliberately. A task with an output and no inputs is
+ * reported UP-TO-DATE forever — that is exactly how THIRD-PARTY-NOTICES.txt
+ * went stale while its gate passed, and a verification that silently stops
+ * running is worse than one that was never wired in.
+ */
+tasks.register('androidSdkTest', Exec) {
+    group = 'verification'
+    description = 'Compiles the Android SDK against the real framework and runs its tests.'
+    workingDir = file('mobile-sdk/tools/jvm-verify')
+    executable = './gradlew'
+    args = ['test', '--no-daemon']
+
+    inputs.dir('mobile-sdk/android/cde-sdk/src').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file('mobile-sdk/tools/jvm-verify/build.gradle.kts')
+    outputs.dir('mobile-sdk/tools/jvm-verify/build/test-results')
+}
+
+tasks.register('iosSdkTest', Exec) {
+    group = 'verification'
+    description = 'Builds the iOS SDK and runs its tests (requires a Swift toolchain).'
+    workingDir = file('mobile-sdk/ios')
+    executable = 'swift'
+    args = ['test']
+
+    inputs.dir('mobile-sdk/ios/Sources').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir('mobile-sdk/ios/Tests').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file('mobile-sdk/ios/Package.swift')
+    outputs.dir('mobile-sdk/ios/.build')
+
+    onlyIf {
+        // Swift is not on a plain Linux CI image and Apple publishes no
+        // toolchain for every platform, so this skips rather than failing the
+        // build for developers who cannot run it at all. The Jenkinsfile is
+        // where "skipped" has to become "not acceptable" — a gate that only
+        // ever skips is not a gate.
+        def probe = new ProcessBuilder('sh', '-c', 'command -v swift')
+                .redirectErrorStream(true).start()
+        probe.inputStream.text
+        boolean available = probe.waitFor() == 0
+        if (!available) {
+            logger.lifecycle('iosSdkTest SKIPPED: no Swift toolchain on PATH. ' +
+                             'The iOS SDK was NOT verified by this build.')
+        }
+        available
+    }
+}
+
 tasks.named('check') {
-    dependsOn 'converterTest', 'passwordHashingPolicyCheck', 'openApiLint',
+    dependsOn 'converterTest', 'androidSdkTest', 'iosSdkTest',
+               'passwordHashingPolicyCheck', 'openApiLint',
                'checkLicences', 'checkAttribution', 'jacocoTestCoverageVerification'
 }
 

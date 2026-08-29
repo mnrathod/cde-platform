@@ -149,6 +149,29 @@ pipeline {
                         sh './gradlew converterTest'
                     }
                 }
+                stage('Mobile SDKs') {
+                    steps {
+                        // Android needs only a JDK — the harness compiles the
+                        // real SDK sources against Robolectric's AOSP jar.
+                        sh './gradlew androidSdkTest'
+
+                        // iOS needs a Swift toolchain, and iosSdkTest skips
+                        // itself when there isn't one so a developer without
+                        // Swift can still build. On CI a skip is not an
+                        // acceptable outcome: it would report the SDK as
+                        // verified when nothing checked it. Fail the stage
+                        // instead, so the missing toolchain is fixed on the
+                        // agent rather than quietly tolerated.
+                        script {
+                            if (sh(returnStatus: true, script: 'command -v swift') != 0) {
+                                error 'No Swift toolchain on this agent, so the iOS SDK ' +
+                                      'cannot be verified. Install Swift on the agent or ' +
+                                      'run this stage on one that has it.'
+                            }
+                            sh './gradlew iosSdkTest'
+                        }
+                    }
+                }
             }
         }
 
