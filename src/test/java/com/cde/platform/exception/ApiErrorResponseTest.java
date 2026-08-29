@@ -43,6 +43,27 @@ class ApiErrorResponseTest {
 
     @Test
     @WithMockUser
+    @DisplayName("a missing required parameter reports a problem document, not Spring's default error")
+    void missingRequiredParameterIsAProblemDocument() throws Exception {
+        // This was the one framework rejection still escaping the envelope.
+        // It reached clients as {timestamp, status, error, path} — no type, no
+        // title, no traceId — while every other error on the API is RFC 9457.
+        // The mobile SDKs parse the problem shape, so this reply failed to
+        // parse rather than reporting what was wrong. Asserting the absence of
+        // "error" is the part that catches a regression: status and detail
+        // alone would pass against Spring's default too.
+        mockMvc.perform(post("/api/documents/upload").param("projectId", "1"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.type").isNotEmpty())
+            .andExpect(jsonPath("$.title").isNotEmpty())
+            .andExpect(jsonPath("$.detail").isNotEmpty())
+            .andExpect(jsonPath("$.traceId").isNotEmpty())
+            .andExpect(jsonPath("$.parameterName").value("name"))
+            .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser
     @DisplayName("an unparseable body reports 400, not 403")
     void malformedJsonIsBadRequest() throws Exception {
         mockMvc.perform(post("/api/annotations")

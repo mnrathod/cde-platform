@@ -119,6 +119,35 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    /**
+     * A required query parameter or multipart part that was not sent.
+     *
+     * <p>Sibling of the two above and missed when they were written, so this
+     * was the one framework rejection still leaving as Spring's default
+     * {@code {timestamp, status, error, path}} — no {@code type}, no
+     * {@code title}, no {@code traceId}. Every other error on the API is
+     * RFC 9457, and the mobile SDKs parse that shape, so a client meeting
+     * this one got a parse failure instead of the reason for the rejection.
+     *
+     * <p>The parameter's name is safe to return: the caller chose it, and
+     * naming it is the difference between a fixable error and a guess.
+     */
+    @ExceptionHandler({
+        org.springframework.web.bind.MissingServletRequestParameterException.class,
+        org.springframework.web.multipart.support.MissingServletRequestPartException.class
+    })
+    public ProblemDetail handleMissingRequestPart(Exception ex, HttpServletRequest request) {
+        String missing = ex instanceof org.springframework.web.bind.MissingServletRequestParameterException p
+            ? p.getParameterName()
+            : ((org.springframework.web.multipart.support.MissingServletRequestPartException) ex).getRequestPartName();
+
+        ProblemDetail problem = ApiProblem.of(HttpStatus.BAD_REQUEST,
+            "missing-request-parameter", "Missing request parameter",
+            "The request is missing a required parameter. Add it and retry.", request);
+        problem.setProperty("parameterName", missing);
+        return problem;
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ProblemDetail handleUnreadableBody(HttpMessageNotReadableException ex,
                                               HttpServletRequest request) {
