@@ -28,7 +28,12 @@ export POSTGRES_PASSWORD=$(openssl rand -base64 24)
 docker compose up --build
 ```
 
-Then open **http://localhost:8080**.
+This starts the **API**, not the user interface. The interface is the Angular
+application in the `cde-angular` repository, which is not built into this
+image — `Dockerfile` produces the Spring Boot jar and nothing else. To use the
+product, start the frontend alongside (see below); `http://localhost:8080` on
+its own answers `401 Not authenticated` on every path, which is correct
+behaviour for an API with no anonymous surface.
 
 All three are required and have no defaults. Compose refuses to start without
 `CDE_JWT_SECRET` or `POSTGRES_PASSWORD`; the application itself refuses to
@@ -124,7 +129,21 @@ get a password-authentication failure. The `export` above lines them up; put
 Under full compose this does not arise — `docker-compose.yml` passes the same
 value to both services.
 
-Then open: **http://localhost:8080**
+**Terminal 4 — the user interface.** It is a separate Angular application in
+the sibling `cde-angular` repository; the backend serves no HTML at all.
+
+```bash
+cd ../cde-angular
+npm ci
+npm start
+```
+
+Then open: **http://localhost:4200**
+
+`cde-angular/proxy.conf.json` forwards `/api` and `/ws` to `localhost:8080`,
+so the dev server and the backend above are the same system. Going to
+`http://localhost:8080` directly gets `401 Not authenticated` on every path —
+that is the API refusing an unauthenticated request, not a fault.
 
 **There are no demo credentials.** A fresh deployment starts empty; register an
 account and it creates an organisation with you administering it. Nothing is
@@ -176,27 +195,42 @@ with `xvfb-run -a`. Without `ODA_PATH`, DWG falls back to LibreDWG.
 
 ## Project Structure
 
+Three deployable pieces, in two repositories:
+
+| Piece | Where | Serves |
+|---|---|---|
+| Backend API | this repo, `src/` | `:8080` — JSON only, no HTML |
+| Converter | this repo, `converter/` | `:5001` — CAD/Office/OCR, internal |
+| Web interface | **`cde-angular`** (sibling repo) | `:4200` dev, static bundle in production |
+
+The backend serves **no user interface**. There is no `src/main/resources/static`,
+and `Dockerfile` builds only the Spring Boot jar. Anything expecting HTML from
+`:8080` is looking in the wrong place.
+
 ```
 cde-platform/
 ├── src/main/java/com/cde/platform/
-│   ├── CdePlatformApplication.java        # Entry point
-│   ├── config/
-│   │   ├── DataSeeder.java                # Demo data
-│   │   └── SecurityConfig.java            # JWT + CORS
-│   ├── controller/
-│   │   ├── AuthController.java            # /api/auth/login|register
-│   │   ├── ProjectController.java         # /api/projects
-│   │   ├── DocumentController.java        # /api/documents
-│   │   ├── AnnotationController.java      # /api/annotations
-│   │   └── ViewerController.java          # /api/viewer/{id}
-│   ├── model/                             # JPA entities
-│   ├── repository/                        # Spring Data repos
-│   ├── dto/                               # Request/response DTOs
-│   └── security/                          # JwtUtil, JwtFilter
-└── src/main/resources/
-    ├── application.yml
-    └── static/
-        └── index.html                     # Full SPA frontend + 2D viewer
+│   ├── CdePlatformApplication.java     # Entry point
+│   ├── controller/                     # 14 controllers — see REST API below
+│   ├── service/                        # Use cases and orchestration
+│   ├── model/  repository/  dto/       # JPA entities, Spring Data, DTOs
+│   ├── cde/                            # ISO 19650 containers, states, transitions
+│   ├── tenancy/                        # Tenant context; feeds PostgreSQL RLS
+│   ├── security/  mfa/  invitation/    # JWT, TOTP, invitation redemption
+│   ├── audit/                          # Append-only, hash-chained audit log
+│   ├── storage/                        # StorageProvider abstraction + local impl
+│   ├── upload/                         # Streaming and chunked upload, magic-byte checks
+│   ├── ai/                             # Payload sanitiser and per-tenant kill switch
+│   ├── deployment/  config/            # Deployment tiers, policy ceilings, security config
+│   ├── observability/  health/         # Tracing, metrics, actuator probes
+│   ├── openapi/                        # Spec generation and drift gate
+│   └── exception/                      # RFC 9457 problem mapping
+├── src/main/resources/
+│   ├── application.yml
+│   └── db/migration/                   # Flyway — owns the schema, including RLS
+├── converter/                          # Python service + its Docker toolchain
+├── k8s/                                # Manifests and kustomization
+└── mobile-sdk/                         # Android and iOS client SDKs
 ```
 
 ---
@@ -231,12 +265,22 @@ cde-platform/
 
 ---
 
-## Extending
+## Documentation
 
-- **PostgreSQL**: uncomment the driver in `build.gradle` and update `application.yml` datasource
-- **PDF support**: integrate Apache PDFBox to render PDF pages to SVG/PNG for the viewer
-- **DXF/DWG**: integrate a Java DXF parser (e.g., Kabeja) to convert CAD files to SVG
-- **WebSocket**: add real-time annotation collaboration with Spring WebSocket
+| Document | Covers |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | How the pieces fit, and why |
+| [`docs/adr/`](docs/adr/) | Decisions, with the options rejected |
+| [`docs/configuration.md`](docs/configuration.md) | Every setting: type, default, range, whether it is a secret |
+| [`docs/integration-guide.md`](docs/integration-guide.md) | Embedding the viewer, using the SDKs |
+| [`docs/licences.md`](docs/licences.md) | Approved licences, exceptions in force, known gaps |
+| [`docs/compliance/`](docs/compliance/) | Control matrix, ROPA, obligations register |
+| [`docs/accessibility/`](docs/accessibility/) | Accessibility statement and conformance report |
+| [`api/openapi.yaml`](api/openapi.yaml) | Generated spec; interactive docs at `/api/docs` |
+
+This section previously listed PostgreSQL, PDFBox, CAD conversion and
+WebSocket collaboration as things to add. All four shipped; the list had
+become a description of the past.
 
 ---
 
