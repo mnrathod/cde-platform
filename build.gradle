@@ -25,6 +25,51 @@ repositories {
     mavenCentral()
 }
 
+// Most versions here are chosen by the Spring Boot BOM rather than written
+// down, which is what makes this file readable — and also means the resolved
+// graph can change without a single line of it changing. Locking writes that
+// graph to gradle.lockfile, so the change becomes a reviewable diff instead
+// of a silent one.
+//
+// LockMode.STRICT: a locked configuration with no lock entry fails the build.
+// The default mode resolves it quietly, which turns a missing lock into no
+// lock at all.
+//
+// Only the four classpath configurations are locked: they are what compiles,
+// what ships in the jar, and what the tests run against. Locking every
+// configuration adds entries for things nothing resolves, and that noise
+// trains people to regenerate without reading.
+//
+// Regenerate after any dependency change:
+//     ./gradlew resolveAndLockAll --write-locks
+dependencyLocking {
+    lockMode = LockMode.STRICT
+}
+
+['compileClasspath', 'runtimeClasspath',
+ 'testCompileClasspath', 'testRuntimeClasspath'].each { name ->
+    configurations.named(name) { resolutionStrategy.activateDependencyLocking() }
+}
+
+// --write-locks only rewrites the configurations the invoked task actually
+// resolves, so `./gradlew build --write-locks` leaves the rest stale. This
+// resolves all four in one pass, which is why it is the documented command.
+tasks.register('resolveAndLockAll') {
+    description = 'Resolves every locked configuration so --write-locks covers all of them.'
+    group = 'help'
+    notCompatibleWithConfigurationCache('Resolves configurations at execution time')
+    doFirst {
+        if (!gradle.startParameter.writeDependencyLocks) {
+            throw new GradleException(
+                'resolveAndLockAll does nothing without --write-locks. ' +
+                'Run: ./gradlew resolveAndLockAll --write-locks')
+        }
+    }
+    doLast {
+        configurations.findAll { it.canBeResolved }.each { it.resolve() }
+    }
+}
+
 dependencies {
     // Web
     implementation 'org.springframework.boot:spring-boot-starter-web'

@@ -23,7 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 public class PostgresTestSessionListener implements LauncherSessionListener {
 
-    private static final String IMAGE = "postgres:17-alpine";
+    private static final String IMAGE = "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73";
 
     private static PostgreSQLContainer<?> container;
 

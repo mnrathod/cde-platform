@@ -1,0 +1,12 @@
+# Test-only dependencies. Kept out of requirements.in so the production image
+# does not carry the test toolchain.
+#
+# Edit this file, then run ./lock-requirements.sh to regenerate
+# requirements-dev.txt.
+-r requirements.in
+
+pytest>=8.0.0,<10
+
+# Used only to generate AcroForm fixtures; hand-writing AcroForm dictionaries
+# in tests would obscure what is being asserted.
+reportlab>=4.0.0,<6

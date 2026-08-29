@@ -19,7 +19,7 @@
 # finds nothing), so binary DWG support has to be compiled. Built
 # static so the runtime stage needs only the single executable and
 # none of LibreDWG's shared libraries.
-FROM ubuntu:24.04 AS dwg-builder
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS dwg-builder
 
 ARG LIBREDWG_VERSION=0.13.3
 ARG LIBREDWG_SHA256=6fe6c273ecbb04d4a7646e1636ede4815b51f98f974cece649dab341d24feda2
@@ -51,7 +51,7 @@ RUN ./configure \
 # ── Stage 2: Python dependencies ──────────────────────────────
 # Built into a venv so the runtime stage copies one directory and
 # never fights Ubuntu's PEP 668 externally-managed-environment.
-FROM ubuntu:24.04 AS python-builder
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS python-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -67,7 +67,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 
 # ── Stage 3: runtime ──────────────────────────────────────────
-FROM ubuntu:24.04 AS runtime
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -94,7 +94,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # The venv is copied wholesale, so this stage's python3 must be the same
 # minor version as python-builder's — both are ubuntu:24.04 (3.12) for that
-# reason. Changing one base image without the other breaks every import.
+# reason. Changing one base image without the other breaks every import, so
+# all three stages are pinned to one digest and scripts/check-pinning.sh fails
+# the build if they diverge. requirements.txt is resolved against 3.12 too;
+# see REQUIRED_PYTHON_MINOR in lock-requirements.sh.
 COPY --from=python-builder /opt/venv /opt/venv
 
 # Copied from a fixed path rather than the versioned build directory, so

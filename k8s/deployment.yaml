@@ -59,7 +59,13 @@ spec:
       containers:
         # ── The application ──────────────────────────────────────
         - name: app
-          image: cde-platform:latest   # overridden by kustomization.yaml
+          # Kustomize rewrites name and tag (kustomization.yaml, images:), so
+          # this value is what a bare `kubectl apply -f k8s/deployment.yaml`
+          # gets. It used to read :latest, which that path would happily
+          # deploy — a moving tag with imagePullPolicy: IfNotPresent, so which
+          # build a node runs depends on what it already had cached.
+          # check-pinning.sh keeps this equal to kustomization.yaml's newTag.
+          image: cde-platform:0.0.1
           imagePullPolicy: IfNotPresent
 
           ports:
@@ -165,7 +171,8 @@ spec:
         # Separating them means ReadWriteMany storage or moving uploads to
         # object storage — see README.md.
         - name: converter
-          image: cde-converter:latest   # overridden by kustomization.yaml
+          # As above: kustomize overrides this, a bare kubectl apply does not.
+          image: cde-converter:0.0.1
           imagePullPolicy: IfNotPresent
 
           ports:

@@ -1,0 +1,41 @@
+# Direct dependencies of converter/app.py. Edit this file, then run
+# ./lock-requirements.sh to regenerate the pinned closure in requirements.txt.
+# Docker installs requirements.txt, never this file.
+#
+# Ranges here express what the code actually needs. The pins in
+# requirements.txt express what we ship. Keeping them apart is what lets a
+# dependency bump be reviewed as a diff of resolved versions rather than as an
+# invisible change of meaning inside a `>=`.
+
+# DXF read/repair and the SVG rendering backend.
+#
+# Deliberately NOT ezdxf[draw]. That extra exists for the matplotlib and Qt
+# backends, and app.py uses neither — it imports
+# ezdxf.addons.drawing.svg.SVGBackend, which is pure Python. The extra pulled
+# in PyMuPDF (AGPL-3.0, forbidden outright by §2.1) and PySide6
+# (LGPL-3.0/GPL-2.0/GPL-3.0, never approved), both of which were being built
+# into the shipped converter image for code that is never imported.
+ezdxf>=1.3.0,<2
+
+# IFC parsing and geometry iteration (§6.7.4 — IFC is a first-class format).
+# LGPL-3.0-or-later: used unmodified, loaded dynamically, which is the only
+# form §2.1 permits. Recorded in docs/licences.md.
+ifcopenshell>=0.8.0,<0.9
+
+# Array maths behind the geometry paths.
+numpy>=1.24.0,<3
+
+# PDF page assembly for ocr_pdf_to_searchable; >=6 for the writer API in use.
+pypdf>=6.0.0,<7
+
+# PDF text and table extraction.
+pdfplumber>=0.11.0,<1
+
+# PDF rasterisation for OCR input.
+pypdfium2>=4.0.0,<6
+
+# Tesseract binding. The binary itself comes from the image, not from pip.
+pytesseract>=0.3.10,<1
+
+# Image handling for the OCR pipeline.
+Pillow>=10.0.0,<14

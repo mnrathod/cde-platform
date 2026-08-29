@@ -225,3 +225,31 @@ cde-platform/
 ./gradlew test           # Run tests
 ./gradlew bootJar        # Build executable JAR → build/libs/
 ```
+
+---
+
+## Dependency updates
+
+Everything is pinned: Gradle to `gradle.lockfile`, Python to a generated
+closure, container images to `@sha256` digests, npm to `package-lock.json`.
+`scripts/check-pinning.sh` fails the build if any of that comes loose, and it
+runs before the build stage so the rest of the pipeline is testing the
+artifact we intend to ship.
+
+**Renovate** (`renovate.json` in both repositories) raises the upgrade PRs.
+Two of the four ecosystems need a follow-up commit, because Renovate edits the
+manifest but cannot regenerate the lock:
+
+```bash
+./gradlew resolveAndLockAll --write-locks   # after any Gradle change
+converter/lock-requirements.sh              # after any converter/*.in change
+```
+
+The Python one needs **python3.12** — the version `ubuntu:24.04` ships, which
+is the version the image resolves against. pip resolves against whichever
+interpreter runs it, so locking on 3.11 pins numpy 2.4 while the image
+installs 2.5; the script refuses to run on the wrong minor rather than write a
+lockfile that disagrees with the thing it locks.
+
+`converter/requirements.txt` and `requirements-dev.txt` are **generated** —
+edit the matching `.in` and re-run the script.

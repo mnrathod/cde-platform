@@ -106,6 +106,43 @@ pipeline {
             }
         }
 
+        stage('Pinning and lockfiles') {
+            // Before the build, because everything after this point installs
+            // dependencies: catching a floating version here means the rest of
+            // the pipeline is testing the artifact we intend to ship.
+            steps {
+                sh './scripts/check-pinning.sh'
+
+                // check-pinning.sh proves requirements.txt is fully pinned;
+                // this proves the pins are the ones requirements.in resolves
+                // to. Needs the network and python3.12, so it degrades to a
+                // loud skip rather than a silent pass on an agent without it.
+                sh '''
+                    set -eu
+                    if command -v python3.12 > /dev/null; then
+                        converter/lock-requirements.sh --check
+                    else
+                        echo "GATE NOT RUN: python3.12 absent, cannot re-resolve requirements.in"
+                        exit 2
+                    fi
+                '''
+
+                // Renovate edits these on a schedule; an invalid one is
+                // silently ignored by the bot, so the repo would simply stop
+                // receiving dependency updates with nothing to show for it.
+                sh '''
+                    set -eu
+                    if command -v npx > /dev/null; then
+                        npx --yes --package renovate renovate-config-validator --strict
+                        ( cd ../cde-angular && npx --yes --package renovate renovate-config-validator --strict )
+                    else
+                        echo "GATE NOT RUN: npx absent, renovate.json unvalidated"
+                        exit 2
+                    fi
+                '''
+            }
+        }
+
         stage('Build') {
             steps {
                 sh './gradlew assemble -x test'

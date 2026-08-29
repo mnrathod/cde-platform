@@ -90,16 +90,64 @@ only. See §6.
 
 ### Converter service (Python, plus system packages in its image)
 
-Verified from the installed environment: ezdxf MIT, pypdf BSD-3-Clause,
-pypdfium2 BSD-3-Clause/Apache-2.0, pytesseract Apache-2.0, Pillow MIT-CMU,
-numpy BSD-3-Clause (with 0BSD, MIT, Zlib and CC0 components), Flask
-BSD-3-Clause, Werkzeug BSD-3-Clause, certifi MPL-2.0, PyGObject LGPL-2.1+.
+**Reviewed against the resolved closure, 2026-08-29.** The earlier review read
+the environment it happened to be running in; `converter/requirements.txt` is
+now a generated, fully pinned closure (`converter/lock-requirements.sh`), so
+every package below is one the image actually installs, and the list is
+complete rather than partial.
 
-**Not verified — declared in `converter/requirements.txt` but not installed
-in the environment this review ran in:** `ifcopenshell`, `pdfplumber`. Both
-must be resolved before release. `ifcopenshell` in particular is understood
-to be copyleft and could carry a real obligation; do not assume it is
-permissive.
+| Package | Licence | Notes |
+|---|---|---|
+| cffi | MIT-0 | |
+| charset-normalizer | MIT | |
+| cryptography | Apache-2.0 OR BSD-3-Clause | Take Apache-2.0 (§17.3 prefers the patent grant) |
+| ezdxf | MIT | Declared **without extras** — see below |
+| fonttools | MIT | |
+| **ifcopenshell** | **LGPL-3.0-or-later** | **Weak copyleft — see §3.2** |
+| isodate | BSD-3-Clause | |
+| lark | MIT | |
+| numpy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | |
+| packaging | Apache-2.0 OR BSD-2-Clause | |
+| pdfminer.six | MIT | |
+| pdfplumber | MIT | Previously unverified — now confirmed permissive |
+| pillow | MIT-CMU | |
+| pycparser | BSD-3-Clause | |
+| pyparsing | MIT | |
+| pypdf | BSD-3-Clause | |
+| pypdfium2 | BSD-3-Clause, Apache-2.0 | |
+| pytesseract | Apache-2.0 | Binding only; Tesseract itself is a subprocess (§4) |
+| python-dateutil | Apache-2.0 OR BSD-3-Clause | |
+| shapely | BSD-3-Clause | |
+| six | MIT | |
+| typing_extensions | PSF-2.0 | |
+
+Test-only, in `converter/requirements-dev.txt`: pytest MIT, reportlab
+BSD-3-Clause, iniconfig MIT, pluggy MIT, Pygments BSD-2-Clause. Not shipped
+in the runtime image.
+
+#### Two forbidden components were being installed and are now gone
+
+`converter/requirements.txt` previously declared **`ezdxf[draw]`**. That extra
+exists for ezdxf's matplotlib and Qt rendering backends, and it pulled in:
+
+| Package | Licence | Verdict |
+|---|---|---|
+| **PyMuPDF** | **AGPL-3.0** or Artifex commercial | **Forbidden outright by §2.1** — AGPL, any version |
+| **PySide6** (+ Addons, Essentials, shiboken6) | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | Weak copyleft at best, never approved |
+
+`converter/app.py` imports neither. It renders through
+`ezdxf.addons.drawing.svg.SVGBackend`, which is pure Python and needs no
+matplotlib, no Qt and no PyMuPDF — verified by installing plain `ezdxf` and
+rendering a DXF to SVG with the exact import list `app.py` uses.
+
+They were invisible to the previous review for the same reason the review
+called itself partial: nothing had ever resolved the full transitive graph.
+An AGPL component was being built into a distributed image on the strength of
+one square bracket.
+
+Dropping the extra removes both, plus matplotlib and its dependency tree —
+roughly 290 MB of wheels — and changes no behaviour. `scripts/check-pinning.sh`
+fails the build if either the extra or PyMuPDF reappears.
 
 ---
 
@@ -120,6 +168,18 @@ No exception is in force. This entry is kept as the record of one that was.
 
 The previous entry noted this move was expected and should be confirmed on the
 next Spring Boot major upgrade. That upgrade is this one, and it is confirmed.
+
+### 3.2 IfcOpenShell — LGPL-3.0-or-later — **IN FORCE, granted 2026-08-29**
+
+| | |
+|---|---|
+| Component | `ifcopenshell` (PyPI), in the converter image only |
+| Licence | LGPL-3.0-or-later, confirmed from PyPI metadata for the pinned version |
+| Why it is needed | IFC is a first-class format under §6.7.4, and `converter/app.py` uses `ifcopenshell` and `ifcopenshell.geom` for parsing and geometry iteration. There is no permissively-licensed equivalent with comparable IFC schema coverage. |
+| Why §2.1 permits it | LGPL is allowed for a **dynamically linked, unmodified** library. The wheel is installed as published and loaded at runtime as a shared object; we do not patch, vendor, or statically link it. |
+| Conditions | Do not modify it. Do not vendor its sources into this repository. If a patch ever becomes necessary, §17.2 applies — contribute upstream or work around, because fork-and-patch creates a distribution obligation. |
+| Obligation we carry | LGPL §4: recipients must be able to relink the work against a modified IfcOpenShell. Because it is an unmodified, separately-installed Python wheel that the user can replace in the venv, this is satisfied by the installation form itself. Record the version and source in the SBOM. |
+| Review trigger | Any change to how the converter loads it, or any upstream relicence — the §17.2 licence-change gate does not yet cover PyPI, which is a gap in §6. |
 
 ---
 
@@ -218,7 +278,9 @@ the same thing at the top.
 | Gap | Impact | Status |
 |---|---|---|
 | `dwg2dxf` GPL-3.0 source offer (§4.1) | **Blocks distribution of the converter image** | Open — needs a decision and counsel sign-off |
-| `ifcopenshell`, `pdfplumber` licences unverified | Unknown; could be a real obligation | Open — verify before release |
+| ~~`ifcopenshell`, `pdfplumber` licences unverified~~ | — | **Closed 2026-08-29** — pdfplumber is MIT; ifcopenshell is LGPL-3.0-or-later with an exception recorded at §3.2 |
+| Python dependencies are not licence-gated in CI | The `ezdxf[draw]` finding (§2) was caught by hand, not by a gate. The next one would not be. | Open — needs the licence scan extended to `converter/requirements.txt`; `scripts/check-pinning.sh` only blocks the specific packages already known to be a problem |
+| The §17.2 licence-change detector covers Gradle only | A PyPI or npm dependency that re-licences would not fail the build | Open |
 | npm licences not gated in CI | A forbidden frontend dependency would not be caught | Open |
 | No frontend attribution file | The MIT/BSD attribution clauses apply to the shipped bundle too | Open |
 | Favicon and 9 PWA icons have no recorded provenance (§5) | Undocumented assets ship in every distribution | Open — confirm in-house or replace |
