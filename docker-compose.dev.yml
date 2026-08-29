@@ -1,0 +1,28 @@
+# Overlay for running the application on the host against the compose
+# database — the "Manual startup" path in README.md.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+#
+# It exists as a separate file, named explicitly, rather than as a `ports:`
+# key in docker-compose.yml, because the default must stay closed. The base
+# file publishes nothing: only cde-app needs the database, and it reaches it
+# over the compose network. Iterating on the backend from the host is the one
+# case that genuinely needs a host port, and it should be a decision rather
+# than the default.
+#
+# docker-compose.override.yml would have been applied automatically, which is
+# the same thing as changing the default, so this is not that file.
+services:
+  db:
+    # Bound to loopback, not 0.0.0.0. `5432:5432` would publish the database
+    # to every interface — on a laptop that means the coffee-shop wifi.
+    # Docker publishes past the host firewall by writing its own iptables
+    # rules, so ufw would not save you here.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  converter:
+    # Same reasoning: only useful when the backend runs on the host and needs
+    # to reach the converter at localhost:5001.
+    ports:
+      - "127.0.0.1:5001:5001"

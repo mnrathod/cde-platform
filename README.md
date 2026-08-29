@@ -75,16 +75,26 @@ things compose otherwise provides: a database, the converter, and the secrets.
 **Terminal 1 — PostgreSQL.** There is no in-memory fallback; Row-Level Security
 is a security control the application depends on, and H2 does not implement it.
 
+`docker-compose.yml` does not publish 5432 — under full compose only `cde-app`
+needs it, and it reaches the database over the compose network. Running the
+application on the host is the one case that needs a host port, so it takes
+the dev overlay:
+
 ```bash
-docker compose up db
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 ```
+
+That binds Postgres to `127.0.0.1:5432` only, not to every interface. Plain
+`docker compose up db` starts the database but leaves it unreachable from the
+host, and `./gradlew bootRun` then fails with `Connection to localhost:5432
+refused`.
 
 **Terminal 2 — the converter.** It shells out to LibreOffice, LibreDWG and
 Tesseract, so running it from source needs all three on `PATH`. Unless you are
 changing `converter/app.py`, run the container instead and skip the toolchain:
 
 ```bash
-docker compose up converter
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d converter
 # or, from source, with the toolchain already installed:
 python -m pip install -r converter/requirements.txt && python converter/app.py
 ```
@@ -94,13 +104,25 @@ python -m pip install -r converter/requirements.txt && python converter/app.py
 **Terminal 3 — Spring Boot:**
 
 ```bash
-export CDE_JWT_SECRET=$(openssl rand -base64 48)
-export CDE_STORAGE_SIGNING_KEY=$(openssl rand -base64 32)
+set -a; source .env; set +a
+export SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD"
 ./gradlew bootRun
 ```
 
-Both variables are required and the application fails fast without them. The
-datasource defaults in `application.yml` already point at the compose database.
+`CDE_JWT_SECRET` and `CDE_STORAGE_SIGNING_KEY` are required and the
+application fails fast without them; `.env` is where they live (see Quick
+Start).
+
+**The datasource password needs setting explicitly.** `application.yml`
+defaults `SPRING_DATASOURCE_USERNAME`/`PASSWORD` to `cde`/`cde`, because a
+default that works locally is better than one that silently reaches a real
+database. Compose initialises Postgres with your generated
+`POSTGRES_PASSWORD` instead, so on the host path the two do not match and you
+get a password-authentication failure. The `export` above lines them up; put
+`SPRING_DATASOURCE_PASSWORD` in `.env` if you prefer.
+
+Under full compose this does not arise — `docker-compose.yml` passes the same
+value to both services.
 
 Then open: **http://localhost:8080**
 
