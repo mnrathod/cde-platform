@@ -73,6 +73,15 @@ services:
       # and whoever holds it can mint a URL for any object in any tenant.
       CDE_STORAGE_SIGNING_KEY: ${CDE_STORAGE_SIGNING_KEY:?set CDE_STORAGE_SIGNING_KEY before starting}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Seeds one demonstration administrator so a local stack can be logged
+      # into without registering an account first. Off unless the .env asks
+      # for it, and there is no password here to fall back on: seeding with
+      # a value written in this file would be the default credential the
+      # seeder was changed to stop shipping.
+      CDE_SEED_ENABLED: ${CDE_SEED_ENABLED:-false}
+      CDE_SEED_ADMIN_USERNAME: ${CDE_SEED_ADMIN_USERNAME:-admin}
+      CDE_SEED_ADMIN_EMAIL: ${CDE_SEED_ADMIN_EMAIL:-admin@cde.invalid}
+      CDE_SEED_ADMIN_PASSWORD: ${CDE_SEED_ADMIN_PASSWORD:-}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-cdedb}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-cde}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before starting}

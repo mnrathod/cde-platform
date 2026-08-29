@@ -150,14 +150,30 @@ account and it creates an organisation with you administering it. Nothing is
 visible across organisations, so a second registration sees none of the first's
 work.
 
-To seed a demonstration organisation instead, supply your own password — there
-is no default, and the application refuses to start if seeding is on without
-one:
+To seed a demonstration organisation instead — a standing account for
+development, rather than registering a new one on each run — put a password
+you choose into `.env` and leave it there:
 
 ```bash
-export CDE_SEED_ENABLED=true
-export CDE_SEED_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+# .env  (gitignored)
+CDE_SEED_ENABLED=true
+CDE_SEED_ADMIN_PASSWORD=<openssl rand -base64 24>
 ```
+
+Compose reads `.env` itself. Spring Boot does not, so on the manual path the
+`set -a; source .env; set +a` above is what puts these into the environment —
+without it `bootRun` starts unseeded and says so.
+
+You then sign in as `admin` with that password; `CDE_SEED_ADMIN_USERNAME`
+changes the name if you want a different one.
+
+The account is written once, on the first start against an empty database, and
+survives restarts and rebuilds for the life of the `pgdata` volume — so the
+credential is stable until `docker compose down -v`. It is a real
+administrator, so treat the value as a credential rather than a fixture: the
+repository supplies no fallback, and the application refuses to start if
+seeding is on without a password, with one under the 12-character policy
+minimum, or with the value this seeder used to hard-code.
 
 ### DXF/DWG support
 

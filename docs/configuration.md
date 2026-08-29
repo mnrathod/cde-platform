@@ -460,6 +460,14 @@ export CDE_SEED_ENABLED=true
 export CDE_SEED_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```
 
+For a standing development account, generate the password once and keep it in
+`.env` rather than regenerating per shell. `docker-compose.yml` passes both
+variables through to `cde-app`, and compose reads `.env` directly; Spring Boot
+does not, so the manual `bootRun` path needs them exported (the README's
+`set -a; source .env; set +a` does this). The account is written on the first
+start against an empty database and then left alone, so it survives restarts
+for the life of the `pgdata` volume.
+
 The password is never written to a log, including at startup.
 
 ### `cde.seed.admin-username` / `cde.seed.admin-email`

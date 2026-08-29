@@ -3,6 +3,7 @@ package com.cde.platform.support;
 import org.junit.platform.launcher.LauncherSession;
 import org.junit.platform.launcher.LauncherSessionListener;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 
 /**
  * Starts one PostgreSQL container for the whole test run and points the test
@@ -23,7 +24,23 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 public class PostgresTestSessionListener implements LauncherSessionListener {
 
-    private static final String IMAGE = "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73";
+    /**
+     * Pinned by digest, matching {@code docker-compose.yml} and
+     * {@code k8s/postgres.yaml} so the suite tests the database the stack
+     * actually runs.
+     *
+     * <p>{@code asCompatibleSubstituteFor} is required, not decorative.
+     * Testcontainers recognises {@code PostgreSQLContainer}'s image by name,
+     * and a name carrying both a tag and a digest does not match {@code
+     * postgres} — so pinning the digest alone makes every container-backed
+     * test fail at launcher startup, before any test runs, with a message
+     * about image compatibility rather than about the pin. That is what
+     * happened when the digests went in: the suite could not be run at the
+     * time, so nothing caught it.
+     */
+    private static final DockerImageName IMAGE = DockerImageName
+        .parse("postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
+        .asCompatibleSubstituteFor("postgres");
 
     private static PostgreSQLContainer<?> container;
 
