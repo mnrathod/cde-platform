@@ -37,7 +37,15 @@ URLs — a shipped default would be a published key able to mint a URL for any
 object in any tenant.
 
 Generate them once and keep them, or the database volume and every issued
-token become unreadable on the next start.
+token become unreadable on the next start. `export` in a shell does not
+survive a new terminal, so the durable way to keep them is a `.env`:
+
+```bash
+cp .env.example .env      # then fill it in; compose reads it automatically
+```
+
+`.env` is gitignored and `.env.example` ships no values — a template with a
+working default is how a development key reaches production.
 
 This runs two containers:
 
