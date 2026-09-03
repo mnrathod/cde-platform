@@ -18,6 +18,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
@@ -31,6 +33,14 @@ public class ViewerController {
     private final DocumentRepository documentRepo;
     private final ConverterService converter;
     private final ObjectMapper mapper = new ObjectMapper();
+
+    /**
+     * Injected rather than written into the method that uses it. The literal
+     * was {@code http://localhost:5001}, which under compose is the app
+     * container itself rather than the converter service — so this path could
+     * only ever work where the two run on one host.
+     */
+    private final String converterUrl;
 
     private static final Set<String> OFFICE_MIME = Set.of(
         "application/msword",
@@ -52,9 +62,11 @@ public class ViewerController {
         "ifc","glb","gltf","obj","stl","ply","dae","3ds","rvt","rfa"
     );
 
-    public ViewerController(DocumentRepository documentRepo, ConverterService converter) {
+    public ViewerController(DocumentRepository documentRepo, ConverterService converter,
+                            @Value("${cde.converter.url}") String converterUrl) {
         this.documentRepo = documentRepo;
         this.converter = converter;
+        this.converterUrl = converterUrl;
     }
 
     @Operation(
@@ -323,7 +335,6 @@ public class ViewerController {
 
         try {
             // POST to converter
-            String converterUrl = "http://localhost:5001";
             var body = mapper.createObjectNode();
             body.put("path", path.toAbsolutePath().toString());
             body.put("contentType", ct);

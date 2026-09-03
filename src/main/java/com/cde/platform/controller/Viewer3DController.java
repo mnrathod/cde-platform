@@ -17,6 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -41,10 +42,20 @@ public class Viewer3DController {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5)).build();
-    private static final String CONVERTER = "http://localhost:5001";
+    /**
+     * Injected, not a constant. The compiled-in value was
+     * {@code http://localhost:5001}, which is the app container itself under
+     * compose — the converter is a separate service reachable as
+     * {@code http://converter:5001}. Every 3D and IFC request therefore failed
+     * to connect in a containerised deployment while working on a developer's
+     * machine, where the converter genuinely is on localhost.
+     */
+    private final String converterUrl;
 
-    public Viewer3DController(DocumentRepository documentRepo) {
+    public Viewer3DController(DocumentRepository documentRepo,
+                              @Value("${cde.converter.url}") String converterUrl) {
         this.documentRepo = documentRepo;
+        this.converterUrl = converterUrl;
     }
 
     @Operation(
@@ -158,7 +169,7 @@ public class Viewer3DController {
             body.put("action", "tree");
 
             HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(CONVERTER + "/ifc-tree"))
+                .uri(URI.create(converterUrl + "/ifc-tree"))
                 .timeout(Duration.ofSeconds(60))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
@@ -224,7 +235,7 @@ public class Viewer3DController {
             body.put("contentType", "application/ifc");
 
             HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(CONVERTER + "/convert"))
+                .uri(URI.create(converterUrl + "/convert"))
                 .timeout(Duration.ofSeconds(180))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
