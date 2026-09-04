@@ -398,6 +398,18 @@ back-pressure.
 saying so rather than producing something misleading. Use
 `GET /api/viewer3d/{documentId}/tree` for models.
 
+**What a converted drawing looks like.** A DWG or DXF is plotted to a single
+**A4 landscape** page, scaled to fit, black on white — not the dark background
+the on-screen viewer uses, which is wrong on paper. Its **labels are real text**,
+so the PDF can be searched, selected, indexed and read by a screen reader rather
+than being a picture of a drawing. If your workflow depends on a specific sheet
+size or scale, plot to PDF in the authoring tool and submit that instead; this
+conversion is a readable copy, not a substitute for a controlled plot.
+
+Drawing conversion needs LibreOffice present in the converter image, which the
+supplied image includes. A deployment that has stripped it converts Office
+documents and drawings alike into a failure naming the missing component.
+
 ### One thing to decide before you build on this
 
 A conversion produces a **copy**. This platform does not know when you replace

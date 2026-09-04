@@ -321,6 +321,32 @@ Each stage is one that already existed. Deciding what the bytes are, scanning
 them and refusing active content is the same admission pipeline the upload
 endpoint uses — a second implementation would only get differently wrong.
 
+### The same drawing, rendered twice, on purpose
+
+A CAD drawing has two outputs and they want opposite things, so the request
+says which it is for. The viewer wants SVG on a dark ground with the text as
+glyph paths for fidelity and an invisible `<text>` layer over it so words can be
+found. An export wants a page: white ground, and the text as **real text**,
+because LibreOffice — which turns the render into PDF — carries visible SVG text
+into the document and discards text it cannot see. So the export tells ezdxf not
+to draw text at all and supplies the labels itself; the words end up selectable
+and extractable rather than outlines, which is what §1A.4 asks of an export and
+better than the viewer manages.
+
+The mapping from drawing units to page is calibrated against **what was
+actually drawn**, which differs between the two: the viewer's render includes
+glyph paths, the export's does not. Measuring the export against the whole
+layout — including a stray note outside the frame, which real drawings carry —
+squeezes the sheet and moves every label on it, while the drawing still looks
+correct.
+
+**A caution recorded because the tests did not catch it.** The first working
+version rendered the geometry white on a white ground. It produced a valid A4
+PDF with correctly placed, searchable text on a white background — and no
+drawing. Every assertion held; none asked whether the drawing was visible. The
+suite now measures ink on the page, and the lesson generalises: a check that
+the output is well-formed is not a check that it is right.
+
 ### The source URL is never stored
 
 Every form of the link — Graph, S3 presigned, Azure SAS, GCS signed — carries its

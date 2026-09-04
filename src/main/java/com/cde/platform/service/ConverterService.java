@@ -29,6 +29,15 @@ public class ConverterService {
 
     public record ConvertResult(boolean success, String svg, String error, JsonNode rawJson) {}
 
+    /**
+     * Asks the converter for a file rather than for something to render.
+     *
+     * <p>The same endpoint serves the viewer, which wants a drawing as SVG it
+     * can mark up, and an export, which wants a PDF. Only the caller knows
+     * which, so it says.
+     */
+    private static final String TARGET_PDF = "PDF";
+
     public ConverterService(
         @Value("${cde.converter.url:http://localhost:5001}") String converterUrl,
         DxfToSvgService fallback) {
@@ -76,11 +85,12 @@ public class ConverterService {
         return new ConvertResult(r.success(), r.svg(), r.error(), null);
     }
 
-    /** Convert an Office/PDF file — returns raw PDF bytes */
+    /** Convert an Office, PDF or CAD file — returns raw PDF bytes */
     public byte[] convertToPdf(Path filePath, String contentType) throws Exception {
         ObjectNode body = mapper.createObjectNode();
         body.put("path", filePath.toAbsolutePath().toString());
         body.put("contentType", contentType != null ? contentType : "");
+        body.put("targetFormat", TARGET_PDF);
 
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(converterUrl + "/convert"))
@@ -123,6 +133,10 @@ public class ConverterService {
         ObjectNode body = mapper.createObjectNode();
         body.put("path", source.toAbsolutePath().toString());
         body.put("contentType", contentType == null ? "" : contentType);
+        // Says what the reply is for, which for a drawing decides the whole
+        // output: without it the converter renders the SVG the viewer wants
+        // and answers a job asking for a file with something to draw.
+        body.put("targetFormat", TARGET_PDF);
 
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(converterUrl + "/convert"))
@@ -155,8 +169,17 @@ public class ConverterService {
             try (java.io.InputStream errorBody = response.body()) {
                 JsonNode json = mapper.readTree(
                     new String(errorBody.readNBytes(8192), java.nio.charset.StandardCharsets.UTF_8));
+                String reason = json.path("error").asText("");
+                if (!reason.isBlank()) {
+                    throw new ConversionRefusedException(reason);
+                }
+                // Success, but not a PDF. Saying "could not convert" here would
+                // be untrue — it converted, into something the caller did not
+                // ask for — and untrue is worse than unhelpful, because it
+                // sends whoever reads it to look at their file.
                 throw new ConversionRefusedException(
-                    json.path("error").asText("The converter could not convert that file."));
+                    "The converter produced " + json.path("type").asText("something else")
+                    + " rather than a PDF. Support can trace it from the job id.");
             }
         }
 

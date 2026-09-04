@@ -135,7 +135,14 @@ def find_libreoffice():
     return None
 
 
-def convert_office_to_pdf(file_path: str) -> dict:
+def libreoffice_to_pdf(file_path: str) -> dict:
+    """
+    Convert any file LibreOffice can open into PDF bytes.
+
+    Named for what it does rather than for its first caller: Office documents
+    were the only input when it was written, and SVG — the print render of a
+    CAD drawing — now goes through the same conversion.
+    """
     lo = find_libreoffice()
     if not lo:
         return {"success": False, "error":
@@ -194,7 +201,16 @@ def find_oda():
     return shutil.which("ODAFileConverter")
 
 
-def dwg_via_oda(dwg_path: str) -> dict:
+def dwg_via_oda(dwg_path: str, render=None) -> dict:
+    """
+    DWG -> DXF via the ODA converter, then rendered by {@code render}.
+
+    The renderer is injected because the extraction is identical whether the
+    caller wants the viewer's SVG or an exported PDF, and duplicating the
+    ODA version-fallback loop to vary only the last line is how the two
+    would drift apart.
+    """
+    render = render or render_dxf_string
     oda = find_oda()
     if not oda:
         return {"success": False, "error": "ODA_NOT_FOUND"}
@@ -234,7 +250,7 @@ def dwg_via_oda(dwg_path: str) -> dict:
                 print(f"[ODA] Reading DXF: {dxf_path} ({dxf_path.stat().st_size} bytes)", flush=True)
                 content = dxf_path.read_text(encoding="utf-8", errors="replace")
                 print(f"[ODA] DXF content preview: {content[:120]!r}", flush=True)
-                result = render_dxf_string(content)
+                result = render(content)
                 if not result.get("success"):
                     print(f"[ODA] ezdxf render failed: {result.get('error','?')}", flush=True)
                 result["odaLog"] = "\n".join(logs)
@@ -281,7 +297,9 @@ def find_tesseract():
     return p if p and os.path.isfile(p) else None
 
 
-def dwg_via_libredwg(dwg_path: str) -> dict:
+def dwg_via_libredwg(dwg_path: str, render=None) -> dict:
+    """DWG -> DXF via LibreDWG, then rendered by {@code render} (see above)."""
+    render = render or render_dxf_string
     tool = find_dwg2dxf()
     if not tool:
         return {"success": False, "error": "LIBREDWG_NOT_FOUND"}
@@ -293,7 +311,7 @@ def dwg_via_libredwg(dwg_path: str) -> dict:
         if not os.path.exists(out_dxf):
             return {"success": False,
                     "error": f"dwg2dxf no output (rc={rc}). {stderr[:200]}"}
-        return render_dxf_string(Path(out_dxf).read_text(encoding="utf-8", errors="replace"))
+        return render(Path(out_dxf).read_text(encoding="utf-8", errors="replace"))
     finally:
         safe_rmtree(tmp)
 
@@ -325,25 +343,70 @@ def render_dxf_string(dxf_content: str) -> dict:
             except: pass
 
 
-def _render_dxf_file(dxf_path: str) -> dict:
-    """Render a DXF file to SVG using ezdxf with recover fallback."""
+def read_dxf_document(dxf_path: str):
+    """
+    Open a DXF, falling back to ezdxf's recovery reader.
+
+    Real drawings arrive malformed often enough that the plain reader alone
+    would refuse files every CAD package opens without complaint, so a refusal
+    here means both readers said no.
+
+    @return (doc, None) or (None, reason) — the reason is written for whoever
+            submitted the file, since it is what reaches them.
+    """
     import ezdxf as _ezdxf
     import ezdxf.recover as _recover
 
-    doc = None
     try:
         doc = _ezdxf.readfile(dxf_path)
-        print(f"[ezdxf] Normal read OK", flush=True)
-    except Exception as e1:
-        print(f"[ezdxf] Normal read failed: {e1} — trying recover", flush=True)
-        try:
-            doc, auditor = _recover.read(dxf_path)
-            if auditor.has_errors:
-                print(f"[ezdxf] Recover fixed {len(auditor.errors)} errors", flush=True)
-            print(f"[ezdxf] Recover read OK", flush=True)
-        except Exception as e2:
-            print(f"[ezdxf] Recover also failed: {e2}", flush=True)
-            return {"success": False, "error": f"ezdxf cannot parse DXF: {e2}"}
+        print("[ezdxf] Normal read OK", flush=True)
+        return doc, None
+    except Exception as first_error:
+        print(f"[ezdxf] Normal read failed: {first_error} — trying recover", flush=True)
+
+    try:
+        doc, auditor = _recover.read(dxf_path)
+        if auditor.has_errors:
+            print(f"[ezdxf] Recover fixed {len(auditor.errors)} errors", flush=True)
+        print("[ezdxf] Recover read OK", flush=True)
+        return doc, None
+    except Exception as recover_error:
+        print(f"[ezdxf] Recover also failed: {recover_error}", flush=True)
+        return None, f"ezdxf cannot parse DXF: {recover_error}"
+
+
+def first_populated_layout(doc):
+    """
+    The layout worth drawing, and how many entities it holds.
+
+    Modelspace normally, but a drawing whose modelspace is empty keeps its
+    content in a paper space layout, and rendering the empty one produces a
+    blank page rather than an error — the worst of both.
+
+    Both the viewer render and the PDF render choose through here, so the two
+    cannot disagree about which sheet a drawing is.
+    """
+    msp = doc.modelspace()
+    entity_count = len(list(msp))
+    print(f"[ezdxf] modelspace entities: {entity_count}", flush=True)
+    if entity_count:
+        return msp, entity_count
+
+    layouts = [l for l in doc.layouts if l.name != "Model"]
+    print(f"[ezdxf] Modelspace empty — checking {len(layouts)} paper layouts", flush=True)
+    for layout in layouts:
+        count = len(list(layout))
+        print(f"[ezdxf]   layout '{layout.name}': {count} entities", flush=True)
+        if count:
+            return layout, count
+    return msp, 0
+
+
+def _render_dxf_file(dxf_path: str) -> dict:
+    """Render a DXF file to SVG using ezdxf with recover fallback."""
+    doc, read_error = read_dxf_document(dxf_path)
+    if doc is None:
+        return {"success": False, "error": read_error}
 
     try:
         # ezdxf 1.4.4 API
@@ -352,22 +415,7 @@ def _render_dxf_file(dxf_path: str) -> dict:
         from ezdxf.addons.drawing.layout import Page, Settings
         from ezdxf.addons.drawing.properties import LayoutProperties
 
-        msp = doc.modelspace()
-        entity_count = len(list(msp))
-        print(f"[ezdxf] modelspace entities: {entity_count}", flush=True)
-
-        # If modelspace empty, try paper space layouts
-        layout_to_render = msp
-        if entity_count == 0:
-            layouts = [l for l in doc.layouts if l.name != "Model"]
-            print(f"[ezdxf] Modelspace empty — checking {len(layouts)} paper layouts", flush=True)
-            for layout in layouts:
-                lcount = len(list(layout))
-                print(f"[ezdxf]   layout '{layout.name}': {lcount} entities", flush=True)
-                if lcount > 0:
-                    layout_to_render = layout
-                    entity_count = lcount
-                    break
+        layout_to_render, entity_count = first_populated_layout(doc)
 
         # ezdxf 1.x: SVGBackend() takes no args; output via get_string(page)
         backend = SVGBackend()
@@ -514,51 +562,55 @@ def _text_entities(layout):
     return out
 
 
-def build_text_layer(svg: str, layout, doc) -> str:
+def calibrate_dxf_to_svg(svg: str, measured_entities) -> tuple:
     """
-    An invisible <text> element over each rendered label.
+    The scale that maps DXF coordinates onto the coordinates ezdxf drew in.
 
-    The transform is calibrated rather than assumed: the drawing's extent in
+    Calibrated rather than assumed: the extent of {@code measured_entities} in
     DXF units is matched against the extent the backend actually drew, which
-    gives the scale and offset whatever page size or fit ezdxf chose. A y flip
-    is included because DXF counts upwards from the bottom and SVG downwards
-    from the top.
+    gives the transform whatever page size or fit ezdxf chose.
 
-    Returns "" when there is nothing to add or the calibration cannot be
-    trusted — a text layer in the wrong place would be worse than none, since
-    the drawing would look right and every search result would point
-    somewhere else.
+    {@code measured_entities} must be the entities that were *drawn*. The
+    viewer render draws text as glyph paths and passes the whole layout; the
+    print render draws no text at all and passes only geometry. Passing the
+    wrong set silently shifts every label, which is why it is a parameter
+    rather than a default.
+
+    @return (svg_min_x, svg_max_y, dxf_min_x, dxf_min_y, scale), or None when
+            the calibration cannot be trusted. A text layer in the wrong place
+            is worse than none: the drawing looks right and every search result
+            points somewhere else.
     """
-    labels = _text_entities(layout)
-    if not labels:
-        return ""
-
     drawn = _rendered_extent(svg)
     if not drawn:
-        return ""
+        return None
     svg_min_x, svg_min_y, svg_max_x, svg_max_y = drawn
 
     try:
         from ezdxf import bbox
-        extents = bbox.extents(layout, fast=True)
+        extents = bbox.extents(measured_entities, fast=True)
         dxf_min_x, dxf_min_y = extents.extmin.x, extents.extmin.y
         dxf_max_x, dxf_max_y = extents.extmax.x, extents.extmax.y
     except Exception:
-        return ""
+        return None
 
     dxf_w, dxf_h = dxf_max_x - dxf_min_x, dxf_max_y - dxf_min_y
     svg_w, svg_h = svg_max_x - svg_min_x, svg_max_y - svg_min_y
     if dxf_w <= 0 or dxf_h <= 0 or svg_w <= 0 or svg_h <= 0:
-        return ""
+        return None
 
     scale_x, scale_y = svg_w / dxf_w, svg_h / dxf_h
     # ezdxf preserves aspect ratio. If these disagree, the assumption behind
     # the whole mapping is wrong and the layer is dropped rather than placed
     # somewhere plausible but incorrect.
     if not (0.9 <= scale_x / scale_y <= 1.1):
-        return ""
-    scale = (scale_x + scale_y) / 2
+        return None
+    return svg_min_x, svg_max_y, dxf_min_x, dxf_min_y, (scale_x + scale_y) / 2
 
+
+def _text_elements(labels, transform, fill: str) -> str:
+    """The <text> elements for one calibrated set of labels."""
+    svg_min_x, svg_max_y, dxf_min_x, dxf_min_y, scale = transform
     parts = []
     for content, x, y, height, anchor in labels:
         sx = svg_min_x + (x - dxf_min_x) * scale
@@ -566,13 +618,158 @@ def build_text_layer(svg: str, layout, doc) -> str:
         size = max(height * scale, 1.0)
         parts.append(
             f'<text x="{sx:.2f}" y="{sy:.2f}" font-size="{size:.2f}" '
-            f'text-anchor="{anchor}">{html.escape(content)}</text>')
+            f'text-anchor="{anchor}"{fill}>{html.escape(content)}</text>')
+    return "".join(parts)
+
+
+def build_text_layer(svg: str, layout, doc) -> str:
+    """
+    An invisible <text> element over each rendered label, for the viewer.
+
+    The glyphs are already on screen as paths; this layer exists so the words
+    are in the DOM and can be found. A y flip is included because DXF counts
+    upwards from the bottom and SVG downwards from the top.
+    """
+    labels = _text_entities(layout)
+    if not labels:
+        return ""
+
+    # The viewer render draws text as glyph paths, so the drawn extent
+    # includes them and the whole layout is the right thing to measure.
+    transform = calibrate_dxf_to_svg(svg, layout)
+    if transform is None:
+        return ""
 
     # fill:none keeps the layer invisible; the glyphs beneath it are already
     # drawn. pointer-events:none keeps it from swallowing clicks meant for the
     # drawing, and it stays selectable and searchable either way.
     return (f'<g class="{TEXT_LAYER_CLASS}" fill="none" stroke="none" '
-            f'pointer-events="none">' + "".join(parts) + "</g>")
+            f'pointer-events="none">'
+            + _text_elements(labels, transform, "") + "</g>")
+
+
+# ══════════════════════════════════════════════════════════════
+#  DXF -> PDF, for export rather than for the screen
+# ══════════════════════════════════════════════════════════════
+#
+#  The viewer wants a drawing on a dark background with its text as glyph
+#  paths for fidelity, and an invisible <text> layer over the top so words can
+#  be found. A PDF wants the opposite of both.
+#
+#  Dark background: a drawing exported on near-black is wrong on paper and
+#  wrong in every PDF reader's default view, so the print render swaps to a
+#  white ground and swaps black/white pen colours with it — what a CAD package
+#  does when it plots.
+#
+#  Text: LibreOffice carries visible SVG <text> into the PDF as real text and
+#  drops text it cannot see, so the invisible-overlay trick that works in a
+#  browser produces a PDF with no searchable text at all. The print render
+#  therefore tells ezdxf not to draw text, and supplies the same labels as
+#  visible <text> instead. The words end up as selectable, extractable PDF
+#  text rather than vector outlines — which is what §1A.4 asks of an export,
+#  and better than the viewer manages.
+
+PRINT_PAGE_MM = (420, 297)          # A4 landscape
+PRINT_BACKGROUND = "#ffffff"
+
+
+def _print_svg(doc, layout) -> str:
+    """The drawing as SVG for export: white ground, no text glyphs."""
+    from ezdxf.addons.drawing import RenderContext, Frontend
+    from ezdxf.addons.drawing.svg import SVGBackend
+    from ezdxf.addons.drawing.layout import Page, Settings
+    from ezdxf.addons.drawing.properties import LayoutProperties
+    from ezdxf.addons.drawing.config import Configuration, TextPolicy
+
+    config = Configuration(text_policy=TextPolicy.IGNORE)
+    backend = SVGBackend()
+    layout_properties = LayoutProperties.from_layout(layout)
+    # The background is set the same way the viewer sets its dark one, and for
+    # the same reason: ezdxf resolves the "use the background's opposite"
+    # colour that most CAD entities carry against whatever ground it is told
+    # about, so saying white here is what makes the lines black.
+    #
+    # Not ColorPolicy.COLOR_SWAP_BW, which was the first attempt and produced
+    # a page that passed every check and was blank: it swapped the resolved
+    # black to white, on white. Every automated assertion held — it was a
+    # valid A4 PDF, on a white ground, with correctly placed searchable text —
+    # because none of them asked whether the drawing was visible. Hence
+    # `_ink_coverage` below, and the test that uses it.
+    layout_properties.set_colors(bg=PRINT_BACKGROUND)
+    Frontend(RenderContext(doc), backend, config=config).draw_layout(
+        layout, finalize=True, layout_properties=layout_properties)
+    return backend.get_string(Page(*PRINT_PAGE_MM), settings=Settings(fit_page=True))
+
+
+def _geometry_of(layout) -> list:
+    """Everything in the layout the print render actually draws."""
+    return [e for e in layout if e.dxftype() not in ("TEXT", "MTEXT")]
+
+
+def dxf_file_to_pdf(dxf_path: str) -> dict:
+    """
+    Render a DXF to a PDF whose text is real text.
+
+    @return {"success": True, "type": "pdf", "pdfBytes": ...} or a refusal
+            carrying a reason written for whoever submitted the file.
+    """
+    if not EZDXF_OK:
+        return {"success": False, "error": f"ezdxf not installed: {EZDXF_ERR}"}
+
+    doc, read_error = read_dxf_document(dxf_path)
+    if doc is None:
+        return {"success": False, "error": read_error}
+
+    try:
+        layout, entity_count = first_populated_layout(doc)
+        svg = _print_svg(doc, layout)
+        if not svg or "<svg" not in svg:
+            return {"success": False,
+                    "error": f"The drawing rendered empty. Entities: {entity_count}, "
+                             f"version: {doc.dxfversion}. Layers may be frozen or off."}
+
+        # Added last and never fatal: a drawing that prints without searchable
+        # text is degraded, one that does not print at all is a failure.
+        try:
+            labels = _text_entities(layout)
+            transform = calibrate_dxf_to_svg(svg, _geometry_of(layout)) if labels else None
+            if transform is not None:
+                layer = (f'<g class="{TEXT_LAYER_CLASS}">'
+                         + _text_elements(labels, transform, ' fill="#000000"')
+                         + "</g>")
+                svg = svg.replace("</svg>", layer + "</svg>", 1)
+        except Exception:
+            print(f"[dxf-pdf] text layer skipped:\n{traceback.format_exc()}", flush=True)
+    except Exception as e:
+        print(f"[dxf-pdf] render error:\n{traceback.format_exc()}", flush=True)
+        return {"success": False, "error": f"The drawing could not be rendered: {e}"}
+
+    work_dir = make_temp_dir()
+    try:
+        svg_path = os.path.join(work_dir, "drawing.svg")
+        Path(svg_path).write_text(svg, encoding="utf-8")
+        result = libreoffice_to_pdf(svg_path)
+        if not result.get("success"):
+            return result
+        return {"success": True, "type": "pdf", "pdfBytes": result["pdfBytes"],
+                "dxfVersion": doc.dxfversion, "entityCount": entity_count}
+    finally:
+        safe_rmtree(work_dir)
+
+
+def dxf_string_to_pdf(dxf_content: str) -> dict:
+    """As above, for a DXF that only exists as text — the DWG converters' output."""
+    tmp_dxf = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".dxf",
+                                         encoding="utf-8", delete=False) as f:
+            f.write(dxf_content)
+            tmp_dxf = f.name
+        return dxf_file_to_pdf(tmp_dxf)
+    finally:
+        if tmp_dxf and os.path.exists(tmp_dxf):
+            try: os.unlink(tmp_dxf)
+            except OSError: pass
 
 
 # ══════════════════════════════════════════════════════════════
@@ -745,14 +942,25 @@ def ifc_to_gltf_json(ifc_path: str) -> dict:
     return {"success": True, "type": "ifc3d", "gltfData": gltf_data}
 
 
-def convert(file_path: str, content_type: str = "") -> dict:
+def convert(file_path: str, content_type: str = "", target_format: str = "") -> dict:
+    """
+    Convert one file for one purpose.
+
+    {@code target_format} says what the caller will do with the result, which
+    for CAD decides the whole output: the viewer wants SVG it can put in a
+    canvas and mark up, and an export wants PDF. Passing "PDF" asks for a file
+    rather than something to render, and a format with no PDF form is refused
+    with a reason rather than answered with a substitute.
+    """
     # Resolve to absolute, normalise slashes
     try:
         abs_path = str(Path(file_path).resolve())
     except Exception as e:
         return {"success": False, "error": f"Invalid path: {file_path} — {e}"}
 
-    print(f"[CONVERT] path={abs_path} ct={content_type}", flush=True)
+    wants_pdf = target_format.upper() == "PDF"
+    print(f"[CONVERT] path={abs_path} ct={content_type} target={target_format or 'viewer'}",
+          flush=True)
 
     if not os.path.exists(abs_path):
         return {"success": False,
@@ -765,7 +973,7 @@ def convert(file_path: str, content_type: str = "") -> dict:
     # Office -> PDF
     if ext in OFFICE_EXTS or any(x in ct for x in [
             "word","excel","powerpoint","opendocument","rtf","text/plain","text/csv"]):
-        r = convert_office_to_pdf(abs_path)
+        r = libreoffice_to_pdf(abs_path)
         if r["success"]:
             return {"success": True, "type": "pdf", "pdfBytes": r["pdfBytes"]}
         return {"success": False, "error": r["error"], "type": "office_error",
@@ -776,15 +984,17 @@ def convert(file_path: str, content_type: str = "") -> dict:
         return {"success": True, "type": "pdf",
                 "pdfBytes": Path(abs_path).read_bytes()}
 
-    # DWG -> DXF -> SVG
+    # DWG -> DXF -> SVG for the viewer, or -> PDF for an export
     dwg, version = is_dwg(abs_path)
     if dwg or ext == "dwg":
-        r = dwg_via_oda(abs_path)
+        render = dxf_string_to_pdf if wants_pdf else render_dxf_string
+
+        r = dwg_via_oda(abs_path, render)
         if r.get("success"):
             r["convertedBy"] = "ODA"; r["dwgVersion"] = version; return r
         oda_err = r.get("error", "")
 
-        r = dwg_via_libredwg(abs_path)
+        r = dwg_via_libredwg(abs_path, render)
         if r.get("success"):
             r["convertedBy"] = "LibreDWG"; r["dwgVersion"] = version; return r
 
@@ -795,12 +1005,21 @@ def convert(file_path: str, content_type: str = "") -> dict:
                 "odaError": oda_err,
                 "libredwgError": r.get("error", "")}
 
-    # DXF -> SVG
+    # DXF -> SVG for the viewer, or -> PDF for an export
     if ext == "dxf" or "dxf" in ct:
-        return render_dxf(abs_path)
+        return dxf_file_to_pdf(abs_path) if wants_pdf else render_dxf(abs_path)
 
     # 3D formats — also detect by content type
     if ext == "ifc" or "ifc" in ct or "step" in ct:
+        if wants_pdf:
+            # Said plainly rather than answered with a picture of a viewport:
+            # a model has no page, no scale and no sheet, so any PDF of one is
+            # a choice this service is not entitled to make on the caller's
+            # behalf. The model tree endpoint is the useful answer.
+            return {"success": False,
+                    "error": "A 3D model has no defined PDF form. Use the model "
+                             "tree endpoint to read its structure, or export a "
+                             "drawing sheet from the authoring tool first."}
         print(f"[IFC] Routing to ifc_to_gltf_json: {abs_path}", flush=True)
         return ifc_to_gltf_json(abs_path)
 
@@ -812,6 +1031,11 @@ def convert(file_path: str, content_type: str = "") -> dict:
         }
 
     if ext in ("glb", "gltf", "obj", "stl", "ply", "dae", "3ds"):
+        if wants_pdf:
+            return {"success": False,
+                    "error": "A 3D model has no defined PDF form. Use the model "
+                             "tree endpoint to read its structure, or export a "
+                             "drawing sheet from the authoring tool first."}
         return {
             "success": True, "type": "model3d_passthrough",
             "ext": ext,
@@ -948,11 +1172,12 @@ class Handler(BaseHTTPRequestHandler):
 
         file_path    = body.get("path", "").strip()
         content_type = body.get("contentType", "")
+        target       = body.get("targetFormat", "")
 
         if not file_path:
             self._json(400, {"success": False, "error": "Missing 'path'"}); return
 
-        result = convert(file_path, content_type)
+        result = convert(file_path, content_type, target)
 
         rtype = result.get("type", "")
 
