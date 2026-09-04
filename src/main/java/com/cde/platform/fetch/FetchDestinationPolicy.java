@@ -45,6 +45,10 @@ public final class FetchDestinationPolicy {
      */
     private static final Set<String> PERMITTED_SCHEMES = Set.of("https", "http");
 
+    /** A dotted quad. Anything with a letter in it is a name, not an address. */
+    private static final java.util.regex.Pattern IPV4_LITERAL =
+        java.util.regex.Pattern.compile("\\d{1,3}(\\.\\d{1,3}){3}");
+
     private final boolean requireTls;
     private final List<String> permittedHosts;
 
@@ -78,7 +82,53 @@ public final class FetchDestinationPolicy {
      *                 the network-mapping oracle this exists to deny.
      */
     public void checkPermitted(URI target, HostResolver resolver) {
-        if (target.getScheme() == null || !PERMITTED_SCHEMES.contains(lowercase(target.getScheme()))) {
+        String host = checkWhatNeedsNoLookup(target);
+
+        List<InetAddress> addresses;
+        try {
+            addresses = resolver.resolve(host);
+        } catch (UnknownHostException e) {
+            throw new FetchNotPermittedException("The host " + host + " could not be resolved.");
+        }
+        if (addresses.isEmpty()) {
+            throw new FetchNotPermittedException("The host " + host + " resolved to no address.");
+        }
+
+        // Every address, not the first. A name that resolves to one public
+        // and one private address is a rebinding attack with the work done
+        // for it: refusing only when the first happens to be private makes
+        // the check a coin toss.
+        for (InetAddress address : addresses) {
+            if (isUnreachableByPolicy(address)) {
+                throw new FetchNotPermittedException(
+                    "The host " + host + " resolves to an address inside this "
+                  + "deployment's own network, which cannot be fetched.");
+            }
+        }
+    }
+
+    /**
+     * Everything that can be decided without asking DNS.
+     *
+     * <p>Exists so submission can refuse an obviously wrong link immediately
+     * while leaving the address check to the fetch, which performs it anyway.
+     * Resolving on the request thread would put a network round trip inside a
+     * §7.1 budget, and — worse — would report a host that is momentarily
+     * unresolvable as "not permitted", telling an integrator their link is
+     * wrong when the truth is "try again".
+     *
+     * <p>An address <em>literal</em> is still judged here, because parsing one
+     * asks nothing of DNS. That is what makes a submission naming
+     * {@code 169.254.169.254} a refusal the caller sees at once, rather than a
+     * job that fails a minute later.
+     *
+     * @return the host, already validated as present
+     * @throws FetchNotPermittedException if the scheme, host or literal
+     *         address rules refuse it
+     */
+    public String checkWhatNeedsNoLookup(URI target) {
+        if (target.getScheme() == null
+                || !PERMITTED_SCHEMES.contains(lowercase(target.getScheme()))) {
             throw new FetchNotPermittedException(
                 "Only https URLs can be fetched. Supply a link with an https scheme.");
         }
@@ -103,27 +153,43 @@ public final class FetchDestinationPolicy {
               + "storage hosts. Ask an administrator to add it.");
         }
 
-        List<InetAddress> addresses;
-        try {
-            addresses = resolver.resolve(host);
-        } catch (UnknownHostException e) {
-            throw new FetchNotPermittedException("The host " + host + " could not be resolved.");
-        }
-        if (addresses.isEmpty()) {
-            throw new FetchNotPermittedException("The host " + host + " resolved to no address.");
-        }
+        refuseIfLiteralAddressIsInternal(host);
+        return host;
+    }
 
-        // Every address, not the first. A name that resolves to one public
-        // and one private address is a rebinding attack with the work done
-        // for it: refusing only when the first happens to be private makes
-        // the check a coin toss.
-        for (InetAddress address : addresses) {
-            if (isUnreachableByPolicy(address)) {
-                throw new FetchNotPermittedException(
-                    "The host " + host + " resolves to an address inside this "
-                  + "deployment's own network, which cannot be fetched.");
-            }
+    /**
+     * Judges a host written as an address rather than a name.
+     *
+     * <p>{@code InetAddress.getByName} performs no lookup for a literal, so
+     * this is free — but it would perform one for a name, which is exactly
+     * what this method must not do. Hence the shape test first.
+     */
+    private void refuseIfLiteralAddressIsInternal(String host) {
+        if (!isAddressLiteral(host)) {
+            return;
         }
+        try {
+            if (isUnreachableByPolicy(InetAddress.getByName(host))) {
+                throw new FetchNotPermittedException(
+                    "That address is inside this deployment's own network and "
+                  + "cannot be fetched. Supply a link to your storage service.");
+            }
+        } catch (UnknownHostException e) {
+            // Shaped like an address but unparseable as one — 999.1.2.3, say.
+            throw new FetchNotPermittedException(
+                "The link's host is not a valid address. Supply a complete URL.");
+        }
+    }
+
+    /**
+     * Whether the host is written as an address rather than a name.
+     *
+     * <p>{@link URI#getHost()} keeps the brackets on an IPv6 literal, which is
+     * the cheapest way to recognise one. IPv4 is a dotted quad; anything with a
+     * letter in it is a name.
+     */
+    private boolean isAddressLiteral(String host) {
+        return host.startsWith("[") || IPV4_LITERAL.matcher(host).matches();
     }
 
     /**

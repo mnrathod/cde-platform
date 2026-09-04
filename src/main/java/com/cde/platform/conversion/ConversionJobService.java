@@ -1,6 +1,6 @@
 package com.cde.platform.conversion;
 
-import com.cde.platform.fetch.DestinationCheck;
+import com.cde.platform.fetch.FetchDestinationPolicy;
 import com.cde.platform.model.ConversionJob;
 import com.cde.platform.model.ConversionJob.TargetFormat;
 import com.cde.platform.repository.ConversionJobRepository;
@@ -24,13 +24,19 @@ import java.util.UUID;
  * §7.1's one-second budget — the work itself scales with the file, so it
  * cannot be on this path at all.
  *
- * <p>The destination is checked <em>here</em>, synchronously, rather than in
- * the worker. A URL that will never be fetched should be refused while the
- * caller is still on the phone: telling them at submission that their link is
- * not permitted is a 422 they can act on, where discovering it thirty seconds
- * later is a failed job they have to go and read. The worker's fetcher checks
- * again regardless, because the check belongs to the fetch and not to whoever
- * remembered to call it first.
+ * <p>The parts of the destination check that need no DNS happen <em>here</em>,
+ * synchronously: a wrong scheme, an unlisted host, or a literal address inside
+ * our own network should be refused while the caller is still on the phone,
+ * because that is a 422 they can act on where a failed job thirty seconds
+ * later is something they have to go and read.
+ *
+ * <p>The address check for a host <em>name</em> stays with the fetch. It needs
+ * a lookup, and a lookup on this path would put a network round trip inside a
+ * §7.1 budget and would turn a momentary DNS failure into "your link is not
+ * permitted" — which sends an integrator looking for a fault in a link that is
+ * perfectly good. The fetcher resolves and checks every address before it
+ * connects, which is where that check belongs regardless of who remembered to
+ * call it first.
  */
 public class ConversionJobService {
 
@@ -38,14 +44,14 @@ public class ConversionJobService {
 
     private final ConversionJobRepository jobs;
     private final ConversionWorkQueue queue;
-    private final DestinationCheck destinationCheck;
+    private final FetchDestinationPolicy destinationPolicy;
 
     public ConversionJobService(ConversionJobRepository jobs,
                                 ConversionWorkQueue queue,
-                                DestinationCheck destinationCheck) {
+                                FetchDestinationPolicy destinationPolicy) {
         this.jobs = jobs;
         this.queue = queue;
-        this.destinationCheck = destinationCheck;
+        this.destinationPolicy = destinationPolicy;
     }
 
     /**
@@ -56,14 +62,32 @@ public class ConversionJobService {
      * @throws ConversionQueueFullException if the system has no room for it
      */
     @Transactional
-    public ConversionJob submit(URI sourceUrl, TargetFormat targetFormat, long submittedBy) {
-        destinationCheck.check(sourceUrl);
+    public ConversionJob submit(URI sourceUrl, TargetFormat targetFormat, long submittedBy,
+                                String idempotencyKey) {
+        // Before the destination check, deliberately. A retry of a submission
+        // that already succeeded should return the same job whatever the link
+        // now looks like — a presigned URL expires, so re-checking it would
+        // turn a safe retry into a refusal of work that is already running.
+        Optional<ConversionJob> alreadySubmitted = findByIdempotencyKey(idempotencyKey);
+        if (alreadySubmitted.isPresent()) {
+            log.info("Returning existing conversion job {} for a repeated submission",
+                     alreadySubmitted.get().getPublicId());
+            return alreadySubmitted.get();
+        }
+
+        // Only what needs no DNS lookup. Resolving here would put a network
+        // round trip inside a §7.1 budget, and would report a momentarily
+        // unresolvable host as "not permitted" — telling an integrator their
+        // link is wrong when the truth is "try again". The fetch resolves and
+        // checks every address before it connects, which is where that check
+        // has to be anyway.
+        destinationPolicy.checkWhatNeedsNoLookup(sourceUrl);
 
         long tenantId = TenantContext.requireTenantId();
         UUID publicId = UUID.randomUUID();
 
         ConversionJob job = jobs.save(ConversionJob.submitted(
-            publicId, submittedBy, hostOf(sourceUrl), targetFormat));
+            publicId, submittedBy, hostOf(sourceUrl), targetFormat, blankToNull(idempotencyKey)));
 
         // Enqueued after the row exists, so a worker that picks it up
         // immediately finds something to update. The reverse order races: a
@@ -135,5 +159,22 @@ public class ConversionJobService {
     private String hostOf(URI sourceUrl) {
         String host = sourceUrl.getHost();
         return host == null ? "" : host;
+    }
+
+    private Optional<ConversionJob> findByIdempotencyKey(String idempotencyKey) {
+        String key = blankToNull(idempotencyKey);
+        return key == null ? Optional.empty() : jobs.findByIdempotencyKey(key);
+    }
+
+    /**
+     * An absent key and an empty one mean the same thing: no key.
+     *
+     * <p>Stored as null rather than {@code ""} so the partial unique index
+     * ignores it. Storing empty strings would make every keyless submission
+     * collide with every other one, turning an optional feature into an
+     * outage.
+     */
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

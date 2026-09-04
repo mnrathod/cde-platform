@@ -14,6 +14,10 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import com.cde.platform.conversion.ConversionQueueFullException;
+import com.cde.platform.fetch.FetchNotPermittedException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
@@ -192,6 +196,46 @@ public class GlobalExceptionHandler {
                                               HttpServletRequest request) {
         return ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
             "upload-rejected", "Upload rejected", ex.getMessage(), request);
+    }
+
+    /**
+     * A link an integrator supplied may not be fetched.
+     *
+     * <p>{@code 422} rather than {@code 400}: the request parsed perfectly
+     * well and was refused on its content. The exception's message is returned
+     * as written — it names the rule and says what to do about it, and it never
+     * names the address a host resolved to, which is the whole reason those
+     * messages are composed where the decision is made rather than here.
+     */
+    @ExceptionHandler(FetchNotPermittedException.class)
+    public ProblemDetail handleFetchNotPermitted(FetchNotPermittedException ex,
+                                                 HttpServletRequest request) {
+        // Logged at warn, not error: a refused destination is this control
+        // working. It is worth seeing — a run of them is someone probing — but
+        // it is not a fault.
+        log.warn("Refused to fetch an integrator-supplied URL: {}", ex.getMessage());
+        return ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
+            "fetch-not-permitted", "Link not permitted", ex.getMessage(), request);
+    }
+
+    /**
+     * The conversion queue is full.
+     *
+     * <p>{@code 429} with {@code Retry-After}, not {@code 503}: nothing is
+     * broken and the caller should come back, which is precisely what those two
+     * say together. Accepting the work instead would produce a job that sits at
+     * PENDING until a restart fails it — which reads as a bug rather than as
+     * back-pressure.
+     */
+    @ExceptionHandler(ConversionQueueFullException.class)
+    public ResponseEntity<ProblemDetail> handleConversionQueueFull(
+            ConversionQueueFullException ex, HttpServletRequest request) {
+        ProblemDetail problem = ApiProblem.of(HttpStatus.TOO_MANY_REQUESTS,
+            "conversion-queue-full", "Too many conversions in progress",
+            ex.getMessage(), request);
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+            .body(problem);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

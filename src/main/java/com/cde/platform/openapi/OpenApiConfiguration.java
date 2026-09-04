@@ -165,6 +165,10 @@ public class OpenApiConfiguration {
             tag(TAG_ASSISTANCE,
                 "Assisted document understanding. Subject to the per-tenant kill switch and "
                 + "disabled by default on sovereign deployments."),
+            tag(TAG_CONVERSIONS,
+                "Converting a document behind a link an integrating application supplied. "
+                + "Asynchronous by design: submission returns a job, never a file. Present "
+                + "only where outbound fetching is enabled."),
             tag(TAG_DIAGNOSTICS,
                 "Client-side error reporting and service status."));
     }

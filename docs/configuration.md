@@ -757,6 +757,106 @@ legitimately be a two-gigabyte model over a slow link.
 
 ---
 
+## The conversion queue
+
+Converting a document is bulk work by §7.1's definition — its cost scales with
+the file — so submission returns `202` with a job to poll and the work happens
+on a queue. There is no synchronous variant, deliberately: a two-gigabyte model
+cannot be converted inside a second, and an endpoint that sometimes takes ten
+minutes is one every client eventually times out against.
+
+The queue is **in-process rather than ActiveMQ Artemis**, which §7.8 would
+otherwise make the default for document processing. This is a deliberate
+departure and worth understanding before deploying:
+
+A message carrying the source URL would put a presigned bearer credential in
+the broker's journal on disk, which is the same objection that keeps it out of
+the database. The alternatives were to encrypt it into a message — a key, a
+rotation story and a test suite of its own, to protect something with a
+fifteen-minute life — or to hold it in memory and accept that a job interrupted
+by a restart is failed rather than resumed. The second is smaller and its
+failure mode is honest.
+
+**The consequence:** execution is bound to the instance that accepted the
+submission, which is a departure from §8.1. Job *status* is not — it lives in
+the database, so any instance serves it — and neither is the result, which is
+in object storage. What is lost is resuming in-flight work elsewhere, which the
+un-persisted credential rules out regardless. A job interrupted by a restart is
+failed at startup with a reason saying to resubmit with a fresh link.
+
+These settings apply only where `cde.fetch.enabled` is true. Where it is not,
+there is no queue, no worker and no endpoint.
+
+### `cde.conversion.workers`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `4` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_CONVERSION_WORKERS` |
+
+How many conversions run at once on this instance.
+
+Small on purpose. Each one holds a fetched original and a converted copy on
+disk and occupies a converter slot, so raising it raises disk and converter
+pressure rather than throughput. Raise the converter's own capacity first.
+
+### `cde.conversion.max-concurrent-per-tenant`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `2` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_CONVERSION_MAX_CONCURRENT_PER_TENANT` |
+
+The most conversions one organisation may have running at once.
+
+Noisy-neighbour protection (§7.8). Without it, a tenant submitting a hundred
+models occupies every worker and every other tenant's jobs wait behind them —
+which surfaces as "the system is slow for everyone except one customer", and is
+diagnosed late because nothing is actually broken.
+
+Keep it below `workers`, or it does nothing.
+
+### `cde.conversion.queue-capacity`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `256` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_CONVERSION_QUEUE_CAPACITY` |
+
+How many jobs may be waiting, counted across all tenants — not per tenant,
+which would make the real cap the product of this and the number of
+organisations, raisable by registering more of them.
+
+When it is full, submission is refused with `429` and a `Retry-After` rather
+than queued. Refusing is the honest answer: accepting work the system cannot
+get to produces a job that sits at PENDING until a restart fails it, which
+reads as a bug to whoever submitted it rather than as back-pressure.
+
+### `cde.conversion.conversion-timeout`
+
+| | |
+|---|---|
+| Type | Duration |
+| Default | `PT30M` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_CONVERSION_CONVERSION_TIMEOUT` |
+
+How long one conversion may take at the converter, separate from the fetch
+timeouts because they bound different things. Generous, because the file being
+converted may legitimately be enormous.
+
+---
+
 ## Assisted summaries
 
 Three checks decide whether anything reaches a model provider, and all three

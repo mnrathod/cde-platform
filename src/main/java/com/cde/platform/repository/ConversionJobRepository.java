@@ -32,6 +32,15 @@ public interface ConversionJobRepository extends JpaRepository<ConversionJob, Lo
     Page<ConversionJob> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     /**
+     * The lookup behind idempotent submission (§3.4).
+     *
+     * <p>Tenant-scoped by RLS like everything else here, which matters more
+     * than usual: two tenants choosing the same key must not see each other's
+     * job, and the unique index is per tenant for the same reason.
+     */
+    Optional<ConversionJob> findByIdempotencyKey(String idempotencyKey);
+
+    /**
      * Jobs left mid-flight, for startup recovery.
      *
      * <p>These cannot be resumed: the source link was never stored, because it

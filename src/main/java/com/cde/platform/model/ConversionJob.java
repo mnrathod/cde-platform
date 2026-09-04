@@ -83,6 +83,16 @@ public class ConversionJob implements TenantScoped {
     @Column(name = "submitted_by", nullable = false, updatable = false)
     private Long submittedBy;
 
+    /**
+     * The client's key for this submission, when it supplied one.
+     *
+     * <p>Makes retrying safe (§3.4). A client that times out against a 202 and
+     * retries — which is the correct thing for it to do — otherwise pays for
+     * the same conversion twice and holds two job ids for one intent.
+     */
+    @Column(name = "idempotency_key", length = 255, updatable = false)
+    private String idempotencyKey;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private Status status = Status.PENDING;
@@ -140,11 +150,21 @@ public class ConversionJob implements TenantScoped {
                                           long submittedBy,
                                           String sourceHost,
                                           TargetFormat targetFormat) {
+        return submitted(publicId, submittedBy, sourceHost, targetFormat, null);
+    }
+
+    /** @param idempotencyKey the client's key, or null when it supplied none */
+    public static ConversionJob submitted(UUID publicId,
+                                          long submittedBy,
+                                          String sourceHost,
+                                          TargetFormat targetFormat,
+                                          String idempotencyKey) {
         ConversionJob job = new ConversionJob();
         job.publicId = publicId;
         job.submittedBy = submittedBy;
         job.sourceHost = sourceHost;
         job.targetFormat = targetFormat;
+        job.idempotencyKey = idempotencyKey;
         job.status = Status.PENDING;
         job.createdAt = LocalDateTime.now();
         return job;
@@ -302,6 +322,10 @@ public class ConversionJob implements TenantScoped {
 
     public short getProgressPercent() {
         return progressPercent;
+    }
+
+    public Optional<String> getIdempotencyKey() {
+        return Optional.ofNullable(idempotencyKey);
     }
 
     public LocalDateTime getCreatedAt() {

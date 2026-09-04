@@ -44,7 +44,11 @@ public final class RolePermissions {
         ContainerPermission.READ,
         ContainerPermission.WRITE,
         ContainerPermission.SHARE,
-        ContainerPermission.ARCHIVE);
+        ContainerPermission.ARCHIVE,
+        // Converting a drawing to PDF produces a derivative, which is
+        // originating information rather than authorising it — the same side
+        // of the ISO 19650 division of labour as WRITE.
+        ConversionPermission.SUBMIT);
 
     /**
      * The lead appointed party's reviewers: they authorise or reject what has
@@ -66,12 +70,13 @@ public final class RolePermissions {
      * Everything, including the authority to decide who is in the tenant.
      *
      * <p>Built by union rather than written out, so a permission added to
-     * either vocabulary reaches the administrator without anyone remembering
-     * to add it here — the failure mode otherwise is an administrator who
-     * cannot use a feature, diagnosed as a bug in the feature.
+     * any vocabulary reaches the administrator without anyone remembering to
+     * add it here — the failure mode otherwise is an administrator who cannot
+     * use a feature, diagnosed as a bug in the feature.
      */
     private static final Set<String> ADMIN_PERMISSIONS =
-        Stream.concat(ContainerPermission.ALL.stream(), TenantPermission.ALL.stream())
+        Stream.of(ContainerPermission.ALL, TenantPermission.ALL, ConversionPermission.ALL)
+              .flatMap(Set::stream)
               .collect(Collectors.toUnmodifiableSet());
 
     public static Set<String> grantedTo(User.Role role) {

@@ -83,6 +83,10 @@ tags:
 - description: Assisted document understanding. Subject to the per-tenant kill switch
     and disabled by default on sovereign deployments.
   name: Assistance
+- description: "Converting a document behind a link an integrating application supplied.\
+    \ Asynchronous by design: submission returns a job, never a file. Present only\
+    \ where outbound fetching is enabled."
+  name: Document conversion
 - description: Client-side error reporting and service status.
   name: Diagnostics
 paths:
@@ -2219,6 +2223,375 @@ paths:
       summary: Compare two documents
       tags:
       - Document comparison
+  /api/conversions:
+    get:
+      description: |-
+        Newest first. Scoped to the caller's own organisation; no parameter widens that.
+
+        Requires the `document:convert` permission.
+      operationId: listConversions
+      parameters:
+      - description: Zero-based page number.
+        example: 0
+        in: query
+        name: page
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+      - description: "Jobs per page, at most 100."
+        example: 20
+        in: query
+        name: size
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 20
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConversionJobResponse"
+          description: "One page of jobs, newest first."
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Authenticated, but without the permission this operation requires."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: List this organisation's conversions
+      tags:
+      - Document conversion
+    post:
+      description: |-
+        Accepts a link to a file and converts it, asynchronously. Returns at once with a job to poll; the conversion itself runs on a queue.
+
+        The link is fetched exactly once and is **never stored** — not in the database, not in a log, not in a message. It is a bearer credential, so only its host is kept on the job record. A link that has expired by the time the job runs fails the job rather than the submission.
+
+        The destination must resolve to a public address and must be on this deployment's list of permitted storage hosts where one is configured. Redirects are not followed.
+
+        Send an `Idempotency-Key` header so a timed-out retry returns the same job rather than converting the file twice.
+
+        Requires the `document:convert` permission.
+      operationId: submitConversion
+      parameters:
+      - description: A key of the client's choosing making this submission safe to
+          retry. Repeating a submission with the same key returns the job created
+          the first time instead of starting another.
+        example: 9c1f4d2e-7a10-4c3b-9f22-6e8b0a5d1c47
+        in: header
+        name: Idempotency-Key
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversionJobRequest"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversionJobResponse"
+          description: Accepted. The `Location` header names the job to poll.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Authenticated, but without the permission this operation requires."
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The link may not be fetched — wrong scheme, an unlisted host,\
+            \ or an address inside this deployment's own network."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Submit a document for conversion
+      tags:
+      - Document conversion
+  /api/conversions/{jobId}:
+    delete:
+      description: |-
+        Cancellation is co-operative: the worker notices between stages, so the job may still report RUNNING for a moment afterwards with `cancellationRequested` true.
+
+        Idempotent, and safe to call on a job that has already finished — that answers with the job's final state rather than an error, because racing a job to completion is normal rather than a client mistake.
+
+        Requires the `document:convert` permission.
+      operationId: cancelConversion
+      parameters:
+      - description: Identifier of the job to stop.
+        example: 3f2a71c4-9b0e-4a2d-8c11-5e7d9a1b3f40
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversionJobResponse"
+          description: The job's state after the request.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: No such job is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Ask a conversion to stop
+      tags:
+      - Document conversion
+    get:
+      description: |-
+        Poll this until `status` is one of SUCCEEDED, FAILED or CANCELLED, which never change again. `progressPercent` moves forward only and reaches 100 only on success.
+
+        A job belonging to another tenant answers 404, exactly as one that does not exist — a caller must not be able to tell the two apart.
+
+        Requires the `document:convert` permission.
+      operationId: getConversion
+      parameters:
+      - description: Identifier returned when the job was submitted.
+        example: 3f2a71c4-9b0e-4a2d-8c11-5e7d9a1b3f40
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversionJobResponse"
+          description: The job's current state.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: No such job is visible to the caller.
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Read the state of a conversion
+      tags:
+      - Document conversion
+  /api/conversions/{jobId}/content:
+    get:
+      description: |-
+        Streams the converted PDF. Available only once `status` is SUCCEEDED.
+
+        The response is served as an attachment with `nosniff`, and no storage path is exposed anywhere in this API — the object is reached through this endpoint, which re-checks the caller's permission and organisation on every request (§5.13).
+
+        Requires the `document:convert` permission.
+      operationId: downloadConversionResult
+      parameters:
+      - description: Identifier of a job that has succeeded.
+        example: 3f2a71c4-9b0e-4a2d-8c11-5e7d9a1b3f40
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          content:
+            application/pdf: {}
+          description: The converted PDF.
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The request could not be read — malformed JSON, or a value\
+            \ outside an accepted set. No field can be named, because parsing did\
+            \ not get that far."
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Authenticated, but without the permission this operation requires."
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: No such job is visible to the caller.
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "The job has not succeeded, so there is nothing to download\
+            \ yet."
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "A rate limit was exceeded. `Retry-After` gives the seconds\
+            \ to wait. Limits apply per account, per source address and per tenant\
+            \ independently."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: The request failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      summary: Download a completed conversion
+      tags:
+      - Document conversion
   /api/documents/project/{projectId}:
     get:
       description: |-
@@ -5943,6 +6316,123 @@ components:
           - PUBLISHED
           - ARCHIVED
           example: SHARED
+    ConversionJobRequest:
+      type: object
+      description: "A conversion to perform. The link is fetched once, immediately,\
+        \ and is never written to the database, a log, or a message: it is a bearer\
+        \ credential, so only its host is retained on the job record."
+      properties:
+        sourceUrl:
+          type: string
+          description: "A link to the file to convert, which this server will fetch\
+            \ once. Must be https unless the deployment has opted out, must resolve\
+            \ to a public address, and must be on the deployment's list of permitted\
+            \ storage hosts where one is configured. Redirects are not followed."
+          example: https://files.example.test/drawings/site-plan.dwg?token=synthetic
+          maxLength: 2048
+          minLength: 0
+          pattern: ^https?://.+
+        targetFormat:
+          type: string
+          description: What to produce. Only PDF is supported today.
+          enum:
+          - PDF
+          example: PDF
+      required:
+      - sourceUrl
+      - targetFormat
+    ConversionJobResponse:
+      type: object
+      description: "The state of a conversion, and its outcome once it has one."
+      properties:
+        cancellationRequested:
+          type: boolean
+          description: Whether a cancellation has been asked for but not yet taken
+            effect.
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          description: "When the job was accepted, UTC."
+          example: 2026-09-04T09:12:33
+        failureReason:
+          type:
+          - string
+          - "null"
+          description: "Why the job failed, written to be acted on. Present only for\
+            \ FAILED. Never contains internal detail."
+          example: The storage service answered 403 for that link. A signed link that
+            has expired usually answers 403.
+        finishedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+          description: "When the job reached a terminal state, UTC."
+          example: 2026-09-04T09:13:02
+        jobId:
+          type: string
+          format: uuid
+          description: "The job's identifier, used on every other conversion endpoint."
+          example: 3f2a71c4-9b0e-4a2d-8c11-5e7d9a1b3f40
+        progressPercent:
+          type: integer
+          format: int32
+          description: "Rough progress, 0 to 100. Never goes backwards, and reaches\
+            \ 100 only on success — a bar sitting at 100 while work continues has\
+            \ stopped meaning anything."
+          example: 60
+          maximum: 100
+          minimum: 0
+        resultSizeBytes:
+          type:
+          - integer
+          - "null"
+          format: int64
+          description: "Size of the converted file in bytes, once it exists."
+          example: 482913
+        sourceFileName:
+          type: string
+          description: "What the far end called the file, sanitised, for display only.\
+            \ Empty when it offered no name."
+          example: site-plan.dwg
+        sourceHost:
+          type: string
+          description: The host the file was fetched from. Never the path or query
+            string.
+          example: files.example.test
+        startedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+          description: "When work began, UTC. Absent while still queued."
+          example: 2026-09-04T09:12:35
+        status:
+          type: string
+          description: "PENDING while queued, RUNNING while working, then one of SUCCEEDED,\
+            \ FAILED or CANCELLED. The three terminal states never change again."
+          enum:
+          - PENDING
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          example: RUNNING
+        targetFormat:
+          type: string
+          description: What was produced.
+          enum:
+          - PDF
+          example: PDF
+      required:
+      - cancellationRequested
+      - createdAt
+      - jobId
+      - progressPercent
+      - sourceHost
+      - status
+      - targetFormat
     ConverterStatusResponse:
       type: object
       description: "Whether the document conversion service is reachable. The viewer\

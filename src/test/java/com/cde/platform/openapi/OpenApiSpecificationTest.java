@@ -33,6 +33,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+// Generated with every optional feature switched on, deliberately. The
+// specification describes what this product's API *is*; a deployment that
+// disables outbound fetching for sovereignty reasons (§6.4-6.6) has fewer
+// endpoints, but it has not changed the contract. Generating from the default
+// configuration would silently drop a whole feature from the spec and the
+// drift gate would report everything as fine (§3.5).
+@org.springframework.test.context.TestPropertySource(properties = {
+    "cde.fetch.enabled=true"
+})
 class OpenApiSpecificationTest {
 
     /** Where the committed specification lives, relative to the module root. */

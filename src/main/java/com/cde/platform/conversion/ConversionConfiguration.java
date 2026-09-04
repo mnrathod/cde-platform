@@ -1,6 +1,6 @@
 package com.cde.platform.conversion;
 
-import com.cde.platform.fetch.DestinationCheck;
+import com.cde.platform.fetch.FetchDestinationPolicy;
 import com.cde.platform.fetch.RemoteContentFetcher;
 import com.cde.platform.repository.ConversionJobRepository;
 import com.cde.platform.repository.TenantRepository;
@@ -46,8 +46,8 @@ public class ConversionConfiguration {
     @Bean
     public ConversionJobService conversionJobService(ConversionJobRepository jobs,
                                                      ConversionWorkQueue queue,
-                                                     DestinationCheck destinationCheck) {
-        return new ConversionJobService(jobs, queue, destinationCheck);
+                                                     FetchDestinationPolicy destinationPolicy) {
+        return new ConversionJobService(jobs, queue, destinationPolicy);
     }
 
     @Bean
