@@ -28,6 +28,7 @@ loses the reasoning, which is the only part worth keeping.
 | [9](0009-bundle-third-party-javascript.md) | Bundle third-party JavaScript; never load executable code from a CDN | Accepted |
 | [10](0010-hash-chained-audit-trail.md) | Make the audit trail append-only and hash-chained in the database | Accepted |
 | [11](0011-storage-abstraction.md) | Put object storage behind one interface, with the local provider built first | Accepted |
+| [12](0012-viewer-as-a-standalone-product.md) | Ship the viewer as its own product, fed by integrator-minted URLs | Accepted |
 
 ## Decisions not yet recorded
 
