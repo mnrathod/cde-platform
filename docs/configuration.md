@@ -617,6 +617,146 @@ chunks, so scanning a two-gigabyte model costs one buffer.
 
 ---
 
+## Fetching integrator-supplied URLs
+
+ADR 12 has the host application mint a short-lived link — a Graph download URL,
+an S3 presigned GET, an Azure SAS, a GCS signed URL — and hand it to us to
+fetch. That is what lets four storage platforms collapse into one code path
+without this product holding anybody's storage credentials.
+
+It also means **a caller chooses an address that this server then connects
+to**, which is server-side request forgery in its textbook form (§5.12 A10).
+What makes that dangerous is not the internet: it is that this server sits
+inside a network the caller cannot otherwise reach. The cloud metadata endpoint
+at `169.254.169.254` hands out instance credentials to anything asking from the
+instance. The database, the converter and Actuator on the internal interface
+are each one HTTP request away from a process that makes requests on request.
+
+So the destination is judged before a socket is opened, and **the judgement is
+on the resolved addresses, never on the text of the host**. A name is not a
+destination: `evil.example` can resolve to `127.0.0.1`, and a string check
+passes it. Every resolved address is checked, and a name resolving to several is
+allowed only if all of them are — which of them the connection picks is not ours
+to choose.
+
+Refused: loopback, link-local (so the metadata endpoint), RFC 1918, IPv6
+unique-local `fc00::/7`, the unspecified address, and multicast. Only `https`
+and `http` schemes are permitted, by allow-list, so `file:` — which would turn
+this into an arbitrary file read — is refused by omission. Redirects are not
+followed, because a redirect names a second destination no check has seen.
+
+A refusal never names the address a host resolved to. A caller who learns that
+their name reached `10.0.4.17` has been handed a network map one refusal at a
+time.
+
+**The residual risk, stated rather than papered over.** The policy resolves the
+host and the HTTP client resolves it again, so a name whose DNS answer changes
+between the two is checked at one address and connected to at another. That
+window cannot be closed in application code: the JDK's client offers no
+supported way to pin a connection to an already-validated address, and
+connecting to a raw IP with a spoofed `Host` header breaks certificate
+validation — a narrow hole traded for a wider one. It is closed by the two
+controls §5.12 A10 names alongside address validation: the host allow-list
+below, and a filtered egress proxy. **A deployment that sets neither is relying
+on the pre-check alone.**
+
+### `cde.fetch.enabled`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `false` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_FETCH_ENABLED` |
+
+Whether integrator-supplied URLs may be fetched at all.
+
+Off by default, and off is a legitimate production posture rather than a
+degraded one: an air-gapped or PROTECTED deployment (§6.4–6.6) prohibits
+outbound calls outright and pushes content to the upload endpoint instead.
+Defaulting to on would make the sovereign case the one that has to remember.
+
+When off, **no outbound HTTP client is created at all** — absent beats
+disabled, because there is then no code path to reach.
+
+### `cde.fetch.permitted-hosts`
+
+| | |
+|---|---|
+| Type | List of host names |
+| Default | *(empty — any host passing the address rules)* |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_FETCH_PERMITTED_HOSTS` |
+
+Host names that may be fetched, matched case-insensitively as DNS does.
+
+**Set this.** The address rules stop us reaching our own network; an allow-list
+additionally stops us being pointed at somebody else's, and it is the only
+setting that fully closes the rebinding window described above. A deployment
+integrating with one CDE knows its storage hosts. Leaving it empty logs a
+warning at startup.
+
+### `cde.fetch.require-tls`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `true` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_FETCH_REQUIRE_TLS` |
+
+Refuse `http`, permitting only `https`. Worth leaving on: a presigned link
+carries its own authorisation in the query string, so plain http hands that
+credential to anything on the path. The setting exists for an on-premises
+integration against a storage service inside the same trusted segment.
+
+### `cde.fetch.max-content-size`
+
+| | |
+|---|---|
+| Type | Data size |
+| Default | `2GB` |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_FETCH_MAX_CONTENT_SIZE` |
+
+The largest response body accepted.
+
+Enforced as a **running total during the transfer**, not believed from
+`Content-Length` — a declared length is a claim by the server we were pointed
+at, and a server that declares ten bytes and sends ten megabytes passes every
+check made before the transfer. The declared length is checked too, so the
+honest oversize case is refused without opening a file and the caller is told
+the actual size.
+
+Two gigabytes matches the chunked-upload ceiling: a federated model is the case
+this exists for, and the two intake paths should not disagree about how large a
+document may be.
+
+### `cde.fetch.connect-timeout` / `response-timeout` / `transfer-timeout`
+
+| | |
+|---|---|
+| Type | Duration |
+| Default | `PT10S` / `PT30S` / `PT30M` |
+| Required | No |
+| Secret | No |
+| Environment variables | `CDE_FETCH_CONNECT_TIMEOUT`, `CDE_FETCH_RESPONSE_TIMEOUT`, `CDE_FETCH_TRANSFER_TIMEOUT` |
+
+Three bounds rather than one, because they stop different things.
+
+`connect-timeout` and `response-timeout` cover a destination that never
+answers. `transfer-timeout` covers one that answers *promptly* and then
+dribbles: a response timeout is satisfied the moment headers arrive, so without
+a separate deadline a slow-loris response holds a thread and a disk allocation
+for as long as it likes. It is generous because the transfer it bounds may
+legitimately be a two-gigabyte model over a slow link.
+
+---
+
 ## Assisted summaries
 
 Three checks decide whether anything reaches a model provider, and all three
