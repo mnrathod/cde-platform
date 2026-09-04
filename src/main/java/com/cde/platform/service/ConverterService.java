@@ -102,6 +102,82 @@ public class ConverterService {
     }
 
     /**
+     * Converts to PDF, streaming the result to {@code destination}.
+     *
+     * <p>The variant above returns the PDF as a {@code byte[]}, which is fine
+     * for the interactive path where the file is small and already in memory,
+     * and wrong for a job: a converted federated model would sit whole in heap
+     * (§7.7). This writes it out as it arrives, so a conversion of any size
+     * costs one buffer. The existing {@code byte[]} method is left in place —
+     * its callers are the synchronous endpoints, and changing them is a
+     * separate change with its own tests.
+     *
+     * <p>A partial file is deleted on failure: a truncated PDF that stayed on
+     * disk is one the next step could not tell from a converted document.
+     *
+     * @return the number of bytes written
+     * @throws ConverterOfflineException if the converter cannot be reached
+     */
+    public long convertToPdfFile(Path source, String contentType, Path destination,
+                                 Duration timeout) {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("path", source.toAbsolutePath().toString());
+        body.put("contentType", contentType == null ? "" : contentType);
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(converterUrl + "/convert"))
+            .timeout(timeout)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+            .build();
+
+        try {
+            HttpResponse<java.io.InputStream> response =
+                http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            return writePdfOrExplain(response, destination);
+        } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
+            throw new ConverterOfflineException(converterUrl);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("The conversion was interrupted", e);
+        } catch (java.io.IOException e) {
+            throw new ConverterOfflineException(converterUrl);
+        }
+    }
+
+    private long writePdfOrExplain(HttpResponse<java.io.InputStream> response, Path destination)
+            throws java.io.IOException {
+        String contentType = response.headers().firstValue("Content-Type").orElse("");
+        if (response.statusCode() != 200 || !contentType.contains("pdf")) {
+            // The converter reports refusals as JSON with an `error` field.
+            // Bounded read: this is an error body, and an unbounded one would
+            // be a way to make a failure cost more than a success.
+            try (java.io.InputStream errorBody = response.body()) {
+                JsonNode json = mapper.readTree(
+                    new String(errorBody.readNBytes(8192), java.nio.charset.StandardCharsets.UTF_8));
+                throw new ConversionRefusedException(
+                    json.path("error").asText("The converter could not convert that file."));
+            }
+        }
+
+        java.nio.file.Files.createDirectories(destination.getParent());
+        try (java.io.InputStream in = response.body();
+             java.io.OutputStream out = java.nio.file.Files.newOutputStream(destination)) {
+            return in.transferTo(out);
+        } catch (java.io.IOException | RuntimeException e) {
+            java.nio.file.Files.deleteIfExists(destination);
+            throw e;
+        }
+    }
+
+    /** The converter answered, and the answer was no. */
+    public static class ConversionRefusedException extends RuntimeException {
+        public ConversionRefusedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * Posts a JSON body to a converter endpoint and returns the parsed reply.
      *
      * <p>Shared by every document-processing call so the timeout, headers and
