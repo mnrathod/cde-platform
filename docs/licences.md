@@ -269,6 +269,20 @@ requirement, the route is a redistribution agreement with the Open Design
 Alliance, negotiated by whoever owns legal review (§18, open item 2) — not an
 engineering change.
 
+**That question is now written up as a decision: [ADR
+13](adr/0013-dwg-conversion-in-a-distributed-product.md).** It sets this
+section beside §4.1 above, because the two converters have opposite problems
+and a distributed product needs one of them resolved: LibreDWG can be shipped
+only with a source offer it does not have, and ODA cannot be shipped at all.
+The ADR costs the options and names what counsel has to answer.
+
+One caution belongs here rather than only in the ADR: **the sentence "its
+licence does not permit redistribution" is inherited, not verified.** It is
+the position this repository has acted on and the reason the binary is not
+vendored, which is the safe direction to be wrong in — but nobody here has
+read the agreement, and §17.3 puts that reading outside engineering. Checking
+it is action one in ADR 13, not a settled premise.
+
 ---
 
 ## 5. Standards, content and assets
@@ -313,7 +327,8 @@ the same thing at the top.
 
 | Gap | Impact | Status |
 |---|---|---|
-| `dwg2dxf` GPL-3.0 source offer (§4.1) | **Blocks distribution of the converter image** | Open — needs a decision and counsel sign-off |
+| `dwg2dxf` GPL-3.0 source offer (§4.1) | **Blocks distribution of the converter image** | Open — written up as [ADR 13](adr/0013-dwg-conversion-in-a-distributed-product.md), which costs the options; needs an owner and counsel sign-off |
+| ODA redistribution terms unverified (§4.2) | Decides whether the shipped product can have DWG support at all | Open — [ADR 13](adr/0013-dwg-conversion-in-a-distributed-product.md), question 1. Not a breach: we ship nothing, so the safe direction |
 | ~~`ifcopenshell`, `pdfplumber` licences unverified~~ | — | **Closed 2026-08-29** — pdfplumber is MIT; ifcopenshell is LGPL-3.0-or-later with an exception recorded at §3.2 |
 | Python dependencies are not licence-gated in CI | The `ezdxf[draw]` finding (§2) was caught by hand, not by a gate. The next one would not be. | Open — needs the licence scan extended to `converter/requirements.txt`; `scripts/check-pinning.sh` only blocks the specific packages already known to be a problem |
 | The §17.2 licence-change detector covers Gradle only | A PyPI or npm dependency that re-licences would not fail the build | Open |

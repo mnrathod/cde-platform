@@ -111,6 +111,12 @@ sense, so this must be closed before the first customer install** — by
 publishing the source alongside the image, by a written offer, or by dropping
 LibreDWG and requiring the ODA converter.
 
+> Written up since as **[ADR 13](0013-dwg-conversion-in-a-distributed-product.md)**,
+> which found the problem is larger than this paragraph implies: the two DWG
+> converters have opposite licence problems, so a distributed product cannot
+> currently ship DWG support either way. Recorded there with the options
+> costed and the questions counsel has to answer.
+
 **Trademarks.** "Works with Microsoft SharePoint" is nominative fair use;
 "Microsoft-approved", their logo, or any implication of partnership is not
 (§17.4). The same applies to Amazon, Google and Autodesk. The integration

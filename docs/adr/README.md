@@ -13,6 +13,14 @@ ADRs are immutable once accepted. A decision that changes gets a new ADR that
 supersedes the old one; the old one stays, marked superseded. Editing history
 loses the reasoning, which is the only part worth keeping.
 
+**"Accepted in part"** appears once, on ADR 13. It marks a record where the
+engineering position is settled and built, and a question inside the same
+decision belongs to someone else — there, to counsel. The alternative was to
+mark the whole thing accepted, which would have been untrue, or to leave it
+unrecorded until someone could decide it, which is how a blocker stays
+invisible until the release it blocks. The open part names who has to answer
+it and by when.
+
 ## Index
 
 | # | Decision | Status |
@@ -29,6 +37,7 @@ loses the reasoning, which is the only part worth keeping.
 | [10](0010-hash-chained-audit-trail.md) | Make the audit trail append-only and hash-chained in the database | Accepted |
 | [11](0011-storage-abstraction.md) | Put object storage behind one interface, with the local provider built first | Accepted |
 | [12](0012-viewer-as-a-standalone-product.md) | Ship the viewer as its own product, fed by integrator-minted URLs | Accepted |
+| [13](0013-dwg-conversion-in-a-distributed-product.md) | Licence the ODA File Converter for redistribution, or ship no DWG support | **Accepted in part — one question referred to counsel** |
 
 ## Decisions not yet recorded
 
