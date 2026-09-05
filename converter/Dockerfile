@@ -90,7 +90,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-liberation2 \
         ca-certificates \
         curl \
+        xvfb \
     && rm -rf /var/lib/apt/lists/*
+
+# xvfb (X.Org, MIT) is here for the ODA File Converter, which is a Qt
+# application and opens a display even when converting from the command
+# line — on a headless container it aborts before reading its arguments.
+# ~1 MB of package, and without it a mounted ODA is present and unusable,
+# which is a worse failure than not having it: DWG conversion silently
+# stays at LibreDWG fidelity and nothing says why. app.py wraps ODA in
+# xvfb-run itself, so an operator mounts the binary and nothing else.
 
 # The venv is copied wholesale, so this stage's python3 must be the same
 # minor version as python-builder's — both are ubuntu:24.04 (3.12) for that
@@ -126,18 +135,24 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 ENTRYPOINT ["python3", "app.py"]
 
-# ── Optional: ODA File Converter ──────────────────────────────
+# ── ODA File Converter: supported, supplied by the operator ───
 # ODA gives better DWG fidelity than LibreDWG and is tried first by
-# app.py, but it cannot be baked into this image: the download is
-# registration-gated and its licence does not permit redistribution.
-# To use it, mount the extracted installation and point ODA_PATH at
-# the binary:
+# app.py. Everything it needs is in this image — xvfb above, the
+# headless wrapper and the startup probe in app.py — except the binary
+# itself, which cannot be baked in: the download is registration-gated
+# and its licence does not permit redistribution. See docs/licences.md.
+#
+# Mount the extracted installation and point ODA_PATH at it. Either the
+# directory or the binary works:
 #
 #   volumes:
 #     - ./vendor/oda:/opt/oda:ro
 #   environment:
-#     ODA_PATH: /opt/oda/ODAFileConverter
+#     ODA_PATH: /opt/oda
 #
-# ODA is a Qt application and needs a display even in "console" mode;
-# install xvfb and wrap it with `xvfb-run -a`. Without ODA_PATH the
-# service falls back to LibreDWG, which is why DWG works out of the box.
+# /opt/oda is also searched by default, so a mount at that path needs no
+# environment variable at all. The startup log and /health report whether
+# ODA was found *and whether it ran* — check `odaRunnable`, not just
+# `odaInstalled`, because a mount missing its libraries or its execute
+# bit is present and useless. Without ODA the service falls back to
+# LibreDWG, which is why DWG works out of the box.

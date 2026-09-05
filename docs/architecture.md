@@ -347,6 +347,30 @@ drawing. Every assertion held; none asked whether the drawing was visible. The
 suite now measures ink on the page, and the lesson generalises: a check that
 the output is well-formed is not a check that it is right.
 
+### DWG: two converters, one of which we cannot ship
+
+A DWG is extracted to DXF before any of the above happens, by whichever of two
+tools is available. **LibreDWG** is compiled into the image and always present.
+The **ODA File Converter** produces better fidelity and is tried first — but its
+licence forbids redistribution, so the binary is supplied by whoever deploys the
+service and never by us (§12, and `docs/licences.md` for why vendoring it is not
+an option rather than an oversight).
+
+Everything else ODA needs *is* shipped. It is a Qt application that opens a
+display even converting from the command line, so the image carries a virtual
+framebuffer and the converter launches ODA inside one; without that a mounted
+ODA aborts before reading its arguments. That was the state of it until
+recently: configured, documented, and unable to start.
+
+**Presence and usability are reported separately, because they differ.** An
+install missing its shared libraries or its execute bit is present and useless,
+and the symptom is not an error — the code falls through to LibreDWG, the
+drawing converts, and the only trace is fidelity nobody is measuring. So ODA is
+run once at startup against an empty directory, and `/health` answers both
+questions: `odaInstalled` for the binary, `odaRunnable` for whether it started.
+The same distinction reaches the user: a DWG that could not be converted reports
+ODA as unavailable when it cannot run, rather than as installed.
+
 ### The source URL is never stored
 
 Every form of the link — Graph, S3 presigned, Azure SAS, GCS signed — carries its

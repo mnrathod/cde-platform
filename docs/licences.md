@@ -235,6 +235,42 @@ but it conflicts with the air-gapped delivery requirement in §9.3.
 
 ---
 
+## 4.2 Proprietary tooling the operator supplies — ODA File Converter
+
+The **ODA File Converter** (Open Design Alliance) converts DWG to DXF at
+higher fidelity than LibreDWG, and the converter service tries it first when
+it is present. It is **not distributed with this product and must not be**:
+
+| | |
+|---|---|
+| Licence | Proprietary end-user licence — not OSI, not on the §2.1 allow-list |
+| Redistribution | **Not permitted.** Its download is registration-gated and its terms bind the person who accepted them |
+| How it is used | A separate executable invoked as a subprocess, never linked or embedded |
+| Where the binary comes from | The deployment supplies it; nothing in our image or artifact set contains it |
+| Without it | DWG conversion falls back to LibreDWG and works |
+
+**This is not the `dwg2dxf` situation in §4.1 and must not be conflated with
+it.** That one is an open obligation: a GPL-3.0 binary we *do* ship without
+the corresponding-source offer it requires. This one is closed by
+construction — we ship nothing, so there is nothing to license onward.
+
+What the product *does* ship is everything around it: the discovery of a
+mounted install, the virtual display it needs to start on a headless host
+(`xvfb`, X.Org, MIT — an ordinary allow-listed package), a startup probe that
+reports whether it actually ran, and the fallback when it is absent. That
+support is ours and carries no third-party obligation.
+
+**Do not "solve" this by vendoring the binary, adding a download step to the
+Dockerfile, or publishing an image with ODA inside it.** Each of those is
+redistribution, and each would put a non-OSI, field-of-use-restricted
+component into an artifact that §2.1 forbids it from and that enterprise and
+Defence procurement will audit (§17). If bundled DWG fidelity is a commercial
+requirement, the route is a redistribution agreement with the Open Design
+Alliance, negotiated by whoever owns legal review (§18, open item 2) — not an
+engineering change.
+
+---
+
 ## 5. Standards, content and assets
 
 **Standards documents are copyrighted.** ISO 19650's suitability code and

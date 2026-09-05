@@ -1232,3 +1232,64 @@ which means enrolment appears to succeed and then every code is rejected.
 This is not in tension with the SHA-1 ban in §4.1. That ban is on SHA-1 as a
 collision-resistant hash; HMAC's security does not rest on collision
 resistance, and HMAC-SHA-1 remains unbroken.
+
+---
+
+## The converter sidecar
+
+The converter is a separate process reached over HTTP, so its settings are
+environment variables on that container rather than Spring properties.
+
+### `CONVERTER_PORT`
+
+| | |
+|---|---|
+| Type | integer |
+| Default | `5001` |
+| Required | no |
+| Secret | no |
+| Environment | `CONVERTER_PORT` |
+
+The port the converter listens on. `cde.converter.url` on the application side
+must agree with it.
+
+### `ODA_PATH`
+
+| | |
+|---|---|
+| Type | filesystem path — a directory or the binary itself |
+| Default | unset; `/opt/oda`, `/usr/bin` and `/usr/local/bin` are searched |
+| Required | no |
+| Secret | no |
+| Environment | `ODA_PATH` |
+
+Where the **ODA File Converter** is mounted. It converts DWG to DXF at higher
+fidelity than the bundled LibreDWG and is tried first when present; unset, DWG
+still works and falls back to LibreDWG.
+
+**The binary is not in the image and cannot be**: its download is
+registration-gated and its licence forbids redistribution, so it is supplied by
+whoever deploys the service (see `/docs/licences.md`). Everything else it needs
+*is* in the image — including the virtual display it opens even in console mode,
+which the converter wraps it in automatically.
+
+Point this at either the extracted directory or the executable; both resolve. A
+mount at `/opt/oda` needs no variable at all.
+
+**Check `odaRunnable`, not `odaInstalled`.** `/health` reports both because they
+answer different questions, and the gap between them is where this goes wrong:
+
+```json
+{
+  "odaInstalled": true,
+  "odaPath": "/opt/oda/ODAFileConverter",
+  "odaRunnable": false,
+  "odaDetail": "present but cannot start: qt.qpa.xcb: could not connect to display"
+}
+```
+
+A mount missing its shared libraries, or one that lost the execute bit, is
+present and useless — and the symptom is not an error but DWG conversion quietly
+staying at LibreDWG fidelity. The converter therefore runs ODA once at startup
+against an empty directory and reports what happened, so a bad mount is caught
+at deploy rather than months later in a drawing nobody can explain.

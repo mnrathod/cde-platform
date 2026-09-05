@@ -192,20 +192,31 @@ If it's not running, the app falls back to the built-in Java DXF parser automati
 is in no Debian or Ubuntu archive — build it from source, or use the Docker
 setup above, which does that for you.
 
-**ODA File Converter** is optional and cannot be bundled: its download is
-registration-gated and its licence forbids redistribution. To use it, mount
-the extracted install and set `ODA_PATH`:
+**ODA File Converter** gives higher-fidelity DWG conversion and is tried before
+LibreDWG whenever it is present. The binary cannot be bundled — its download is
+registration-gated and its licence forbids redistribution (`docs/licences.md`) —
+so you supply it and the image supplies everything else, including the virtual
+display it opens even in console mode. Mount it and nothing more:
 
 ```yaml
 converter:
   volumes:
     - ./vendor/oda:/opt/oda:ro
-  environment:
-    ODA_PATH: /opt/oda/ODAFileConverter
 ```
 
-ODA is a Qt application and needs a display even in console mode, so wrap it
-with `xvfb-run -a`. Without `ODA_PATH`, DWG falls back to LibreDWG.
+`/opt/oda` is searched by default; mount it elsewhere and set `ODA_PATH` to the
+directory or the binary. Without it, DWG falls back to LibreDWG and works.
+
+Confirm it is actually usable rather than merely mounted — the two differ, and
+the difference is silent:
+
+```bash
+curl -s localhost:5001/health | jq '{odaInstalled, odaRunnable, odaDetail}'
+```
+
+`odaRunnable: false` means the binary was found and could not start — usually a
+mount missing its shared libraries or its execute bit. DWG still converts, at
+LibreDWG fidelity, which is why nothing else tells you.
 
 ---
 

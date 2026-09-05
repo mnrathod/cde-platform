@@ -185,20 +185,127 @@ def libreoffice_to_pdf(file_path: str) -> dict:
 # ══════════════════════════════════════════════════════════════
 #  ODA FILE CONVERTER
 # ══════════════════════════════════════════════════════════════
+ODA_BINARY_NAME = "ODAFileConverter.exe" if IS_WINDOWS else "ODAFileConverter"
+
+
+def _oda_candidate(path: str):
+    """
+    Resolve one configured location to a runnable binary.
+
+    Accepts the binary or the directory holding it, because both are natural
+    things to point ODA_PATH at and half of them silently found nothing
+    before. Executability is checked rather than existence: a mount that
+    dropped the execute bit is the commonest way this arrives broken, and
+    "the file is there" is not the question worth answering.
+    """
+    if not path:
+        return None
+    if os.path.isdir(path):
+        path = os.path.join(path, ODA_BINARY_NAME)
+    if os.path.isfile(path) and os.access(path, os.X_OK):
+        return path
+    return None
+
+
 def find_oda():
     if IS_WINDOWS:
         for base in [r"C:\Program Files\ODA", r"C:\Program Files (x86)\ODA"]:
             if not os.path.isdir(base):
                 continue
             for entry in sorted(os.listdir(base), reverse=True):
-                exe = os.path.join(base, entry, "ODAFileConverter.exe")
-                if os.path.isfile(exe):
-                    return exe
-    for p in ["/usr/bin/ODAFileConverter", "/usr/local/bin/ODAFileConverter",
-              os.environ.get("ODA_PATH", "")]:
-        if p and os.path.isfile(p):
-            return p
-    return shutil.which("ODAFileConverter")
+                found = _oda_candidate(os.path.join(base, entry))
+                if found:
+                    return found
+
+    for path in [os.environ.get("ODA_PATH", ""),
+                 "/opt/oda", "/usr/bin/ODAFileConverter",
+                 "/usr/local/bin/ODAFileConverter"]:
+        found = _oda_candidate(path)
+        if found:
+            return found
+    return shutil.which(ODA_BINARY_NAME)
+
+
+def oda_launch_prefix() -> list:
+    """
+    What has to run in front of ODA for it to start on a headless host.
+
+    ODA File Converter is a Qt application and opens a display even when
+    converting from the command line, so on a container with no X server it
+    aborts before reading its arguments. Wrapping it in a virtual framebuffer
+    is the whole fix, and doing it here rather than in a deployment note is
+    what makes a mounted ODA work rather than merely be configured.
+
+    Returns an empty prefix where a display already exists, so a developer
+    running this on a desktop is not put behind an unnecessary X server.
+    """
+    if IS_WINDOWS or os.environ.get("DISPLAY"):
+        return []
+    xvfb_run = shutil.which("xvfb-run")
+    if not xvfb_run:
+        return []
+    # -a picks a free display number: two conversions running at once would
+    # otherwise collide on :99 and one would fail for a reason that has
+    # nothing to do with its drawing.
+    return [xvfb_run, "-a"]
+
+
+def probe_oda(timeout: int = 30) -> dict:
+    """
+    Whether ODA can actually run here, not merely whether it is present.
+
+    The two differ constantly: an install mounted without its shared
+    libraries, without the execute bit, or onto a host with no display is
+    present and unusable. Finding that out on the first DWG a customer
+    uploads — where it looks like a bad drawing — is the failure this exists
+    to prevent, so it is answered at startup and reported on /health.
+
+    Run against an empty directory: ODA is asked to convert nothing, which
+    exercises process start, library loading and the display without needing
+    a DWG to hand.
+    """
+    oda = find_oda()
+    if not oda:
+        return {"installed": False, "runnable": False, "path": None,
+                "detail": "not configured — DWG falls back to LibreDWG"}
+
+    prefix = oda_launch_prefix()
+    in_dir, out_dir = make_temp_dir(), make_temp_dir()
+    try:
+        rc, stdout, stderr = run_cmd(
+            prefix + [oda, in_dir, out_dir, "ACAD2018", "DXF", "0", "0"],
+            timeout=timeout)
+        # The exit code is not the signal: ODA exits non-zero for an empty
+        # input directory on some builds. A display failure is what matters
+        # and it says so on stderr.
+        output = f"{stdout}\n{stderr}".lower()
+        broken = any(marker in output for marker in
+                     ("cannot connect to x server", "could not connect to display",
+                      "qt platform plugin", "no display", "error while loading shared"))
+        if broken:
+            return {"installed": True, "runnable": False, "path": oda,
+                    "detail": f"present but cannot start: {stderr.strip()[:200]}"}
+        return {"installed": True, "runnable": True, "path": oda,
+                "detail": "headless via xvfb" if prefix else "native display"}
+    except Exception as e:
+        return {"installed": True, "runnable": False, "path": oda,
+                "detail": f"present but could not be launched: {e}"}
+    finally:
+        safe_rmtree(in_dir)
+        safe_rmtree(out_dir)
+
+
+# Probed once. Running ODA on every health poll would cost a process start
+# every 30 seconds to answer a question whose answer only changes when the
+# deployment does.
+_ODA_STATUS = None
+
+
+def oda_status(refresh: bool = False) -> dict:
+    global _ODA_STATUS
+    if _ODA_STATUS is None or refresh:
+        _ODA_STATUS = probe_oda()
+    return _ODA_STATUS
 
 
 def dwg_via_oda(dwg_path: str, render=None) -> dict:
@@ -228,11 +335,15 @@ def dwg_via_oda(dwg_path: str, render=None) -> dict:
         print(f"[ODA] Output dir:    {out_dir}", flush=True)
         print(f"[ODA] Executable:    {oda}", flush=True)
 
+        # Prepended once, outside the loop: the display wrapper is a property
+        # of the host, not of the DWG version being attempted.
+        prefix = oda_launch_prefix()
+
         logs = []
         for version in ["ACAD2018", "ACAD2013", "ACAD2010", "ACAD2007"]:
             # ODA CLI: <inputDir> <outputDir> <version> <type> <recurse> <audit>
             # Pass as list — Python/Windows handles quoting for spaces automatically
-            cmd = [oda, in_dir, out_dir, version, "DXF", "0", "1"]
+            cmd = prefix + [oda, in_dir, out_dir, version, "DXF", "0", "1"]
             rc, stdout, stderr = run_cmd(cmd, timeout=120)
             logs.append(f"v={version} rc={rc} err={stderr[:150]}")
 
@@ -998,9 +1109,16 @@ def convert(file_path: str, content_type: str = "", target_format: str = "") -> 
         if r.get("success"):
             r["convertedBy"] = "LibreDWG"; r["dwgVersion"] = version; return r
 
+        # This payload reaches the person whose drawing would not open, so
+        # `odaInstalled` answers their question — is ODA available to convert
+        # this — rather than ours. A binary that is mounted and cannot start
+        # is not available, and reporting it as installed sends them looking
+        # for a fault in the drawing.
+        oda = oda_status()
         return {"success": False, "error": "DWG_NEED_CONVERTER",
                 "dwgVersion": version,
-                "odaInstalled": find_oda() is not None,
+                "odaInstalled": oda["runnable"],
+                "odaDetail": oda["detail"],
                 "libredwgInstalled": find_dwg2dxf() is not None,
                 "odaError": oda_err,
                 "libredwgError": r.get("error", "")}
@@ -1058,12 +1176,17 @@ class Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path == "/health":
             lo   = find_libreoffice()
             tess = find_tesseract()
+            oda  = oda_status()
             self._json(200, {
                 "status": "ok", "platform": platform.system(),
                 "ezdxf": EZDXF_OK,
                 "ezdxfVersion": ezdxf.__version__ if EZDXF_OK else None,
                 "libreoffice": lo is not None, "libreofficePath": lo,
-                "odaInstalled": find_oda() is not None, "odaPath": find_oda(),
+                # Both fields, because they answer different questions and the
+                # gap between them is where a mounted ODA goes wrong: installed
+                # says a binary was found, runnable says it started.
+                "odaInstalled": oda["installed"], "odaPath": oda["path"],
+                "odaRunnable": oda["runnable"], "odaDetail": oda["detail"],
                 "libredwgInstalled": find_dwg2dxf() is not None,
                 "tesseractInstalled": tess is not None, "tesseractPath": tess,
             })
@@ -3288,8 +3411,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     lo    = find_libreoffice()
-    oda   = find_oda()
     libre = find_dwg2dxf()
+    # Probed at startup rather than on first use, so an ODA that is mounted
+    # but cannot run is a line in the boot log instead of a drawing that
+    # quietly came out at LibreDWG fidelity months later.
+    oda   = oda_status()
 
     tess  = find_tesseract()
 
@@ -3303,7 +3429,9 @@ if __name__ == "__main__":
 
     print(f"CDE Converter  |  {platform.system()}  |  ezdxf {ezdxf.__version__}  |  port {PORT}")
     print(f"  LibreOffice : {lo   or 'NOT FOUND'}")
-    print(f"  ODA         : {oda  or 'NOT FOUND'}")
+    print(f"  ODA         : {oda['path'] or 'not configured'}"
+          f"{'' if not oda['installed'] else ('  [ok] ' if oda['runnable'] else '  [UNUSABLE] ')}"
+          f"{oda['detail'] if oda['installed'] else '— DWG uses LibreDWG'}")
     print(f"  LibreDWG    : {libre or 'not found'}")
     print(f"  Tesseract   : {tess or 'NOT FOUND — scanned PDF OCR disabled'}")
     print(f"  POST /convert  body: {{\"path\": \"<absolute_path>\", \"contentType\": \"<mime>\"}}")

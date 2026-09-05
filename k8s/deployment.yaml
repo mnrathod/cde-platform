@@ -51,6 +51,14 @@ spec:
         - name: uploads
           persistentVolumeClaim:
             claimName: cde-platform-uploads
+        # The ODA File Converter, supplied by the operator — it cannot be
+        # shipped in the image (docs/licences.md). A hostPath suits a fixed
+        # node; a ReadOnlyMany PVC or an init container that unpacks it from
+        # your own registry suits a real cluster.
+        # - name: oda
+        #   hostPath:
+        #     path: /opt/oda
+        #     type: Directory
         # The application's root filesystem is read-only, so the JVM needs
         # somewhere to put its own temporary files.
         - name: tmp
@@ -182,10 +190,20 @@ spec:
           env:
             - name: CONVERTER_PORT
               value: "5001"
+            # Higher-fidelity DWG conversion, tried before LibreDWG. The
+            # binary is not in the image — its licence forbids redistribution
+            # (docs/licences.md) — so supply it yourself and point this at
+            # the mount. /opt/oda is searched by default, so the volume below
+            # is enough on its own; this stays here for a mount elsewhere.
+            # - name: ODA_PATH
+            #   value: /opt/oda
 
           # /health reports whether LibreOffice, LibreDWG and Tesseract were
           # actually found, so a misbuilt image is caught here rather than on
-          # someone's first upload.
+          # someone's first upload. ODA additionally reports `odaRunnable`:
+          # it is probed at startup, because a mount without its libraries or
+          # its execute bit is present and unusable, and the symptom is DWG
+          # quietly staying at LibreDWG fidelity rather than an error.
           startupProbe:
             httpGet:
               path: /health
@@ -226,3 +244,8 @@ spec:
           volumeMounts:
             - name: uploads
               mountPath: /app/uploads
+            # Uncomment with the matching volume below to supply the ODA File
+            # Converter. Read-only: the converter runs it and never writes to it.
+            # - name: oda
+            #   mountPath: /opt/oda
+            #   readOnly: true

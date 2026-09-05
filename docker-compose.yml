@@ -33,11 +33,19 @@ services:
       - "5001"
     environment:
       CONVERTER_PORT: 5001
-      # Point this at a mounted ODA File Converter to get higher-fidelity
-      # DWG conversion; unset, DWG falls back to the bundled LibreDWG.
+      # Higher-fidelity DWG conversion. Point at the extracted ODA File
+      # Converter — the directory or the binary — and the image supplies
+      # everything else it needs, including the virtual display it opens
+      # even in console mode. Unset, DWG falls back to the bundled
+      # LibreDWG. ODA cannot be shipped in the image: its download is
+      # registration-gated and its licence forbids redistribution
+      # (docs/licences.md).
       ODA_PATH: ${ODA_PATH:-}
     volumes:
       - uploads:/app/uploads
+      # Uncomment alongside ODA_PATH, or mount at /opt/oda, which is
+      # searched by default and needs no environment variable:
+      # - ./vendor/oda:/opt/oda:ro
     healthcheck:
       # /health reports whether LibreOffice, LibreDWG and Tesseract were
       # actually found, so a bad image is caught here rather than on a
