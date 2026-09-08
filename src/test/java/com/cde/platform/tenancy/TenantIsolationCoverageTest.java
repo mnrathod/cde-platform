@@ -1,5 +1,6 @@
 package com.cde.platform.tenancy;
 
+import com.cde.platform.model.ConversionJob;
 import com.cde.platform.model.Tenant;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
@@ -50,6 +51,33 @@ class TenantIsolationCoverageTest {
      */
     private static final Set<Class<?>> NOT_TENANT_SCOPED = Set.of(Tenant.class);
 
+    /**
+     * Entities whose rows belong to a tenant but which cannot say so in Java.
+     *
+     * <p>{@link ConversionJob} lives in the {@code conversion-service} module,
+     * which has no dependency on this package — that is the point of the module
+     * (ADR 12), and it means the entity cannot implement {@link TenantScoped}
+     * or name {@link TenantAssigningListener}. It carries the same
+     * {@code tenant_id} column and the same policy; what it does differently is
+     * take the owner in its factory instead of receiving it from the listener,
+     * so a job with no owner cannot be constructed rather than being rejected
+     * at insert.
+     *
+     * <p>These stay inside every database-level assertion below. Exempting them
+     * from the interface and from the RLS check would be two different things,
+     * and only the first is warranted — {@code conversion_jobs} is exactly the
+     * kind of table where a leak matters.
+     */
+    private static final Set<Class<?>> SCOPED_BY_CONSTRUCTION = Set.of(ConversionJob.class);
+
+    /** Every entity whose rows belong to one tenant, however it says so. */
+    private List<Class<?>> tenantScopedEntities() {
+        return allEntities().stream()
+            .filter(type -> TenantScoped.class.isAssignableFrom(type)
+                         || SCOPED_BY_CONSTRUCTION.contains(type))
+            .collect(Collectors.toList());
+    }
+
     @Autowired JdbcTemplate jdbcTemplate;
 
     private List<Class<?>> allEntities() {
@@ -79,13 +107,14 @@ class TenantIsolationCoverageTest {
     void everyEntityImplementsTenantScoped() {
         List<String> unscoped = allEntities().stream()
             .filter(type -> !NOT_TENANT_SCOPED.contains(type))
+            .filter(type -> !SCOPED_BY_CONSTRUCTION.contains(type))
             .filter(type -> !TenantScoped.class.isAssignableFrom(type))
             .map(Class::getSimpleName)
             .toList();
 
         assertThat(unscoped)
-            .as("entities missing TenantScoped — add tenant_id and a policy, "
-                + "or add the class to NOT_TENANT_SCOPED with a reason")
+            .as("entities missing TenantScoped — add tenant_id and a policy, or add "
+                + "the class to NOT_TENANT_SCOPED or SCOPED_BY_CONSTRUCTION with a reason")
             .isEmpty();
     }
 
@@ -112,8 +141,7 @@ class TenantIsolationCoverageTest {
     @Test
     @DisplayName("every tenant-scoped table has RLS enabled, forced, and a policy")
     void everyTenantScopedTableIsProtectedInTheDatabase() {
-        List<String> unprotected = allEntities().stream()
-            .filter(TenantScoped.class::isAssignableFrom)
+        List<String> unprotected = tenantScopedEntities().stream()
             .map(TenantIsolationCoverageTest::tableNameOf)
             .filter(table -> !isFullyProtected(table))
             .toList();
@@ -134,6 +162,37 @@ class TenantIsolationCoverageTest {
              WHERE n.nspname = 'public' AND c.relname = ?
             """, Boolean.class, table);
         return Boolean.TRUE.equals(protectedTable);
+    }
+
+    @Test
+    @DisplayName("a construction-scoped table refuses a row with no owner")
+    void everyConstructionScopedTableRequiresItsOwner() {
+        // These entities have no listener to fall back on, so the column being
+        // NOT NULL with no default is the whole of the database's guarantee. A
+        // default would be worse than none: it would silently file an ownerless
+        // row under whichever tenant the default named.
+        List<String> permissive = SCOPED_BY_CONSTRUCTION.stream()
+            .map(TenantIsolationCoverageTest::tableNameOf)
+            .filter(table -> !requiresTenantId(table))
+            .toList();
+
+        assertThat(permissive)
+            .as("tenant_id must be NOT NULL with no default on a table whose entity "
+                + "cannot carry TenantAssigningListener")
+            .isEmpty();
+    }
+
+    private boolean requiresTenantId(String table) {
+        Boolean required = jdbcTemplate.queryForObject("""
+            SELECT a.attnotnull AND NOT EXISTS (
+                       SELECT 1 FROM pg_attrdef d
+                        WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum)
+              FROM pg_attribute a
+              JOIN pg_class c ON c.oid = a.attrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public' AND c.relname = ? AND a.attname = 'tenant_id'
+            """, Boolean.class, table);
+        return Boolean.TRUE.equals(required);
     }
 
     @Test

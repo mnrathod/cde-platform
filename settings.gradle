@@ -1,1 +1,14 @@
 rootProject.name = 'cde-platform'
+
+// The conversion service is a module rather than a package so the boundary is
+// enforced by the compiler instead of by a test. ConversionPackageBoundaryTest
+// reads imports and fails on the ones that should not exist; this makes those
+// imports impossible to write, because the classes are not on the classpath.
+//
+// api-conventions sits below both. It holds the handful of leaf classes that
+// the application and the conversion service both need in order to present the
+// same HTTP surface — the OpenAPI annotation constants and the not-found
+// exception. It exists so that neither of the two above it has to depend on
+// the other for them, which is the shape the dependency would otherwise take.
+include 'api-conventions'
+include 'conversion-service'

@@ -1,0 +1,115 @@
+// The conversion service: fetch a link somebody else chose, admit the bytes,
+// convert them, and report a job.
+//
+// What is NOT on this classpath is the point of the module. There is no
+// dependency on the application, so nothing here can reach a tenant, a user, a
+// project, a document or the CDE state machine — not because a test forbids it
+// but because the classes do not exist to import. ConversionCallers is how the
+// host tells this module who is calling; ADR 12 is why that matters.
+//
+// Deliberately not a Spring Boot application: no bootJar, no main class. It is
+// a library the host boots, which is what lets this platform run it in-process
+// today and a customer run it beside the viewer tomorrow without the code
+// knowing the difference.
+plugins {
+    id 'java-library'
+    id 'jacoco'
+    id 'io.spring.dependency-management'
+}
+
+group = 'com.cde'
+version = rootProject.version
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories { mavenCentral() }
+
+dependencyManagement {
+    imports { mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}" }
+}
+
+dependencies {
+    api project(':api-conventions')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // Content type by magic bytes, never by the extension or the header the
+    // caller sent (§5.13.3).
+    implementation 'org.apache.tika:tika-core:4.0.0'
+
+    // JUnit and AssertJ. No Testcontainers and no Spring context: every test
+    // that needs a real PostgreSQL is testing what the *host* does with this
+    // module — tenant isolation, RLS, the wired pipeline — and those stay in
+    // the application's suite, where the tenancy they assert on exists.
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Gradle 9 loads the JUnit Platform through its launcher and does not put
+    // one on the classpath itself; without this the executor fails to start
+    // and reports it as "test framework not available", which reads like a
+    // missing engine rather than a missing launcher.
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports { xml.required = true; html.required = true }
+}
+
+// The application's floors are in the root build file and measure only its own
+// source set, so moving 48 files here took them out of every count. A module
+// with no gate of its own is a module whose coverage can fall to nothing
+// without a build noticing — which is the situation this replaces.
+//
+// Same ratchet rule as the root: these are the measured figures, they go up
+// only, and lowering one to make a build pass should fail review. Note they
+// measure the unit tests alone; the integration tests that exercise this code
+// through the application still live in the root suite and are not counted
+// here, so the real figure is higher than the gate.
+def measuredLineFloor = '0.40'
+def measuredBranchFloor = '0.34'
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = measuredLineFloor.toBigDecimal()
+            }
+            limit {
+                counter = 'BRANCH'
+                value = 'COVEREDRATIO'
+                minimum = measuredBranchFloor.toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.named('check') { dependsOn jacocoTestCoverageVerification }
+
+// Spring resolves an unnamed @PathVariable or @RequestParam by the method
+// parameter's real name, which javac discards unless asked to keep it. The
+// Spring Boot Gradle plugin adds this to the project it is applied to — the
+// application — and these modules do not apply it, so every read endpoint
+// here answered 400 until this line existed. Declared per module rather than
+// injected from the root, because a build file that only works inside this
+// repository is not one a customer can extract.
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << '-parameters'
+}
+
+dependencyLocking { lockMode = LockMode.STRICT }
+['compileClasspath', 'runtimeClasspath',
+ 'testCompileClasspath', 'testRuntimeClasspath'].each { name ->
+    configurations.named(name) { resolutionStrategy.activateDependencyLocking() }
+}

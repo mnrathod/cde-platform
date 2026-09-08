@@ -67,7 +67,7 @@ class ConversionJobIsolationTest {
                 .build());
             UUID publicId = UUID.randomUUID();
             jobs.save(ConversionJob.submitted(
-                publicId, submitter.getId(), sourceHost, TargetFormat.PDF));
+                tenantId, publicId, submitter.getId(), sourceHost, TargetFormat.PDF));
             return publicId;
         });
     }

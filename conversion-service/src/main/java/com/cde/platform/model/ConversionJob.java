@@ -1,10 +1,7 @@
 package com.cde.platform.model;
 
-import com.cde.platform.tenancy.TenantAssigningListener;
-import com.cde.platform.tenancy.TenantScoped;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EntityListeners;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.GeneratedValue;
@@ -44,8 +41,7 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "conversion_jobs")
-@EntityListeners(TenantAssigningListener.class)
-public class ConversionJob implements TenantScoped {
+public class ConversionJob {
 
     /** Where a job can be, and what it can still become. */
     public enum Status {
@@ -69,8 +65,23 @@ public class ConversionJob implements TenantScoped {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tenant_id", nullable = false)
-    private Long tenantId;
+    /**
+     * Whoever the host says submitted this — a tenant on this platform, and
+     * something else on a host that has no tenants.
+     *
+     * <p>Set at construction rather than by a lifecycle listener, which is the
+     * whole reason this entity can live outside the platform. The listener
+     * exists so the Row-Level Security policy's {@code WITH CHECK} clause has a
+     * value to accept; requiring it in the factory meets that need without the
+     * entity knowing what a tenant is, and makes a job with no owner
+     * unconstructible rather than merely rejected on insert.
+     *
+     * <p>The column keeps the name {@code tenant_id}. It is named by the host's
+     * schema — the RLS policy reads that column — and renaming it here would
+     * change nothing about this class while breaking the control.
+     */
+    @Column(name = "tenant_id", nullable = false, updatable = false)
+    private Long callerId;
 
     /**
      * The identifier the API exposes. A sequential primary key in a URL invites
@@ -146,20 +157,23 @@ public class ConversionJob implements TenantScoped {
      * <p>Takes the host rather than the URL so there is no call site at which
      * the credential could be handed to something that persists it.
      */
-    public static ConversionJob submitted(UUID publicId,
+    public static ConversionJob submitted(long callerId,
+                                          UUID publicId,
                                           long submittedBy,
                                           String sourceHost,
                                           TargetFormat targetFormat) {
-        return submitted(publicId, submittedBy, sourceHost, targetFormat, null);
+        return submitted(callerId, publicId, submittedBy, sourceHost, targetFormat, null);
     }
 
     /** @param idempotencyKey the client's key, or null when it supplied none */
-    public static ConversionJob submitted(UUID publicId,
+    public static ConversionJob submitted(long callerId,
+                                          UUID publicId,
                                           long submittedBy,
                                           String sourceHost,
                                           TargetFormat targetFormat,
                                           String idempotencyKey) {
         ConversionJob job = new ConversionJob();
+        job.callerId = callerId;
         job.publicId = publicId;
         job.submittedBy = submittedBy;
         job.sourceHost = sourceHost;
@@ -274,14 +288,8 @@ public class ConversionJob implements TenantScoped {
         return id;
     }
 
-    @Override
-    public Long getTenantId() {
-        return tenantId;
-    }
-
-    @Override
-    public void setTenantId(Long tenantId) {
-        this.tenantId = tenantId;
+    public Long getCallerId() {
+        return callerId;
     }
 
     public UUID getPublicId() {

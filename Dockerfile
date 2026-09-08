@@ -11,11 +11,21 @@ WORKDIR /app
 
 # Copy the build definition first so the dependency-resolution layer is
 # cached and only re-runs when the build files actually change.
-COPY gradlew settings.gradle build.gradle ./
+#
+# gradle.properties carries the Spring Boot version the plugin block reads,
+# and the lockfiles are what LockMode.STRICT resolves against — a build
+# without them fails naming dependency locking rather than the missing file.
+# Every project's build file is copied here, and every project's sources
+# below, because settings.gradle includes three of them.
+COPY gradlew settings.gradle build.gradle gradle.properties gradle.lockfile ./
 COPY gradle ./gradle
+COPY api-conventions/build.gradle api-conventions/gradle.lockfile ./api-conventions/
+COPY conversion-service/build.gradle conversion-service/gradle.lockfile ./conversion-service/
 RUN chmod +x gradlew && ./gradlew dependencies --no-daemon > /dev/null 2>&1 || true
 
 COPY src ./src
+COPY api-conventions/src ./api-conventions/src
+COPY conversion-service/src ./conversion-service/src
 RUN ./gradlew bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre-alpine@sha256:974b08960c5d96694c780e65b2d5705268ab1e1ca1a0dd0caf4ba6c3fe34d699

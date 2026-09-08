@@ -132,3 +132,47 @@ state, and that inventory is the first task of the extraction.
 the product on the same integration contract as anyone else. That is the
 useful discipline: an API that is awkward for us will be awkward for them,
 and we will find out first.
+
+## Progress
+
+**The conversion service is now a Gradle module** — `conversion-service`,
+with `api-conventions` beneath it and the application above. It is still
+deployed in-process and still runs against this platform's schema, so nothing
+about how it is operated has changed. What changed is that the classes it
+must not depend on are no longer on its compile classpath, so the dependency
+that used to be forbidden by a test is now one that does not build.
+
+That distinction earned itself immediately. `ConversionPackageBoundaryTest`
+had passed on every commit while four dependencies on platform tenancy sat in
+the code: `ConversionJob` implemented `TenantScoped` and carried
+`TenantAssigningListener`, `ChunkedUploadStaging` called
+`TenantContext.requireTenantId()` in a package the test did not scan, and
+`ConversionJobController` named an exception by its fully-qualified name with
+no import for the test's regex to find. The compiler named all four in one
+run. The test has been widened for each of them, but the general lesson is
+the one worth keeping: a test that enumerates forbidden names tests the names
+it enumerates.
+
+**How the caller reaches the module.** `ConversionCallers` — a five-method
+interface the module owns, implemented on the platform side by
+`TenantConversionCallers`, which maps a caller to a tenant. The mapping is
+one line each way here because the two concepts genuinely coincide on this
+platform; the interface exists because they will not coincide on a host that
+has no tenants.
+
+`ConversionJob` takes its owner in its factory rather than receiving it from
+an entity listener. The listener existed so the Row-Level Security policy's
+`WITH CHECK` clause had a value to accept; requiring it at construction meets
+that need without the entity knowing what a tenant is, and makes an ownerless
+job unconstructible rather than merely rejected on insert. The column is
+still `tenant_id` — it is named by the host's schema, and the policy reads
+it. `TenantIsolationCoverageTest` records this as `SCOPED_BY_CONSTRUCTION`:
+exempt from the interface, still inside every database-level assertion, plus
+a new one that the column is `NOT NULL` with no default.
+
+**What is still to do before extraction.** The module has no `main` class and
+no `bootJar`; it is a library the host boots. Standing it up as a service of
+its own needs a machine-authentication scheme — an API key or OAuth 2.0
+client credentials scoped to `document:convert` — its own Flyway migrations
+for `conversion_jobs`, and its own attribution file. None of those is
+started, and the ADR 13 DWG position still blocks distribution regardless.

@@ -171,12 +171,21 @@ ext.readLicencesFromPom = { Project project, String group, String name, String v
 /**
  * Resolves the runtime classpath into a sorted list of components, each with
  * its SPDX identifiers.
+ *
+ * <p>Our own modules are skipped. §17.2 is an obligation to third parties —
+ * their licence text, their copyright notice, in a file we ship — and
+ * {@code api-conventions} and {@code conversion-service} are neither third
+ * party nor separately licensed; they are this product, split across build
+ * units. Including them produced two UNDECLARED violations that no edit to
+ * docs/licences.md could honestly resolve, because the answer to "what licence
+ * is our code under" is the repository's own LICENSE.
  */
 ext.resolveRuntimeComponents = {
     def components = []
     configurations.runtimeClasspath.resolvedConfiguration
         .resolvedArtifacts
         .collect { it.moduleVersion.id }
+        .findAll { it.group != project.group }
         .unique { "${it.group}:${it.name}" }
         .sort { "${it.group}:${it.name}" }
         .each { id ->

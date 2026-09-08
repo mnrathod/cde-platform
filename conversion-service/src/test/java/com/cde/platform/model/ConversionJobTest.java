@@ -24,7 +24,18 @@ class ConversionJobTest {
 
     private static ConversionJob pending() {
         return ConversionJob.submitted(
-            UUID.randomUUID(), 42L, "files.example.test", TargetFormat.PDF);
+            7L, UUID.randomUUID(), 42L, "files.example.test", TargetFormat.PDF);
+    }
+
+    @Test
+    @DisplayName("cannot be built without an owner, so no row can exist unowned")
+    void carriesItsCaller() {
+        // The caller id used to be stamped on persist by the platform's entity
+        // listener, which meant an in-memory job had none and the invariant
+        // held only at the database. Requiring it here makes the unowned job
+        // unconstructible instead — and is what let this entity stop
+        // implementing the platform's TenantScoped.
+        assertThat(pending().getCallerId()).isEqualTo(7L);
     }
 
     private static ConversionJob running() {

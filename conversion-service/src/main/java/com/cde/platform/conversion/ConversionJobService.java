@@ -89,7 +89,8 @@ public class ConversionJobService {
         UUID publicId = UUID.randomUUID();
 
         ConversionJob job = jobs.save(ConversionJob.submitted(
-            publicId, submittedBy, hostOf(sourceUrl), targetFormat, blankToNull(idempotencyKey)));
+            callerId, publicId, submittedBy, hostOf(sourceUrl), targetFormat,
+            blankToNull(idempotencyKey)));
 
         // Enqueued after the row exists, so a worker that picks it up
         // immediately finds something to update. The reverse order races: a

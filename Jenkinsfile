@@ -163,7 +163,11 @@ pipeline {
                     }
                     post {
                         always {
-                            junit testResults: 'build/test-results/test/*.xml',
+                            // Every project's results, not the root's. The
+                            // conversion service is a module now; a glob that
+                            // named one directory would report the suite as
+                            // passing while showing none of its results.
+                            junit testResults: '**/build/test-results/test/*.xml',
                                   allowEmptyResults: false
                             publishHTML(target: [
                                 reportDir: 'build/reports/jacoco/test/html',

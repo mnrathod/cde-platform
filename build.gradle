@@ -2,7 +2,10 @@ plugins {
     id 'java'
     // Core Gradle plugin, versioned with Gradle itself — nothing to pin.
     id 'jacoco'
-    id 'org.springframework.boot' version '4.1.1'
+    // Version from gradle.properties, because the subprojects need the same
+    // number to import the BOM and a second literal here is a number that can
+    // drift without anything noticing.
+    id 'org.springframework.boot' version "${springBootVersion}"
     id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -54,8 +57,13 @@ dependencyLocking {
 // --write-locks only rewrites the configurations the invoked task actually
 // resolves, so `./gradlew build --write-locks` leaves the rest stale. This
 // resolves all four in one pass, which is why it is the documented command.
+//
+// It walks every project, not just this one. Under LockMode.STRICT a locked
+// configuration with no lock entry fails the build, so a subproject this task
+// skipped would not be quietly unlocked — it would not compile at all, with an
+// error naming locking rather than the missing run.
 tasks.register('resolveAndLockAll') {
-    description = 'Resolves every locked configuration so --write-locks covers all of them.'
+    description = 'Resolves every locked configuration in every project so --write-locks covers all of them.'
     group = 'help'
     notCompatibleWithConfigurationCache('Resolves configurations at execution time')
     doFirst {
@@ -66,11 +74,23 @@ tasks.register('resolveAndLockAll') {
         }
     }
     doLast {
-        configurations.findAll { it.canBeResolved }.each { it.resolve() }
+        rootProject.allprojects.each { project ->
+            project.configurations.findAll { it.canBeResolved }.each { it.resolve() }
+        }
     }
 }
 
 dependencies {
+    // The conversion service, hosted in-process. This direction is the only
+    // one that exists: it does not depend on the application, which is what
+    // lets a customer run it beside the viewer instead (ADR 12).
+    implementation project(':conversion-service')
+    // Declared even though :conversion-service exposes it via `api`. Twenty-odd
+    // files here use the OpenAPI annotation constants and the not-found
+    // exception, and inheriting them through a module that could stop needing
+    // them would break this compile for a reason nowhere near the change.
+    implementation project(':api-conventions')
+
     // Web
     implementation 'org.springframework.boot:spring-boot-starter-web'
     // Jackson 3. Boot 4's JacksonAutoConfiguration produces a
@@ -252,7 +272,12 @@ tasks.register('passwordHashingPolicyCheck') {
     group = 'verification'
     description = 'Fails on a bare digest over a password, or an encoder built outside PasswordEncoderConfig.'
 
-    def sources = fileTree('src/main/java') { include '**/*.java' }
+    // Every module, not just this one — a rule that stops at the project
+    // boundary is a rule the next module is exempt from.
+    def sources = files('src/main/java',
+                        'api-conventions/src/main/java',
+                        'conversion-service/src/main/java')
+            .asFileTree.matching { include '**/*.java' }
     def encoderConfig = 'PasswordEncoderConfig.java'
     inputs.files sources
 
@@ -340,10 +365,16 @@ tasks.named('test') {
 /**
  * Coverage floors, as a ratchet.
  *
- * §14 requires 90% line and 85% branch. Measured on 2026-08-27 the codebase
- * is at 66.2% line and 47.9% branch, so switching the required figures on
+ * §14 requires 90% line and 85% branch. Measured on 2026-09-08 this project
+ * is at 70.0% line and 53.3% branch, so switching the required figures on
  * today would leave main permanently red — and a gate that is always red is
  * a gate everyone learns to ignore, which is worse than no gate.
+ *
+ * Those numbers went up from 66.2/47.9 without a test being written. The
+ * conversion service moved to its own module and took 48 of the less-covered
+ * files with it, so the denominator shrank — read this as an accounting
+ * change, not as progress. The code it left with is gated by the same ratchet
+ * in conversion-service/build.gradle, at the figures it actually measures.
  *
  * So the build enforces the *measured floor* instead. Coverage cannot fall,
  * and each improvement is banked by raising these numbers in the same commit.
@@ -359,8 +390,8 @@ tasks.named('test') {
  * number without testing anything more, and the point of the number is to be
  * uncomfortable while it is low.
  */
-def measuredLineFloor = '0.66'
-def measuredBranchFloor = '0.47'
+def measuredLineFloor = '0.70'
+def measuredBranchFloor = '0.53'
 def targetLine = '0.90'
 def targetBranch = '0.85'
 

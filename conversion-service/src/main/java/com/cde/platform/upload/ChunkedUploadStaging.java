@@ -1,6 +1,6 @@
 package com.cde.platform.upload;
 
-import com.cde.platform.tenancy.TenantContext;
+import com.cde.platform.conversion.ConversionCallers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -67,14 +67,17 @@ public class ChunkedUploadStaging {
 
     private final Path stagingRoot;
     private final UploadStagingProperties limits;
+    private final ConversionCallers callers;
 
     /** When the expiry sweep last ran, so it runs rarely. */
     private final AtomicLong lastSweepEpochMillis = new AtomicLong();
 
     public ChunkedUploadStaging(@Value("${cde.storage.upload-dir}") String uploadDir,
-                                UploadStagingProperties limits) {
+                                UploadStagingProperties limits,
+                                ConversionCallers callers) {
         this.stagingRoot = Path.of(uploadDir).resolve("staging");
         this.limits = limits;
+        this.callers = callers;
         for (int stripe = 0; stripe < LOCK_STRIPES; stripe++) {
             locks[stripe] = new Object();
         }
@@ -201,10 +204,14 @@ public class ChunkedUploadStaging {
      * <p>The client's identifier is hashed rather than used, so nothing it
      * contains — separators, dots, control characters — can influence where the
      * chunks land. There is no sanitising step to get wrong.
+     *
+     * <p>The caller id is in the digest material, not merely beside it: two
+     * callers who choose the same upload id must not land in the same
+     * directory, and a shared prefix with a per-caller subdirectory would let
+     * one of them see how many chunks the other had staged.
      */
     private Path stagingDirectoryFor(String uploadId, int totalChunks) {
-        long tenantId = TenantContext.requireTenantId();
-        String material = tenantId + ":" + uploadId + ":" + totalChunks;
+        String material = callers.requireCurrentCallerId() + ":" + uploadId + ":" + totalChunks;
 
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")

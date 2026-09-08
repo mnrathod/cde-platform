@@ -157,7 +157,7 @@ class ConversionPipelineTest {
         return TenantContext.callAsTenant(tenantId, () -> {
             UUID publicId = UUID.randomUUID();
             jobs.save(ConversionJob.submitted(
-                publicId, userId, "127.0.0.1", TargetFormat.PDF));
+                tenantId, publicId, userId, "127.0.0.1", TargetFormat.PDF));
             return publicId;
         });
     }

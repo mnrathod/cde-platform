@@ -1,0 +1,54 @@
+// Leaf classes the application and the conversion service both need to present
+// the same HTTP surface. Nothing here may depend on either of them — that is
+// the whole point of the module, and the empty dependency list is what keeps
+// it true.
+plugins {
+    id 'java-library'
+    id 'io.spring.dependency-management'
+}
+
+group = 'com.cde'
+version = rootProject.version
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories { mavenCentral() }
+
+dependencyManagement {
+    imports { mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}" }
+}
+
+dependencies {
+    // Swagger annotations only, and only for StandardErrorResponses — which is
+    // a meta-annotation built from them. ApiDocumentation is String constants
+    // and ResourceNotFoundException is a bare RuntimeException; neither needs
+    // anything.
+    //
+    // Not a new dependency: the application already resolves this on all four
+    // classpaths, transitively through springdoc-openapi 3.1.0, which is where
+    // the version comes from. The Boot BOM does not manage it, so it has to be
+    // written down here — and it must stay equal to what springdoc pulls in the
+    // root, or Gradle's conflict resolution silently picks the higher of the
+    // two and this module compiles against something the application does not
+    // run. `grep swagger-annotations gradle.lockfile` is the check.
+    api 'io.swagger.core.v3:swagger-annotations-jakarta:2.2.52'
+}
+
+// Spring resolves an unnamed @PathVariable or @RequestParam by the method
+// parameter's real name, which javac discards unless asked to keep it. The
+// Spring Boot Gradle plugin adds this to the project it is applied to — the
+// application — and these modules do not apply it, so every read endpoint
+// here answered 400 until this line existed. Declared per module rather than
+// injected from the root, because a build file that only works inside this
+// repository is not one a customer can extract.
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << '-parameters'
+}
+
+dependencyLocking { lockMode = LockMode.STRICT }
+['compileClasspath', 'runtimeClasspath',
+ 'testCompileClasspath', 'testRuntimeClasspath'].each { name ->
+    configurations.named(name) { resolutionStrategy.activateDependencyLocking() }
+}
