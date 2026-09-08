@@ -157,8 +157,13 @@ public class ViewerController {
                 } else {
                     resp.put("version", s(result.error()).replace("DWG_BINARY:",""));
                     resp.put("odaInstalled", false);
-                    resp.put("libredwgInstalled", false);
                 }
+                // The converter stopped reporting this when ADR 13 removed the
+                // LibreDWG binary. Filled in here rather than left absent
+                // because dropping a property from a released response is a
+                // breaking change (§3.4); it is deprecated in the schema with
+                // a sunset date and is always false.
+                resp.putIfAbsent("libredwgInstalled", false);
                 return ResponseEntity.ok(resp);
             }
 

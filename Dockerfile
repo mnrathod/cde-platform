@@ -2,8 +2,8 @@
 #  CDE Platform — Spring Boot application
 #
 #  Document/CAD conversion lives in the separate converter image
-#  (converter/Dockerfile), which carries LibreOffice, LibreDWG and
-#  Tesseract. This image talks to it over HTTP via CDE_CONVERTER_URL.
+#  (converter/Dockerfile), which carries LibreOffice and Tesseract.
+#  This image talks to it over HTTP via CDE_CONVERTER_URL.
 # ══════════════════════════════════════════════════════════════
 
 FROM eclipse-temurin:21-jdk-alpine@sha256:6ea5548706b60ac0a602eaf48af74792cbab012d90e811ca8db6184b16b5c3d6 AS builder

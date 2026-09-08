@@ -6,9 +6,9 @@
 ## Context
 
 The product converts DWG, DXF, Office documents and scanned PDFs, and scans
-every upload for malware. The best tools for those jobs — LibreDWG,
-LibreOffice, Tesseract, ClamAV — are all GPL or MPL licensed and are all
-heavyweight native parsers.
+every upload for malware. The best tools for those jobs — LibreOffice,
+Tesseract, ClamAV, and LibreDWG for DWG — are all GPL or MPL licensed and are
+all heavyweight native parsers.
 
 Two independent constraints point the same way.
 
@@ -43,11 +43,18 @@ Everything untrusted is parsed out of process.
 |---|---|---|
 | ClamAV | GPL-2.0 | INSTREAM over a TCP socket |
 | LibreOffice | MPL-2.0 | `soffice --headless` subprocess |
-| LibreDWG `dwg2dxf` | GPL-3.0 | subprocess |
 | Tesseract | Apache-2.0 | subprocess |
 
 None is linked, embedded, or bundled into the application artifact. Mere
 aggregation, not a combined work.
+
+> **Amended 2026-09-08.** LibreDWG `dwg2dxf` (GPL-3.0, subprocess) was in
+> this table and is no longer in the image. Out-of-process kept its copyleft
+> away from our code and that reasoning held — but it did nothing about
+> *distributing the binary*, which GPL-3.0 §6 obliges separately, and ADR 12
+> turned the image into something we distribute. Removed by ADR 13; DWG now
+> goes through the operator-supplied ODA converter. The pattern this ADR
+> establishes is unchanged and still governs the tools that remain.
 
 ## Consequences
 

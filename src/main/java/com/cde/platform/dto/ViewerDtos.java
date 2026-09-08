@@ -171,13 +171,37 @@ public final class ViewerDtos {
                 example = "false")
         Boolean odaInstalled,
 
-        @Schema(description = "Whether LibreDWG is installed. `dwg_binary` only.", example = "true")
+        /**
+         * Always {@code false}. Deprecated, and kept only because removing a
+         * property from a released response is a breaking change (§3.4) that
+         * {@code oasdiff} would fail the build on.
+         *
+         * <p>ADR 13 removed the bundled LibreDWG binary: shipping a GPL-3.0
+         * executable inside a product customers install triggers §6, and the
+         * corresponding-source obligation travels with every copy. DWG now
+         * goes through the ODA File Converter alone, so read
+         * {@code odaInstalled} and {@code remedy} instead.
+         */
+        @Deprecated(since = "2026-09-08")
+        @Schema(description = "Always false. **Deprecated — sunset 2027-04-01.** LibreDWG is no "
+                            + "longer bundled (ADR 13); DWG conversion requires the ODA File "
+                            + "Converter. Read `odaInstalled` and `remedy` instead. "
+                            + "`dwg_binary` only.",
+                deprecated = true, example = "false")
         Boolean libredwgInstalled,
 
         @Schema(description = "Which DWG release the file is, where it could be read from the "
                             + "header. `dwg_binary` only.",
                 example = "AC1032")
         String version,
+
+        @Schema(description = "What the caller can do about a DWG that could not be converted, in "
+                            + "prose fit to show a person. `dwg_binary` only.",
+                example = "DWG requires the ODA File Converter, which cannot be redistributed and "
+                        + "so is not in this image. Download it from opendesign.com, mount the "
+                        + "extracted installation at /opt/oda (or set ODA_PATH), and restart. "
+                        + "Every other format — DXF, PDF, Office and IFC — works without it.")
+        String remedy,
 
         @Schema(description = "Whether LibreOffice is installed. `office_error` only.",
                 example = "true")

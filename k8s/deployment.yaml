@@ -190,20 +190,21 @@ spec:
           env:
             - name: CONVERTER_PORT
               value: "5001"
-            # Higher-fidelity DWG conversion, tried before LibreDWG. The
-            # binary is not in the image — its licence forbids redistribution
-            # (docs/licences.md) — so supply it yourself and point this at
+            # Required for DWG, and the only route to it since ADR 13
+            # removed the bundled LibreDWG. The binary is not in the image —
+            # its licence forbids redistribution (docs/licences.md) — so
+            # supply it yourself and point this at
             # the mount. /opt/oda is searched by default, so the volume below
             # is enough on its own; this stays here for a mount elsewhere.
             # - name: ODA_PATH
             #   value: /opt/oda
 
-          # /health reports whether LibreOffice, LibreDWG and Tesseract were
-          # actually found, so a misbuilt image is caught here rather than on
-          # someone's first upload. ODA additionally reports `odaRunnable`:
-          # it is probed at startup, because a mount without its libraries or
-          # its execute bit is present and unusable, and the symptom is DWG
-          # quietly staying at LibreDWG fidelity rather than an error.
+          # /health reports whether LibreOffice and Tesseract were actually
+          # found, so a misbuilt image is caught here rather than on someone's
+          # first upload. ODA additionally reports `odaRunnable`: it is probed
+          # at startup, because a mount without its libraries or its execute
+          # bit is present and unusable, and `odaInstalled` alone reports it
+          # as fine.
           startupProbe:
             httpGet:
               path: /health

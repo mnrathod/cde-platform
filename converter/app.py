@@ -187,6 +187,17 @@ def libreoffice_to_pdf(file_path: str) -> dict:
 # ══════════════════════════════════════════════════════════════
 ODA_BINARY_NAME = "ODAFileConverter.exe" if IS_WINDOWS else "ODAFileConverter"
 
+# What to tell someone whose DWG would not open. It travels in the failure
+# payload rather than living only in the documentation, because the person
+# who hits this is looking at an error, not at a README — and the previous
+# error, LIBREDWG_NOT_FOUND, named a tool that is no longer the answer.
+DWG_REMEDY = (
+    "DWG requires the ODA File Converter, which cannot be redistributed and so "
+    "is not in this image. Download it from opendesign.com, mount the extracted "
+    "installation at /opt/oda (or set ODA_PATH), and restart. Every other "
+    "format — DXF, PDF, Office and IFC — works without it."
+)
+
 
 def _oda_candidate(path: str):
     """
@@ -267,7 +278,7 @@ def probe_oda(timeout: int = 30) -> dict:
     oda = find_oda()
     if not oda:
         return {"installed": False, "runnable": False, "path": None,
-                "detail": "not configured — DWG falls back to LibreDWG"}
+                "detail": "not configured — DWG cannot be converted"}
 
     prefix = oda_launch_prefix()
     in_dir, out_dir = make_temp_dir(), make_temp_dir()
@@ -375,17 +386,6 @@ def dwg_via_oda(dwg_path: str, render=None) -> dict:
         safe_rmtree(out_dir)
 
 
-# ══════════════════════════════════════════════════════════════
-#  LibreDWG
-# ══════════════════════════════════════════════════════════════
-def find_dwg2dxf():
-    for p in ["/usr/bin/dwg2dxf", "/usr/local/bin/dwg2dxf",
-              r"C:\Program Files\LibreDWG\dwg2dxf.exe",
-              os.environ.get("DWG2DXF_PATH", "")]:
-        if p and os.path.isfile(p): return p
-    return shutil.which("dwg2dxf")
-
-
 def find_tesseract():
     """
     Locate the Tesseract OCR binary. Single source of truth — the same
@@ -406,25 +406,6 @@ def find_tesseract():
                 return p
     p = os.environ.get("TESSERACT_PATH", "")
     return p if p and os.path.isfile(p) else None
-
-
-def dwg_via_libredwg(dwg_path: str, render=None) -> dict:
-    """DWG -> DXF via LibreDWG, then rendered by {@code render} (see above)."""
-    render = render or render_dxf_string
-    tool = find_dwg2dxf()
-    if not tool:
-        return {"success": False, "error": "LIBREDWG_NOT_FOUND"}
-    abs_dwg = str(Path(dwg_path).resolve())
-    tmp = make_temp_dir()
-    try:
-        out_dxf = os.path.join(tmp, "out.dxf")
-        rc, stdout, stderr = run_cmd([tool, "-o", out_dxf, abs_dwg], timeout=60)
-        if not os.path.exists(out_dxf):
-            return {"success": False,
-                    "error": f"dwg2dxf no output (rc={rc}). {stderr[:200]}"}
-        return render(Path(out_dxf).read_text(encoding="utf-8", errors="replace"))
-    finally:
-        safe_rmtree(tmp)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1103,25 +1084,25 @@ def convert(file_path: str, content_type: str = "", target_format: str = "") -> 
         r = dwg_via_oda(abs_path, render)
         if r.get("success"):
             r["convertedBy"] = "ODA"; r["dwgVersion"] = version; return r
-        oda_err = r.get("error", "")
 
-        r = dwg_via_libredwg(abs_path, render)
-        if r.get("success"):
-            r["convertedBy"] = "LibreDWG"; r["dwgVersion"] = version; return r
-
-        # This payload reaches the person whose drawing would not open, so
-        # `odaInstalled` answers their question — is ODA available to convert
-        # this — rather than ours. A binary that is mounted and cannot start
-        # is not available, and reporting it as installed sends them looking
-        # for a fault in the drawing.
+        # ODA is the only DWG route. There was a LibreDWG fallback here and
+        # it is gone with the binary — see ADR 13: shipping a GPL-3.0
+        # executable inside a product customers install triggers §6, and the
+        # obligation travels with every copy.
+        #
+        # This payload reaches the person whose drawing would not open, so it
+        # answers their question — can this be converted here, and if not what
+        # do I do — rather than ours. `odaInstalled` reports *runnable*: a
+        # binary that is mounted and cannot start is not available, and
+        # reporting it as installed sends them looking for a fault in the
+        # drawing.
         oda = oda_status()
         return {"success": False, "error": "DWG_NEED_CONVERTER",
                 "dwgVersion": version,
                 "odaInstalled": oda["runnable"],
                 "odaDetail": oda["detail"],
-                "libredwgInstalled": find_dwg2dxf() is not None,
-                "odaError": oda_err,
-                "libredwgError": r.get("error", "")}
+                "remedy": DWG_REMEDY,
+                "odaError": r.get("error", "")}
 
     # DXF -> SVG for the viewer, or -> PDF for an export
     if ext == "dxf" or "dxf" in ct:
@@ -1187,7 +1168,6 @@ class Handler(BaseHTTPRequestHandler):
                 # says a binary was found, runnable says it started.
                 "odaInstalled": oda["installed"], "odaPath": oda["path"],
                 "odaRunnable": oda["runnable"], "odaDetail": oda["detail"],
-                "libredwgInstalled": find_dwg2dxf() is not None,
                 "tesseractInstalled": tess is not None, "tesseractPath": tess,
             })
         else:
@@ -1396,14 +1376,12 @@ def compare_files(path1: str, path2: str, ct1: str = "", ct2: str = "") -> dict:
 
 # ── CAD Comparison (DXF/DWG) ──────────────────────────────────
 def _load_dxf_for_compare(path: str, ext: str):
-    """Load a DXF or DWG file, converting DWG via ODA if needed."""
+    """Load a DXF or DWG file, converting DWG via ODA where needed."""
     if ext == 'dwg':
         # Convert to DXF first
         r = dwg_via_oda(path)
         if not r.get('success'):
-            r2 = dwg_via_libredwg(path)
-            if not r2.get('success'):
-                return None, f"Cannot read DWG: {r.get('error','')}"
+            return None, f"Cannot read DWG: {r.get('error','')}. {DWG_REMEDY}"
         # Write DXF to temp file
         import ezdxf as _ezdxf
         tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.dxf',
@@ -3411,10 +3389,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     lo    = find_libreoffice()
-    libre = find_dwg2dxf()
     # Probed at startup rather than on first use, so an ODA that is mounted
     # but cannot run is a line in the boot log instead of a drawing that
-    # quietly came out at LibreDWG fidelity months later.
+    # fails months later for a reason nobody connects to the mount.
     oda   = oda_status()
 
     tess  = find_tesseract()
@@ -3429,10 +3406,9 @@ if __name__ == "__main__":
 
     print(f"CDE Converter  |  {platform.system()}  |  ezdxf {ezdxf.__version__}  |  port {PORT}")
     print(f"  LibreOffice : {lo   or 'NOT FOUND'}")
-    print(f"  ODA         : {oda['path'] or 'not configured'}"
+    print(f"  ODA (DWG)   : {oda['path'] or 'not configured'}"
           f"{'' if not oda['installed'] else ('  [ok] ' if oda['runnable'] else '  [UNUSABLE] ')}"
-          f"{oda['detail'] if oda['installed'] else '— DWG uses LibreDWG'}")
-    print(f"  LibreDWG    : {libre or 'not found'}")
+          f"{oda['detail'] if oda['installed'] else '— DWG disabled, every other format works'}")
     print(f"  Tesseract   : {tess or 'NOT FOUND — scanned PDF OCR disabled'}")
     print(f"  POST /convert  body: {{\"path\": \"<absolute_path>\", \"contentType\": \"<mime>\"}}")
     print(flush=True)

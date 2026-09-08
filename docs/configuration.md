@@ -1263,9 +1263,15 @@ must agree with it.
 | Secret | no |
 | Environment | `ODA_PATH` |
 
-Where the **ODA File Converter** is mounted. It converts DWG to DXF at higher
-fidelity than the bundled LibreDWG and is tried first when present; unset, DWG
-still works and falls back to LibreDWG.
+Where the **ODA File Converter** is mounted. It converts DWG to DXF and is the
+only DWG route: unset, DWG conversion fails with `DWG_NEED_CONVERTER` and a
+`remedy` naming this variable. Every other format works without it — DXF
+renders through ezdxf directly, and Office, PDF and IFC never use a DWG
+converter.
+
+There was a bundled LibreDWG fallback until 2026-09-08, removed by ADR 13
+because shipping a GPL-3.0 binary in a distributed product obliges a
+corresponding-source offer to every recipient.
 
 **The binary is not in the image and cannot be**: its download is
 registration-gated and its licence forbids redistribution, so it is supplied by
@@ -1289,7 +1295,8 @@ answer different questions, and the gap between them is where this goes wrong:
 ```
 
 A mount missing its shared libraries, or one that lost the execute bit, is
-present and useless — and the symptom is not an error but DWG conversion quietly
-staying at LibreDWG fidelity. The converter therefore runs ODA once at startup
-against an empty directory and reports what happened, so a bad mount is caught
-at deploy rather than months later in a drawing nobody can explain.
+present and useless — and `odaInstalled` alone reports it as fine, which sends
+whoever uploaded the drawing looking for a fault in the file. The converter
+therefore runs ODA once at startup against an empty directory and reports what
+happened, so a bad mount is caught at deploy rather than on someone's first
+DWG.

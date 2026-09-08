@@ -36,10 +36,12 @@ services:
       # Higher-fidelity DWG conversion. Point at the extracted ODA File
       # Converter — the directory or the binary — and the image supplies
       # everything else it needs, including the virtual display it opens
-      # even in console mode. Unset, DWG falls back to the bundled
-      # LibreDWG. ODA cannot be shipped in the image: its download is
-      # registration-gated and its licence forbids redistribution
-      # (docs/licences.md).
+      # even in console mode. Unset, DWG does not convert at all — the
+      # bundled LibreDWG fallback was removed by ADR 13, because shipping
+      # a GPL-3.0 binary in a distributed product obliges a
+      # corresponding-source offer to every recipient. ODA cannot be
+      # shipped either: its download is registration-gated and its licence
+      # forbids redistribution (docs/licences.md).
       ODA_PATH: ${ODA_PATH:-}
     volumes:
       - uploads:/app/uploads
@@ -47,9 +49,9 @@ services:
       # searched by default and needs no environment variable:
       # - ./vendor/oda:/opt/oda:ro
     healthcheck:
-      # /health reports whether LibreOffice, LibreDWG and Tesseract were
-      # actually found, so a bad image is caught here rather than on a
-      # user's first upload.
+      # /health reports whether LibreOffice and Tesseract were actually
+      # found, so a bad image is caught here rather than on a user's first
+      # upload. DWG additionally needs a mounted ODA — check odaRunnable.
       test: ["CMD", "curl", "-fsS", "http://localhost:5001/health"]
       interval: 30s
       timeout: 5s

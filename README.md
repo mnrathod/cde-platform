@@ -57,7 +57,7 @@ This runs two containers:
 | Service | Contains |
 |---|---|
 | `cde-app` | Spring Boot API |
-| `converter` | Python service **plus LibreOffice, LibreDWG and Tesseract** |
+| `converter` | Python service **plus LibreOffice and Tesseract** |
 
 The toolchain lives in the converter image because `converter/app.py` shells
 out to those three binaries. Running the app without them is what made DWG
@@ -94,7 +94,7 @@ That binds Postgres to `127.0.0.1:5432` only, not to every interface. Plain
 host, and `./gradlew bootRun` then fails with `Connection to localhost:5432
 refused`.
 
-**Terminal 2 — the converter.** It shells out to LibreOffice, LibreDWG and
+**Terminal 2 — the converter.** It shells out to LibreOffice and
 Tesseract, so running it from source needs all three on `PATH`. Unless you are
 changing `converter/app.py`, run the container instead and skip the toolchain:
 
@@ -180,7 +180,7 @@ minimum, or with the value this seeder used to hard-code.
 | File type | Behaviour |
 |---|---|
 | `.dxf` | Rendered via **ezdxf** Python service (full fidelity) |
-| `.dwg` | Converted to DXF, then rendered — **LibreDWG** by default, **ODA File Converter** when available (higher fidelity, tried first) |
+| `.dwg` | Converted to DXF, then rendered — requires the **ODA File Converter**, which you supply (see below). Without it, DWG reports what to do rather than rendering |
 | `.svg` | Rendered inline |
 | `.png` / `.jpg` | Displayed as image |
 | `.pdf` | Rendered in iframe |
@@ -188,15 +188,14 @@ minimum, or with the value this seeder used to hard-code.
 The ezdxf converter runs as a lightweight Python HTTP service on port 5001.
 If it's not running, the app falls back to the built-in Java DXF parser automatically.
 
-**Running outside Docker?** Binary DWG needs `dwg2dxf` on `PATH`, and LibreDWG
-is in no Debian or Ubuntu archive — build it from source, or use the Docker
-setup above, which does that for you.
-
-**ODA File Converter** gives higher-fidelity DWG conversion and is tried before
-LibreDWG whenever it is present. The binary cannot be bundled — its download is
-registration-gated and its licence forbids redistribution (`docs/licences.md`) —
-so you supply it and the image supplies everything else, including the virtual
-display it opens even in console mode. Mount it and nothing more:
+**DWG needs the ODA File Converter, and it is the only route.** The image
+used to bundle LibreDWG as a zero-setup fallback; it was removed because
+shipping a GPL-3.0 binary in a product customers install obliges us to offer
+the corresponding source to every recipient (ADR 13, `docs/licences.md` §4.1).
+ODA cannot be bundled either — its download is registration-gated and its
+licence forbids redistribution — so you supply it and the image supplies
+everything else, including the virtual display it opens even in console mode.
+Mount it and nothing more:
 
 ```yaml
 converter:
@@ -205,7 +204,10 @@ converter:
 ```
 
 `/opt/oda` is searched by default; mount it elsewhere and set `ODA_PATH` to the
-directory or the binary. Without it, DWG falls back to LibreDWG and works.
+directory or the binary. Without it, DWG conversion fails with
+`DWG_NEED_CONVERTER` and a `remedy` naming the mount point — **every other
+format is unaffected.** DXF renders through ezdxf with no external tool, and
+Office, PDF and IFC never used a DWG converter at all.
 
 Confirm it is actually usable rather than merely mounted — the two differ, and
 the difference is silent:
@@ -215,8 +217,9 @@ curl -s localhost:5001/health | jq '{odaInstalled, odaRunnable, odaDetail}'
 ```
 
 `odaRunnable: false` means the binary was found and could not start — usually a
-mount missing its shared libraries or its execute bit. DWG still converts, at
-LibreDWG fidelity, which is why nothing else tells you.
+mount missing its shared libraries or its execute bit. Check it: `odaInstalled`
+alone will happily report a binary that cannot run, and the symptom is DWG
+failing for a reason that looks like a bad drawing.
 
 ---
 

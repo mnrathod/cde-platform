@@ -347,14 +347,22 @@ drawing. Every assertion held; none asked whether the drawing was visible. The
 suite now measures ink on the page, and the lesson generalises: a check that
 the output is well-formed is not a check that it is right.
 
-### DWG: two converters, one of which we cannot ship
+### DWG: one converter, which we cannot ship
 
-A DWG is extracted to DXF before any of the above happens, by whichever of two
-tools is available. **LibreDWG** is compiled into the image and always present.
-The **ODA File Converter** produces better fidelity and is tried first — but its
-licence forbids redistribution, so the binary is supplied by whoever deploys the
-service and never by us (§12, and `docs/licences.md` for why vendoring it is not
-an option rather than an oversight).
+A DWG is extracted to DXF before any of the above happens, by the **ODA File
+Converter** — and only by it. Its licence forbids redistribution, so the binary
+is supplied by whoever deploys the service and never by us (§12, and
+`docs/licences.md` for why vendoring it is not an option rather than an
+oversight).
+
+There were two converters until 2026-09-08. **LibreDWG** was compiled into the
+image as a zero-setup fallback, and it was removed by ADR 13: out-of-process
+invocation kept its GPL-3.0 copyleft away from our code, but *shipping the
+binary* obliges a corresponding-source offer to every recipient under §6, and
+a product customers install is distribution. So DWG now works where ODA is
+mounted and reports what to do where it is not. No other format is affected —
+DXF goes straight to ezdxf, and Office, PDF and IFC never touched a DWG
+converter.
 
 Everything else ODA needs *is* shipped. It is a Qt application that opens a
 display even converting from the command line, so the image carries a virtual
@@ -363,9 +371,11 @@ ODA aborts before reading its arguments. That was the state of it until
 recently: configured, documented, and unable to start.
 
 **Presence and usability are reported separately, because they differ.** An
-install missing its shared libraries or its execute bit is present and useless,
-and the symptom is not an error — the code falls through to LibreDWG, the
-drawing converts, and the only trace is fidelity nobody is measuring. So ODA is
+install missing its shared libraries or its execute bit is present and useless.
+That used to be invisible — the code fell through to LibreDWG, the drawing
+converted, and the only trace was fidelity nobody was measuring. Now it is a
+failed conversion whose cause is a mount, which is louder but no more
+self-explanatory, so the distinction still has to be reported. ODA is
 run once at startup against an empty directory, and `/health` answers both
 questions: `odaInstalled` for the binary, `odaRunnable` for whether it started.
 The same distinction reaches the user: a DWG that could not be converted reports
@@ -603,10 +613,10 @@ claim that nothing else is needed.
   on its own, and the navigable tree beside it was not built to be the equivalent
   route the accessibility target requires. This is a procurement gate, not a
   backlog item.
-- **`dwg2dxf` is GPL-3.0 with no corresponding-source offer.** Running the
-  converter is fine; shipping the image to a customer is distribution, and that
-  is a breach today. It decides whether DWG support can exist in a distributed
-  artifact at all.
+- **DWG requires an operator-supplied ODA File Converter.** The GPL-3.0
+  `dwg2dxf` binary that made DWG work out of the box was removed (ADR 13):
+  running it was fine, shipping it to a customer was distribution and a breach.
+  Closed, at the cost of DWG no longer working on a fresh install.
 
 ---
 

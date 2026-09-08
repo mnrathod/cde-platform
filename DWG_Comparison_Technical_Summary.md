@@ -175,7 +175,7 @@ ODA conversion is the dominant cost for DWG files. DXF files are significantly f
 |---|---|
 | Block name matching uses keyword heuristics | Load block library manifest from project metadata |
 | No geometric position diff (only counts) | Spatial bounding-box comparison for moved elements |
-| ODA required for DWG (free, but manual install) | Evaluate LibreDWG as zero-install fallback |
+| ODA required for DWG (free, but manual install) | No zero-install fallback is available: LibreDWG was one and was removed because distributing a GPL-3.0 binary obliges a corresponding-source offer to every recipient (ADR 13). Closing this needs ODA redistribution rights, not an engineering change |
 | Text diff is exact-match set comparison | Fuzzy/semantic matching for revised annotations |
 | No visual overlay of changes | SVG diff overlay highlighting changed regions |
 

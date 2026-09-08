@@ -23,7 +23,8 @@ viewer", and that answer is a security boundary rather than a convenience.
 Three properties make it hard:
 
 **Conversion is server-side and cannot move.** Office documents go through
-LibreOffice, DWG through LibreDWG, OCR through Tesseract — out of process, in
+LibreOffice, DWG through the ODA converter, OCR through Tesseract — out of
+process, in
 the converter image, deliberately (ADR 8). The bytes must therefore reach our
 infrastructure. A design where the browser fetches directly from the
 customer's storage and we never see the file cannot render a `.docx` at all.
@@ -102,20 +103,23 @@ anything the response header claims (§5.13.3).
 latency on top of a conversion that already exceeds the one-second budget, so
 §7.1's `202` plus a job resource is the only shape that fits.
 
-**LibreDWG blocks distribution today.** `docs/licences.md` §4.1 records an
-open obligation: the converter image contains a `dwg2dxf` binary built from
+**LibreDWG blocked distribution.** `docs/licences.md` §4.1 recorded an open
+obligation: the converter image contained a `dwg2dxf` binary built from
 GPL-3.0 source, and GPL-3.0 §6 requires a corresponding-source offer to
-anyone receiving it. Inside a service we operate this is unresolved but
+anyone receiving it. Inside a service we operate that was unresolved but
 contained. **A product that customers deploy is distribution in the plainest
-sense, so this must be closed before the first customer install** — by
-publishing the source alongside the image, by a written offer, or by dropping
-LibreDWG and requiring the ODA converter.
+sense**, which made it a release blocker.
 
-> Written up since as **[ADR 13](0013-dwg-conversion-in-a-distributed-product.md)**,
-> which found the problem is larger than this paragraph implies: the two DWG
-> converters have opposite licence problems, so a distributed product cannot
-> currently ship DWG support either way. Recorded there with the options
-> costed and the questions counsel has to answer.
+> Written up as **[ADR 13](0013-dwg-conversion-in-a-distributed-product.md)**,
+> which found the problem larger than this paragraph implied: the two DWG
+> converters have opposite licence problems, so a distributed product could
+> not ship DWG support either way.
+>
+> **Resolved 2026-09-08 by shipping neither.** LibreDWG is removed from the
+> image, so §4.1 closes by deletion; ODA stays operator-supplied, so the
+> proprietary licence is the customer's. DWG works where a customer mounts
+> ODA and fails with a message naming the remedy where they have not. DXF,
+> Office, PDF and IFC are unaffected — none of them ever used LibreDWG.
 
 **Trademarks.** "Works with Microsoft SharePoint" is nominative fair use;
 "Microsoft-approved", their logo, or any implication of partnership is not

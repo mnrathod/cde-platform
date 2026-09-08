@@ -287,21 +287,26 @@ class TestWhatHasNoPdfForm:
 
 class TestTheDwgRouteUsesTheSameRenderer:
 
-    def test_libredwg_renders_with_whatever_it_is_given(self, monkeypatch, tmp_path):
-        # A real DWG needs ODA or LibreDWG and a binary fixture, so what is
-        # pinned here is the wiring the fix introduced: the extraction step
-        # must hand its DXF to the renderer the caller chose, not to the SVG
-        # one it used to call by name. Getting this wrong makes DWG->PDF
-        # silently return SVG again.
-        extracted = tmp_path / "out.dxf"
+    # These pinned the renderer-injection wiring on dwg_via_libredwg. That
+    # function is gone with the binary (ADR 13), but the property it guarded
+    # is not: the extraction step must hand its DXF to the renderer the
+    # caller chose rather than to the SVG one it used to call by name, or
+    # DWG->PDF silently returns SVG again. Re-pointed at ODA, which is now
+    # the only extractor, rather than deleted with the function.
 
-        def fake_run(cmd, timeout=120):
-            extracted.write_text("DXF CONTENT")
-            return 0, "", ""
+    def test_oda_renders_with_whatever_it_is_given(self, monkeypatch, tmp_path):
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        (out_dir / "out.dxf").write_text("DXF CONTENT")
 
-        monkeypatch.setattr(app, "find_dwg2dxf", lambda: "/usr/bin/dwg2dxf")
-        monkeypatch.setattr(app, "run_cmd", fake_run)
-        monkeypatch.setattr(app, "make_temp_dir", lambda: str(tmp_path))
+        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
+        monkeypatch.setattr(app, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
+        monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
+        # in_dir then out_dir, in the order dwg_via_oda asks for them.
+        dirs = iter([str(tmp_path / "in"), str(out_dir)])
+        (tmp_path / "in").mkdir()
+        monkeypatch.setattr(app, "make_temp_dir", lambda: next(dirs))
 
         seen = {}
 
@@ -309,17 +314,27 @@ class TestTheDwgRouteUsesTheSameRenderer:
             seen["content"] = content
             return {"success": True, "type": "pdf", "pdfBytes": b"%PDF-1.4"}
 
-        result = app.dwg_via_libredwg("/tmp/whatever.dwg", spy)
+        source = tmp_path / "whatever.dwg"
+        source.write_bytes(b"AC1032" + b"\0" * 32)
+
+        result = app.dwg_via_oda(str(source), spy)
         assert result["type"] == "pdf"
         assert seen["content"] == "DXF CONTENT"
 
     def test_the_default_renderer_is_still_the_viewer_one(self, monkeypatch, tmp_path):
         # Callers that pass nothing must keep getting SVG, or the viewer
         # breaks the moment someone adds an argument elsewhere.
-        (tmp_path / "out.dxf").write_text("DXF CONTENT")
-        monkeypatch.setattr(app, "find_dwg2dxf", lambda: "/usr/bin/dwg2dxf")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        (out_dir / "out.dxf").write_text("DXF CONTENT")
+
+        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
         monkeypatch.setattr(app, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
-        monkeypatch.setattr(app, "make_temp_dir", lambda: str(tmp_path))
+        monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
+        dirs = iter([str(tmp_path / "in"), str(out_dir)])
+        (tmp_path / "in").mkdir()
+        monkeypatch.setattr(app, "make_temp_dir", lambda: next(dirs))
 
         seen = {}
 
@@ -329,6 +344,9 @@ class TestTheDwgRouteUsesTheSameRenderer:
 
         monkeypatch.setattr(app, "render_dxf_string", viewer_render)
 
-        result = app.dwg_via_libredwg("/tmp/whatever.dwg")
+        source = tmp_path / "whatever.dwg"
+        source.write_bytes(b"AC1032" + b"\0" * 32)
+
+        result = app.dwg_via_oda(str(source))
         assert seen.get("called"), "the viewer renderer was not the default"
         assert "svg" in result

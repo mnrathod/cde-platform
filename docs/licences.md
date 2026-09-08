@@ -186,8 +186,8 @@ next Spring Boot major upgrade. That upgrade is this one, and it is confirmed.
 ## 4. GPL tooling — out of process
 
 CLAUDE.md §2.1 and §17.2 permit GPL tools invoked as separate processes.
-Three are in use, and all three are genuinely separate executables invoked
-over a socket or command line. None is linked, embedded, or bundled into the
+Two are in use, and both are genuinely separate executables invoked over a
+socket or command line. Neither is linked, embedded, or bundled into the
 application artifact, so no combined work is created and their copyleft does
 not reach this product's code.
 
@@ -195,51 +195,50 @@ not reach this product's code.
 |---|---|---|---|
 | ClamAV | GPL-2.0 | INSTREAM over a TCP socket (`ClamAvScanner`) | Its own service/container |
 | LibreOffice | MPL-2.0 | `soffice --headless` subprocess | Converter image |
-| LibreDWG (`dwg2dxf`) | **GPL-3.0** | subprocess | **Compiled into and copied into the converter image** |
 
-### 4.1 Open obligation — distributing the `dwg2dxf` binary
+### 4.1 Closed — the `dwg2dxf` binary is no longer distributed
 
-**This is not discharged and blocks distribution of the converter image.**
+**Closed 2026-09-08 by removing LibreDWG from the converter image.**
 
-`converter/Dockerfile` builds LibreDWG 0.13.3 from source and copies the
-resulting `dwg2dxf` binary into the runtime image. Invoking it as a
-subprocess keeps our own code clear of GPL-3.0 — that part is fine, and is
-mere aggregation rather than a combined work.
+This section previously recorded an open obligation that blocked
+distribution. `converter/Dockerfile` built LibreDWG 0.13.3 from source and
+copied the resulting `dwg2dxf` binary into the runtime image. Invoking it as
+a subprocess kept our own code clear of GPL-3.0 — that part was always fine,
+and was mere aggregation rather than a combined work — but *shipping the
+image distributed the binary*, and GPL-3.0 §6 requires that anyone receiving
+a binary is offered the corresponding source. Neither source nor a written
+offer accompanied the image.
 
-But shipping the image *distributes the binary*, and GPL-3.0 §6 requires
-that anyone receiving a binary is offered the corresponding source. Today
-neither the source nor a written offer accompanies the image, so any
-distribution of it is a breach.
+Three ways to close it were costed: retain the source tarball in the image,
+publish a three-year written offer, or have customers pull the converter
+image themselves. **A fourth was taken instead — remove the binary.** The
+reasoning is in ADR 13; in short, LibreDWG was never the preferred converter.
+`app.py` already tried the ODA File Converter first and fell back to
+LibreDWG only when ODA was absent, so what the binary actually bought was
+zero-setup convenience, not capability. Paying a perpetual
+corresponding-source obligation on every distributed copy for that is a bad
+trade once the product is something customers install.
 
-Three ways to close it, in rough order of preference:
+**What this costs.** DWG no longer works out of the box. It requires the ODA
+File Converter, which the customer licences and mounts themselves (§4.2) —
+so the encumbered binary is theirs, not ours, and we distribute nothing that
+carries an obligation. Every other format is unaffected: DXF renders through
+ezdxf (MIT) with no external tool at all, and Office, PDF and IFC never
+touched LibreDWG.
 
-1. **Ship the source alongside the binary.** The Dockerfile already
-   downloads a checksummed release tarball; retain it in the image (or in
-   the published artifact set) at a documented path, and reference that path
-   from `NOTICE`. Cheapest and self-contained.
-2. **Publish a written offer** valid for three years, naming a URL or
-   address where the exact corresponding source can be obtained. Requires
-   keeping that channel alive for the full period, including the precise
-   version built.
-3. **Split the converter into its own image** that we do not redistribute,
-   pulled by the customer directly from a public registry. Changes the
-   deployment story and does not help air-gapped installations, which is
-   most of the sovereign and Defence scope.
-
-Option 1, with the tarball and its `SHA256` retained, is the recommendation.
-Whichever is chosen needs counsel's sign-off before the image ships.
-
-Note that option 3's variant — customers building the image themselves — is
-not distribution by us at all and would sidestep the obligation entirely,
-but it conflicts with the air-gapped delivery requirement in §9.3.
+**What to check if this is ever reopened.** The obligation attaches to
+distributing the binary, not to offering the feature — so removing DWG from
+the datasheet while leaving `dwg2dxf` in the image would have discharged
+nothing. `converter/test_oda.py::TestDwgWithoutOda` asserts the functions are
+gone rather than merely unreferenced.
 
 ---
 
 ## 4.2 Proprietary tooling the operator supplies — ODA File Converter
 
-The **ODA File Converter** (Open Design Alliance) converts DWG to DXF at
-higher fidelity than LibreDWG, and the converter service tries it first when
-it is present. It is **not distributed with this product and must not be**:
+The **ODA File Converter** (Open Design Alliance) converts DWG to DXF, and
+since §4.1 removed LibreDWG it is the **only** DWG route. It is **not
+distributed with this product and must not be**:
 
 | | |
 |---|---|
@@ -247,18 +246,20 @@ it is present. It is **not distributed with this product and must not be**:
 | Redistribution | **Not permitted.** Its download is registration-gated and its terms bind the person who accepted them |
 | How it is used | A separate executable invoked as a subprocess, never linked or embedded |
 | Where the binary comes from | The deployment supplies it; nothing in our image or artifact set contains it |
-| Without it | DWG conversion falls back to LibreDWG and works |
+| Without it | DWG conversion fails with `DWG_NEED_CONVERTER` and a `remedy` naming the mount point. Every other format works |
 
-**This is not the `dwg2dxf` situation in §4.1 and must not be conflated with
-it.** That one is an open obligation: a GPL-3.0 binary we *do* ship without
-the corresponding-source offer it requires. This one is closed by
-construction — we ship nothing, so there is nothing to license onward.
+**This was never the `dwg2dxf` situation in §4.1, and the distinction is why
+both are now closed.** That one was an obligation we carried: a GPL-3.0
+binary we *did* ship without the corresponding-source offer it requires, and
+it was closed by removing the binary. This one is closed by construction — we
+ship nothing, so there is nothing to license onward, and the customer's own
+ODA licence covers the copy they mount.
 
 What the product *does* ship is everything around it: the discovery of a
 mounted install, the virtual display it needs to start on a headless host
-(`xvfb`, X.Org, MIT — an ordinary allow-listed package), a startup probe that
-reports whether it actually ran, and the fallback when it is absent. That
-support is ours and carries no third-party obligation.
+(`xvfb`, X.Org, MIT — an ordinary allow-listed package), and a startup probe
+that reports whether it actually ran. That support is ours and carries no
+third-party obligation.
 
 **Do not "solve" this by vendoring the binary, adding a download step to the
 Dockerfile, or publishing an image with ODA inside it.** Each of those is
@@ -269,19 +270,22 @@ requirement, the route is a redistribution agreement with the Open Design
 Alliance, negotiated by whoever owns legal review (§18, open item 2) — not an
 engineering change.
 
-**That question is now written up as a decision: [ADR
-13](adr/0013-dwg-conversion-in-a-distributed-product.md).** It sets this
-section beside §4.1 above, because the two converters have opposite problems
-and a distributed product needs one of them resolved: LibreDWG can be shipped
-only with a source offer it does not have, and ODA cannot be shipped at all.
-The ADR costs the options and names what counsel has to answer.
+**That question is written up as a decision: [ADR
+13](adr/0013-dwg-conversion-in-a-distributed-product.md).** It set this
+section beside §4.1, because the two converters had opposite problems and a
+distributed product needed one of them resolved: LibreDWG could be shipped
+only with a source offer it did not have, and ODA cannot be shipped at all.
+The resolution taken was to ship neither — see §4.1 — which leaves DWG
+working only where the customer supplies ODA themselves.
 
 One caution belongs here rather than only in the ADR: **the sentence "its
 licence does not permit redistribution" is inherited, not verified.** It is
 the position this repository has acted on and the reason the binary is not
 vendored, which is the safe direction to be wrong in — but nobody here has
 read the agreement, and §17.3 puts that reading outside engineering. Checking
-it is action one in ADR 13, not a settled premise.
+it is action one in ADR 13, not a settled premise. Removing LibreDWG does not
+change this: it makes ODA the only DWG route, so if a redistribution
+agreement is ever wanted, this is the sentence that has to be verified first.
 
 ---
 
@@ -327,8 +331,8 @@ the same thing at the top.
 
 | Gap | Impact | Status |
 |---|---|---|
-| `dwg2dxf` GPL-3.0 source offer (§4.1) | **Blocks distribution of the converter image** | Open — written up as [ADR 13](adr/0013-dwg-conversion-in-a-distributed-product.md), which costs the options; needs an owner and counsel sign-off |
-| ODA redistribution terms unverified (§4.2) | Decides whether the shipped product can have DWG support at all | Open — [ADR 13](adr/0013-dwg-conversion-in-a-distributed-product.md), question 1. Not a breach: we ship nothing, so the safe direction |
+| ~~`dwg2dxf` GPL-3.0 source offer (§4.1)~~ | — | **Closed 2026-09-08** — the binary was removed from the converter image rather than the obligation discharged ([ADR 13](adr/0013-dwg-conversion-in-a-distributed-product.md), option F). DWG now requires an operator-supplied ODA |
+| ODA redistribution terms unverified (§4.2) | Decides whether DWG could ever work out of the box. No longer a release blocker — the shipped product simply has no DWG reader | Open, demoted — [ADR 13](adr/0013-dwg-conversion-in-a-distributed-product.md), question 1. Not a breach: we ship nothing, so the safe direction |
 | ~~`ifcopenshell`, `pdfplumber` licences unverified~~ | — | **Closed 2026-08-29** — pdfplumber is MIT; ifcopenshell is LGPL-3.0-or-later with an exception recorded at §3.2 |
 | Python dependencies are not licence-gated in CI | The `ezdxf[draw]` finding (§2) was caught by hand, not by a gate. The next one would not be. | Open — needs the licence scan extended to `converter/requirements.txt`; `scripts/check-pinning.sh` only blocks the specific packages already known to be a problem |
 | The §17.2 licence-change detector covers Gradle only | A PyPI or npm dependency that re-licences would not fail the build | Open |

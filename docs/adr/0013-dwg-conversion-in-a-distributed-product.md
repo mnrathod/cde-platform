@@ -1,8 +1,10 @@
 # 13. Licence the ODA File Converter for redistribution, or ship no DWG support
 
-- **Status:** Accepted in part — the engineering position is decided and built.
-  **One question is referred to counsel and has no owner** (CLAUDE.md §18,
-  open item 2).
+- **Status:** **Resolved 2026-09-08 — option F below.** LibreDWG is removed
+  from the converter image, so `licences.md` §4.1 is closed by deletion and no
+  encumbered binary is distributed. DWG now requires an operator-supplied ODA.
+  The counsel questions are no longer release blockers; they become live again
+  only if bundled DWG is ever wanted.
 - **Date:** 2026-09-05
 - **Related:** ADR 8 (out-of-process toolchain), ADR 12 (viewer as a product),
   `docs/licences.md` §4.1 and §4.2
@@ -130,18 +132,73 @@ distribute the image, which is why this has been survivable so far.
    does either option's compliance mechanism survive having no network? A
    written offer naming a URL does not.
 
+## Decision taken — option F, 2026-09-08
+
+**None of A–E. LibreDWG is deleted and no redistribution rights are sought.**
+
+The product decision was to scope the initial release to Office, PDF and IFC
+and to stop shipping the GPL-3.0 binary outright. That is not option D — DWG
+is not withdrawn from the product — and not option E either, because E
+explicitly "does nothing about §4.1, which is the breach". It is E with the
+binary removed, which the options above did not name:
+
+> **F. Remove LibreDWG; DWG works only where the operator supplies ODA.**
+> §4.1 closes by deletion rather than by compliance. We distribute no
+> encumbered binary of any kind: not the GPL-3.0 one we were shipping, and
+> not ODA, which we never could. The customer licences ODA directly, so the
+> proprietary obligation is theirs. DWG fidelity for anyone who does that is
+> *better* than what we shipped before, because ODA was always tried first
+> and LibreDWG was the fallback.
+
+**This overrides the engineering recommendation above, and that is the right
+way round.** The recommendation was C falling back to A, reasoning from cost
+and availability. It undervalued one thing a product decision weighs
+correctly: A leaves GPL-3.0 code inside an artifact that enterprise,
+government and Defence procurement will audit, and counsel question 3 exists
+precisely because that is a conversation nobody wants to have repeatedly.
+Deleting the binary makes the question moot rather than answerable.
+
+**What it costs, plainly.** DWG no longer works out of the box. A customer
+who wants it must find, register for, download and mount the ODA File
+Converter before their first DWG opens — the first-run experience objection
+raised against option E, which is real and now applies. The failure is at
+least loud: `DWG_NEED_CONVERTER` carries a `remedy` naming the tool and the
+mount point, rather than the old `LIBREDWG_NOT_FOUND`, which named a tool
+that is no longer the answer.
+
+**What it does not cost.** Nothing else moved. DXF renders through ezdxf
+(MIT) with no external tool; Office, PDF and IFC never touched LibreDWG.
+`converter/test_oda.py::TestDwgWithoutOda` asserts both — that DWG fails with
+a usable message, and that DXF still renders — because losing an adjacent
+format to this change would be a far worse outcome than losing the fallback.
+
+**Counsel questions 1 and 2 survive, demoted.** They are no longer release
+blockers; they are what to ask if bundled DWG ever becomes a commercial
+requirement. Question 3 is closed by construction. Question 4 — whether a
+compliance mechanism survives an air-gapped install — is closed the same way:
+there is no mechanism to survive, though note that an air-gapped customer
+must now source ODA offline too.
+
 ## Consequences
 
-**§4.1 stays open and stays a release blocker until this lands.** It is
-already listed in `licences.md` §6 as blocking distribution of the converter
-image. This ADR does not close it — it names the two ways it can close and
-makes the choice visible.
+**§4.1 is closed.** The obligation attached to distributing the binary, not
+to offering the feature — so removing DWG from the datasheet while leaving
+`dwg2dxf` in the image would have discharged nothing. The binary is gone from
+`converter/Dockerfile`, and `find_dwg2dxf()` and `dwg_via_libredwg()` are
+gone from `app.py`; a test asserts the functions do not exist rather than
+merely going uncalled.
 
-**Whatever is chosen, the code does not change much.** Both converters are
-already behind one interface with fallback, discovery and a health probe. A
-is a Dockerfile and `NOTICE` change. B is deleting the LibreDWG build stage.
-C is neither. That is the point of having done `f7f1154` first: the decision
-is not held hostage by an implementation.
+**The code did not change much, as predicted.** Both converters were already
+behind one interface with discovery and a health probe, so F was deleting the
+LibreDWG build stage and the fallback branch. That is the point of having
+done `f7f1154` first: the decision was not held hostage by an implementation.
+
+**One API field outlived the binary.** `libredwgInstalled` is a released
+response property on `dwg_binary`, so removing it would be a breaking change
+inside a stable version (§3.4) that `oasdiff` would fail the build on. It is
+deprecated with a sunset date of 2027-04-01, always `false`, and the
+controller fills it in rather than the converter continuing to report on a
+binary that is not there.
 
 **If B or C is chosen, the terms become a tracked dependency.** ODA joins
 `licences.md` as a licensed component rather than an operator-supplied one,

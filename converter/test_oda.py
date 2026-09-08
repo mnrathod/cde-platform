@@ -1,7 +1,7 @@
 """
 Tests for the ODA File Converter integration.
 
-ODA converts DWG to DXF at higher fidelity than the bundled LibreDWG and is
+ODA converts DWG to DXF and, since ADR 13 removed the bundled LibreDWG, is
 tried first when present. The binary cannot ship with the product — its licence
 forbids redistribution — so everything *around* it is ours to get right, and
 before this it was not: the image had no virtual display, the invocation did not
@@ -9,7 +9,7 @@ ask for one, and ODA is a Qt application that opens a display even converting
 from the command line. A mounted ODA was configured, advertised in the README,
 and could not start.
 
-The failure had no symptom. ODA aborts, the code falls through to LibreDWG, the
+The failure had no symptom. ODA aborts, the code fell through to LibreDWG, the
 drawing converts, and the only trace is fidelity nobody is measuring. So these
 tests cover the two halves of making it real: that it is launched in a way that
 can work, and that when it cannot, something says so.
@@ -73,7 +73,7 @@ class TestFindingIt:
     def test_a_file_without_the_execute_bit_is_not_found(self, oda_stub, monkeypatch):
         # A read-only mount that dropped the execute bit is the commonest way
         # this arrives broken. Reporting it as found would send the DWG path
-        # into a binary that cannot run instead of to LibreDWG.
+        # into a binary that cannot run.
         binary = oda_stub / "ODAFileConverter"
         binary.chmod(binary.stat().st_mode & ~0o111)
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
@@ -150,7 +150,7 @@ class TestSayingWhetherItWorks:
     def test_an_install_that_cannot_start_is_reported_not_merely_present(
             self, oda_stub, monkeypatch):
         # The failure this whole probe exists for. Before it, health said
-        # "odaInstalled: true" and DWG quietly converted at LibreDWG fidelity.
+        # "odaInstalled: true" and DWG quietly converted at lower fidelity.
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
         monkeypatch.delenv("DISPLAY", raising=False)
         monkeypatch.setattr(app.shutil, "which", lambda name: None)
@@ -167,7 +167,7 @@ class TestSayingWhetherItWorks:
         monkeypatch.setattr(app, "find_oda", lambda: None)
         status = app.probe_oda()
         assert status == {"installed": False, "runnable": False, "path": None,
-                          "detail": "not configured — DWG falls back to LibreDWG"}
+                          "detail": "not configured — DWG cannot be converted"}
 
     def test_the_probe_runs_once(self, oda_stub, monkeypatch):
         # /health is polled every 30 seconds; starting a process each time to
@@ -208,32 +208,56 @@ class TestSayingWhetherItWorks:
             f"left behind: {[d for d in made if os.path.exists(d)]}"
 
 
-class TestTheFallbackIsIntact:
+class TestDwgWithoutOda:
+    """
+    There used to be a LibreDWG fallback here and a test asserting DWG
+    converted with no ODA at all — "ODA is an upgrade, never a requirement".
+    That is no longer true and the assertion is inverted rather than deleted:
+    ADR 13 removed the GPL-3.0 binary because distributing it obliged us to
+    offer corresponding source to every customer, so ODA is now the only DWG
+    route and its absence has to be a clear failure rather than a quiet one.
 
-    def test_dwg_still_converts_with_no_oda_at_all(self, monkeypatch, tmp_path):
-        # ODA is an upgrade, never a requirement. If this breaks, every
-        # deployment without ODA loses DWG entirely.
+    What must not regress is everything else. DWG is one format; a change
+    that took the others with it would be a much worse outcome than losing
+    the fallback.
+    """
+
+    def test_dwg_without_oda_fails_and_says_what_to_do(self, monkeypatch, tmp_path):
         monkeypatch.setattr(app, "find_oda", lambda: None)
-        monkeypatch.setattr(app, "find_dwg2dxf", lambda: "/usr/local/bin/dwg2dxf")
-
-        extracted = tmp_path / "out.dxf"
-
-        def fake_run(cmd, timeout=120):
-            extracted.write_text("DXF CONTENT")
-            return 0, "", ""
-
-        monkeypatch.setattr(app, "run_cmd", fake_run)
-        monkeypatch.setattr(app, "make_temp_dir", lambda: str(tmp_path))
-        # Stubbed: what is being asserted is which extractor the DWG was
-        # routed to, not whether ezdxf can render this particular text.
-        monkeypatch.setattr(app, "render_dxf_string",
-                            lambda content: {"success": True, "svg": "<svg/>"})
 
         source = tmp_path / "plan.dwg"
         source.write_bytes(b"AC1032" + b"\0" * 32)
 
         result = app.convert(str(source), "application/dwg")
-        assert result.get("convertedBy") == "LibreDWG", result
+
+        assert result["success"] is False
+        assert result["error"] == "DWG_NEED_CONVERTER"
+        # Naming the tool and the mount point is the whole point of the
+        # message. The previous error was LIBREDWG_NOT_FOUND, which named a
+        # tool that is no longer the answer and sent people to install it.
+        assert "ODA File Converter" in result["remedy"]
+        assert "/opt/oda" in result["remedy"]
+        assert "LibreDWG" not in str(result)
+
+    def test_dxf_still_renders_without_oda(self, monkeypatch, tmp_path):
+        # DXF never went through a DWG converter — ezdxf reads it directly —
+        # and the risk in removing LibreDWG is taking this with it.
+        monkeypatch.setattr(app, "find_oda", lambda: None)
+        monkeypatch.setattr(app, "render_dxf_string",
+                            lambda content: {"success": True, "svg": "<svg/>"})
+
+        source = tmp_path / "plan.dxf"
+        source.write_text("0\nSECTION\n")
+
+        result = app.convert(str(source), "application/dxf")
+        assert result.get("success") is True
+
+    def test_nothing_looks_for_a_dwg_binary_any_more(self):
+        # The functions are gone, not merely unreferenced. A leftover
+        # find_dwg2dxf() would keep reporting on a binary the image no
+        # longer contains.
+        assert not hasattr(app, "find_dwg2dxf")
+        assert not hasattr(app, "dwg_via_libredwg")
 
 
 class TestWhatTheUserIsTold:
@@ -247,7 +271,6 @@ class TestWhatTheUserIsTold:
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
         monkeypatch.delenv("DISPLAY", raising=False)
         monkeypatch.setattr(app.shutil, "which", lambda name: None)
-        monkeypatch.setattr(app, "find_dwg2dxf", lambda: None)
 
         source = tmp_path / "plan.dwg"
         source.write_bytes(b"AC1032" + b"\0" * 32)
@@ -261,7 +284,6 @@ class TestWhatTheUserIsTold:
     def test_a_working_oda_is_reported_as_installed(
             self, oda_stub, monkeypatch, tmp_path):
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
-        monkeypatch.setattr(app, "find_dwg2dxf", lambda: None)
         # The stub converts nothing, so extraction still fails and the payload
         # is still built — which is exactly the case being checked.
         source = tmp_path / "plan.dwg"
