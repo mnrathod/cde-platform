@@ -1,8 +1,5 @@
 package com.cde.platform.conversion;
 
-import com.cde.platform.model.Tenant;
-import com.cde.platform.repository.TenantRepository;
-import com.cde.platform.tenancy.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -22,25 +19,28 @@ import org.springframework.context.event.EventListener;
  * fifteen minutes anyway, so one that waited through a restart would very
  * likely have expired regardless.
  *
- * <p>The sweep runs once per tenant rather than once across the table. That is
- * not a stylistic choice: every query here is scoped by Row-Level Security to
- * {@code app.tenant_id}, and a sweep written to see every row would be a query
- * that sees every row (§5.6). Establishing context per tenant keeps the
- * recovery path under the same control as every other read.
+ * <p>The sweep runs once per caller rather than once across the table. That is
+ * not a stylistic choice: the host scopes every query here to the caller in
+ * context — in this platform by Row-Level Security on {@code app.tenant_id}
+ * (§5.6) — so a sweep written to see every row would have to be a query that
+ * sees every row, which is precisely the query that isolation exists to
+ * prevent. Going through {@link ConversionCallers#callAsCaller} keeps the
+ * recovery path under whatever control the host applies to every other read,
+ * without this class needing to know what that control is.
  */
 public class ConversionStartupRecovery {
 
     private static final Logger log = LoggerFactory.getLogger(ConversionStartupRecovery.class);
 
     private final ConversionJobService jobService;
-    private final TenantRepository tenants;
+    private final ConversionCallers callers;
     private final ConversionJobExecutor executor;
 
     public ConversionStartupRecovery(ConversionJobService jobService,
-                                     TenantRepository tenants,
+                                     ConversionCallers callers,
                                      ConversionJobExecutor executor) {
         this.jobService = jobService;
-        this.tenants = tenants;
+        this.callers = callers;
         this.executor = executor;
     }
 
@@ -63,15 +63,15 @@ public class ConversionStartupRecovery {
 
     private int failInterruptedJobs() {
         int total = 0;
-        for (Tenant tenant : tenants.findAll()) {
+        for (Long callerId : callers.knownCallerIds()) {
             try {
-                total += TenantContext.callAsTenant(
-                    tenant.getId(), jobService::failInterruptedJobsForCurrentTenant);
+                total += callers.callAsCaller(
+                    callerId, jobService::failInterruptedJobsForCurrentCaller);
             } catch (RuntimeException e) {
-                // One tenant's recovery failing must not stop the others', and
+                // One caller's recovery failing must not stop the others', and
                 // must not stop the workers from starting: the alternative is
                 // an instance that boots and then converts nothing.
-                log.error("Could not recover conversion jobs for tenant {}", tenant.getId(), e);
+                log.error("Could not recover conversion jobs for caller {}", callerId, e);
             }
         }
         return total;

@@ -57,16 +57,16 @@ public class ConversionWorkQueue {
         }
         if (waitingTotal >= capacity) {
             log.warn("Refusing a conversion for tenant {}: {} already waiting",
-                     request.tenantId(), waitingTotal);
+                     request.callerId(), waitingTotal);
             throw new ConversionQueueFullException(retryAfterSeconds);
         }
 
         waitingByTenant
-            .computeIfAbsent(request.tenantId(), tenant -> new ArrayDeque<>())
+            .computeIfAbsent(request.callerId(), tenant -> new ArrayDeque<>())
             .addLast(request);
         waitingTotal++;
-        if (!rotation.contains(request.tenantId())) {
-            rotation.addLast(request.tenantId());
+        if (!rotation.contains(request.callerId())) {
+            rotation.addLast(request.callerId());
         }
         notifyAll();
     }

@@ -87,7 +87,7 @@ public class ConversionJobExecutor {
                 log.error("A conversion worker caught an escaped failure for job {}",
                           request.jobPublicId(), e);
             } finally {
-                queue.completed(request.tenantId());
+                queue.completed(request.callerId());
             }
         }
     }

@@ -18,6 +18,8 @@ import com.cde.platform.storage.StorageKey;
 import com.cde.platform.storage.StorageProperties;
 import com.cde.platform.storage.StorageProvider;
 import com.cde.platform.tenancy.TenantContext;
+import java.util.function.Supplier;
+import java.util.List;
 import com.cde.platform.upload.UploadAdmissionService;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -146,9 +148,9 @@ class ConversionPipelineTest {
 
         ConverterService converter = new ConverterService(baseUri.toString(), dxfFallback);
 
-        return new ConversionPipeline(fetcher, admission, converter, storage, stateWriter,
-                                      new ConversionJobProperties(), storageProperties,
-                                      uploadDir);
+        return new ConversionPipeline(callersBoundTo(tenantId), fetcher, admission, converter,
+                                      storage, stateWriter, new ConversionJobProperties(),
+                                      storageProperties, uploadDir);
     }
 
     private UUID seedPendingJob() {
@@ -293,5 +295,30 @@ class ConversionPipelineTest {
         assertThat(Files.exists(expected))
             .as("expected the result at %s", expected)
             .isTrue();
+    }
+
+    /**
+     * The pipeline's view of who is calling, pinned to one caller.
+     *
+     * <p>Delegates to {@link TenantContext} rather than running the work
+     * directly. These tests run against a real PostgreSQL with Row-Level
+     * Security on, so a double that skipped establishing context would leave
+     * the pipeline's progress writes seeing no rows — and the test would report
+     * a pipeline defect that does not exist. A double is allowed to be simpler
+     * than the real thing; it is not allowed to be less correct about the
+     * control it stands in for.
+     */
+    private static ConversionCallers callersBoundTo(long callerId) {
+        return new ConversionCallers() {
+            @Override public long requireCurrentCallerId() { return callerId; }
+            @Override public long requireSubmitterId(String username) { return callerId; }
+            @Override public <T> T callAsCaller(long id, Supplier<T> work) {
+                return TenantContext.callAsTenant(id, work);
+            }
+            @Override public void runAsCaller(long id, Runnable work) {
+                TenantContext.runAsTenant(id, work);
+            }
+            @Override public List<Long> knownCallerIds() { return List.of(callerId); }
+        };
     }
 }

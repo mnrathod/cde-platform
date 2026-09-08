@@ -4,7 +4,6 @@ import com.cde.platform.fetch.FetchDestinationPolicy;
 import com.cde.platform.model.ConversionJob;
 import com.cde.platform.model.ConversionJob.TargetFormat;
 import com.cde.platform.repository.ConversionJobRepository;
-import com.cde.platform.tenancy.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -45,13 +44,16 @@ public class ConversionJobService {
     private final ConversionJobRepository jobs;
     private final ConversionWorkQueue queue;
     private final FetchDestinationPolicy destinationPolicy;
+    private final ConversionCallers callers;
 
     public ConversionJobService(ConversionJobRepository jobs,
                                 ConversionWorkQueue queue,
-                                FetchDestinationPolicy destinationPolicy) {
+                                FetchDestinationPolicy destinationPolicy,
+                                ConversionCallers callers) {
         this.jobs = jobs;
         this.queue = queue;
         this.destinationPolicy = destinationPolicy;
+        this.callers = callers;
     }
 
     /**
@@ -83,7 +85,7 @@ public class ConversionJobService {
         // has to be anyway.
         destinationPolicy.checkWhatNeedsNoLookup(sourceUrl);
 
-        long tenantId = TenantContext.requireTenantId();
+        long callerId = callers.requireCurrentCallerId();
         UUID publicId = UUID.randomUUID();
 
         ConversionJob job = jobs.save(ConversionJob.submitted(
@@ -92,10 +94,10 @@ public class ConversionJobService {
         // Enqueued after the row exists, so a worker that picks it up
         // immediately finds something to update. The reverse order races: a
         // fast worker would look for a job that has not been written yet.
-        queue.enqueue(new ConversionRequest(tenantId, publicId, sourceUrl));
+        queue.enqueue(new ConversionRequest(callerId, publicId, sourceUrl));
 
-        log.info("Accepted conversion job {} for tenant {} from host {}",
-                 publicId, tenantId, job.getSourceHost());
+        log.info("Accepted conversion job {} for caller {} from host {}",
+                 publicId, callerId, job.getSourceHost());
         return job;
     }
 
@@ -139,7 +141,7 @@ public class ConversionJobService {
      * the point: a sweep written to see everything would see everything.
      */
     @Transactional
-    public int failInterruptedJobsForCurrentTenant() {
+    public int failInterruptedJobsForCurrentCaller() {
         List<ConversionJob> interrupted = jobs.findByStatusIn(
             List.of(ConversionJob.Status.PENDING, ConversionJob.Status.RUNNING));
 

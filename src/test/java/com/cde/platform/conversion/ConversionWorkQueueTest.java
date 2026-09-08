@@ -129,7 +129,7 @@ class ConversionWorkQueueTest {
         queue.enqueue(requestFor(9L));
 
         List<Long> served = drain(queue, 2).stream()
-            .map(ConversionRequest::tenantId).toList();
+            .map(ConversionRequest::callerId).toList();
 
         assertThat(served).containsExactly(7L, 9L);
     }
@@ -147,7 +147,7 @@ class ConversionWorkQueueTest {
         queue.enqueue(requestFor(9L));
 
         List<Long> served = drain(queue, 2).stream()
-            .map(ConversionRequest::tenantId).toList();
+            .map(ConversionRequest::callerId).toList();
 
         assertThat(served).containsExactly(7L, 9L);
     }
@@ -226,7 +226,7 @@ class ConversionWorkQueueTest {
         worker.join(TimeUnit.SECONDS.toMillis(5));
 
         assertThat(taken.get()).isNotNull();
-        assertThat(taken.get().tenantId()).isEqualTo(7L);
+        assertThat(taken.get().callerId()).isEqualTo(7L);
     }
 
     @Test

@@ -31,7 +31,7 @@ import java.util.UUID;
  * it — so what is lost is only the ability to resume in-flight work elsewhere,
  * which the un-persisted credential rules out anyway.
  */
-public record ConversionRequest(long tenantId, UUID jobPublicId, URI sourceUrl) {
+public record ConversionRequest(long callerId, UUID jobPublicId, URI sourceUrl) {
 
     /**
      * Deliberately omits the URL.
@@ -43,7 +43,7 @@ public record ConversionRequest(long tenantId, UUID jobPublicId, URI sourceUrl) 
      */
     @Override
     public String toString() {
-        return "ConversionRequest[tenantId=" + tenantId + ", jobPublicId=" + jobPublicId
+        return "ConversionRequest[callerId=" + callerId + ", jobPublicId=" + jobPublicId
              + ", sourceUrl=(withheld)]";
     }
 }

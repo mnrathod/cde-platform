@@ -9,7 +9,6 @@ import com.cde.platform.storage.StorageKey;
 import com.cde.platform.storage.StorageMetadata;
 import com.cde.platform.storage.StorageProperties;
 import com.cde.platform.storage.StorageProvider;
-import com.cde.platform.tenancy.TenantContext;
 import com.cde.platform.upload.StoredFileName;
 import com.cde.platform.upload.UploadAdmissionService;
 import com.cde.platform.upload.UploadRejectedException;
@@ -47,6 +46,7 @@ public class ConversionPipeline {
     private static final Logger log = LoggerFactory.getLogger(ConversionPipeline.class);
 
     private final RemoteContentFetcher fetcher;
+    private final ConversionCallers callers;
     private final UploadAdmissionService admission;
     private final ConverterService converter;
     private final StorageProvider storage;
@@ -55,7 +55,8 @@ public class ConversionPipeline {
     private final Path workRoot;
     private final String environment;
 
-    public ConversionPipeline(RemoteContentFetcher fetcher,
+    public ConversionPipeline(ConversionCallers callers,
+                              RemoteContentFetcher fetcher,
                               UploadAdmissionService admission,
                               ConverterService converter,
                               StorageProvider storage,
@@ -63,6 +64,7 @@ public class ConversionPipeline {
                               ConversionJobProperties properties,
                               StorageProperties storageProperties,
                               @Value("${cde.storage.upload-dir}") String uploadDir) {
+        this.callers = callers;
         this.fetcher = fetcher;
         this.admission = admission;
         this.converter = converter;
@@ -83,10 +85,10 @@ public class ConversionPipeline {
         // Every directory is tenant-namespaced, like every storage prefix and
         // cache key (§5.6). Server-generated names throughout, so nothing the
         // far end said can influence a path (§5.13.6).
-        Path workDirectory = workRoot.resolve(String.valueOf(request.tenantId()))
+        Path workDirectory = workRoot.resolve(String.valueOf(request.callerId()))
                                      .resolve(jobId.toString());
         try {
-            TenantContext.runAsTenant(request.tenantId(),
+            callers.runAsCaller(request.callerId(),
                 () -> state.markRunning(jobId));
             convert(request, workDirectory);
         } catch (Exception e) {
@@ -110,7 +112,7 @@ public class ConversionPipeline {
 
         var fetched = fetcher.fetchTo(request.sourceUrl(), quarantined);
         String displayName = StoredFileName.forDisplay(fetched.declaredFileName());
-        TenantContext.runAsTenant(request.tenantId(), () -> {
+        callers.runAsCaller(request.callerId(), () -> {
             state.recordSourceFileName(jobId, displayName);
             state.recordProgress(jobId, 40);
         });
@@ -120,7 +122,7 @@ public class ConversionPipeline {
         }
 
         var admittedFile = admission.admit(quarantined, admitted, displayName);
-        TenantContext.runAsTenant(request.tenantId(), () -> state.recordProgress(jobId, 60));
+        callers.runAsCaller(request.callerId(), () -> state.recordProgress(jobId, 60));
 
         if (stopIfCancelled(request)) {
             return;
@@ -129,18 +131,18 @@ public class ConversionPipeline {
         long convertedBytes = converter.convertToPdfFile(
             admittedFile.path(), admittedFile.detectedType(), converted,
             properties.getConversionTimeout());
-        TenantContext.runAsTenant(request.tenantId(), () -> state.recordProgress(jobId, 85));
+        callers.runAsCaller(request.callerId(), () -> state.recordProgress(jobId, 85));
 
         if (stopIfCancelled(request)) {
             return;
         }
 
         String objectId = storeResult(request, converted);
-        TenantContext.runAsTenant(request.tenantId(),
+        callers.runAsCaller(request.callerId(),
             () -> state.markSucceeded(jobId, objectId, convertedBytes));
 
         log.info("Conversion job {} produced {} bytes for tenant {}",
-                 jobId, convertedBytes, request.tenantId());
+                 jobId, convertedBytes, request.callerId());
     }
 
     /**
@@ -151,7 +153,7 @@ public class ConversionPipeline {
     private String storeResult(ConversionRequest request, Path converted) throws IOException {
         String objectId = UUID.randomUUID().toString().replace("-", "") + ".pdf";
         StorageKey key = new StorageKey(
-            environment, request.tenantId(), StorageCategory.DERIVATIVE, objectId);
+            environment, request.callerId(), StorageCategory.DERIVATIVE, objectId);
 
         try (InputStream content = Files.newInputStream(converted)) {
             storage.store(key, content,
@@ -168,10 +170,10 @@ public class ConversionPipeline {
      */
     private boolean stopIfCancelled(ConversionRequest request) {
         UUID jobId = request.jobPublicId();
-        boolean cancelled = TenantContext.callAsTenant(request.tenantId(),
+        boolean cancelled = callers.callAsCaller(request.callerId(),
             () -> state.isCancellationRequested(jobId));
         if (cancelled) {
-            TenantContext.runAsTenant(request.tenantId(), () -> state.markCancelled(jobId));
+            callers.runAsCaller(request.callerId(), () -> state.markCancelled(jobId));
             log.info("Conversion job {} stopped at the submitter's request", jobId);
         }
         return cancelled;
@@ -188,8 +190,8 @@ public class ConversionPipeline {
     private void recordFailure(ConversionRequest request, Exception cause) {
         String reason = explain(cause);
         log.warn("Conversion job {} failed for tenant {}",
-                 request.jobPublicId(), request.tenantId(), cause);
-        TenantContext.runAsTenant(request.tenantId(),
+                 request.jobPublicId(), request.callerId(), cause);
+        callers.runAsCaller(request.callerId(),
             () -> state.markFailed(request.jobPublicId(), reason));
     }
 

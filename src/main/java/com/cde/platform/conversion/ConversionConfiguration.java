@@ -3,7 +3,6 @@ package com.cde.platform.conversion;
 import com.cde.platform.fetch.FetchDestinationPolicy;
 import com.cde.platform.fetch.RemoteContentFetcher;
 import com.cde.platform.repository.ConversionJobRepository;
-import com.cde.platform.repository.TenantRepository;
 import com.cde.platform.service.ConverterService;
 import com.cde.platform.storage.StorageProperties;
 import com.cde.platform.storage.StorageProvider;
@@ -46,12 +45,14 @@ public class ConversionConfiguration {
     @Bean
     public ConversionJobService conversionJobService(ConversionJobRepository jobs,
                                                      ConversionWorkQueue queue,
-                                                     FetchDestinationPolicy destinationPolicy) {
-        return new ConversionJobService(jobs, queue, destinationPolicy);
+                                                     FetchDestinationPolicy destinationPolicy,
+                                                     ConversionCallers callers) {
+        return new ConversionJobService(jobs, queue, destinationPolicy, callers);
     }
 
     @Bean
-    public ConversionPipeline conversionPipeline(RemoteContentFetcher fetcher,
+    public ConversionPipeline conversionPipeline(ConversionCallers callers,
+                                                 RemoteContentFetcher fetcher,
                                                  UploadAdmissionService admission,
                                                  ConverterService converter,
                                                  StorageProvider storage,
@@ -60,7 +61,7 @@ public class ConversionConfiguration {
                                                  StorageProperties storageProperties,
                                                  @Value("${cde.storage.upload-dir}")
                                                  String uploadDir) {
-        return new ConversionPipeline(fetcher, admission, converter, storage, state,
+        return new ConversionPipeline(callers, fetcher, admission, converter, storage, state,
                                       properties, storageProperties, uploadDir);
     }
 
@@ -73,8 +74,8 @@ public class ConversionConfiguration {
 
     @Bean
     public ConversionStartupRecovery conversionStartupRecovery(ConversionJobService jobService,
-                                                               TenantRepository tenants,
+                                                               ConversionCallers callers,
                                                                ConversionJobExecutor executor) {
-        return new ConversionStartupRecovery(jobService, tenants, executor);
+        return new ConversionStartupRecovery(jobService, callers, executor);
     }
 }

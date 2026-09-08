@@ -1,5 +1,6 @@
 package com.cde.platform.conversion.api;
 
+import com.cde.platform.conversion.ConversionCallers;
 import com.cde.platform.conversion.ConversionJobService;
 import com.cde.platform.conversion.api.ConversionDtos.ConversionJobRequest;
 import com.cde.platform.conversion.api.ConversionDtos.ConversionJobResponse;
@@ -7,12 +8,10 @@ import com.cde.platform.exception.ResourceNotFoundException;
 import com.cde.platform.model.ConversionJob;
 import com.cde.platform.openapi.ApiDocumentation;
 import com.cde.platform.openapi.StandardErrorResponses;
-import com.cde.platform.repository.UserRepository;
 import com.cde.platform.storage.StorageCategory;
 import com.cde.platform.storage.StorageKey;
 import com.cde.platform.storage.StorageProperties;
 import com.cde.platform.storage.StorageProvider;
-import com.cde.platform.tenancy.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -69,16 +68,16 @@ import java.util.UUID;
 public class ConversionJobController {
 
     private final ConversionJobService conversions;
-    private final UserRepository users;
+    private final ConversionCallers callers;
     private final StorageProvider storage;
     private final String environment;
 
     public ConversionJobController(ConversionJobService conversions,
-                                   UserRepository users,
+                                   ConversionCallers callers,
                                    StorageProvider storage,
                                    StorageProperties storageProperties) {
         this.conversions = conversions;
-        this.users = users;
+        this.callers = callers;
         this.storage = storage;
         this.environment = storageProperties.getEnvironment();
     }
@@ -262,7 +261,7 @@ public class ConversionJobController {
         // The key is rebuilt from the caller's own tenant, never from anything
         // in the request, so a job row cannot name an object outside its
         // tenant's prefix even if one were somehow written that way (§11).
-        StorageKey key = new StorageKey(environment, TenantContext.requireTenantId(),
+        StorageKey key = new StorageKey(environment, callers.requireCurrentCallerId(),
                                         StorageCategory.DERIVATIVE, objectId);
 
         return ResponseEntity.ok()
@@ -290,9 +289,6 @@ public class ConversionJobController {
     }
 
     private long currentUserId(UserDetails principal) {
-        return users.findByUsername(principal.getUsername())
-            .orElseThrow(() -> new IllegalStateException(
-                "An authenticated principal has no user record."))
-            .getId();
+        return callers.requireSubmitterId(principal.getUsername());
     }
 }
