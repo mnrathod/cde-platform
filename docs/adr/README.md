@@ -13,11 +13,12 @@ ADRs are immutable once accepted. A decision that changes gets a new ADR that
 supersedes the old one; the old one stays, marked superseded. Editing history
 loses the reasoning, which is the only part worth keeping.
 
-**"Proposed"** appears once, on ADR 14, against the rule above. It was
-written to give a decision something to react to rather than to record one
-already taken, and marking it Accepted would misrepresent who decided it. A
-proposal sitting in this directory reads as a decision to anyone skimming, so
-this status is meant to be short-lived and rare.
+**"Proposed"** appeared once, on ADR 14, for a few hours between drafting
+and acceptance — against the rule above, and deliberately. Writing a decision
+down is how it gets argued with; marking it Accepted before anyone had would
+have misrepresented who decided it. The status is meant to be short-lived and
+rare, because a proposal in this directory reads as a decision to anyone
+skimming.
 
 **"Accepted in part"** appears once, on ADR 13. It marks a record where the
 engineering position is settled and built, and a question inside the same
@@ -44,7 +45,7 @@ it and by when.
 | [11](0011-storage-abstraction.md) | Put object storage behind one interface, with the local provider built first | Accepted |
 | [12](0012-viewer-as-a-standalone-product.md) | Ship the viewer as its own product, fed by integrator-minted URLs | Accepted |
 | [13](0013-dwg-conversion-in-a-distributed-product.md) | Licence the ODA File Converter for redistribution, or ship no DWG support | **Resolved — LibreDWG removed; DWG needs an operator-supplied ODA** |
-| [14](0014-viewer-embed-and-identity-contracts.md) | Embed the viewer in an iframe, and give it no identity of its own | **Proposed — not yet accepted** |
+| [14](0014-viewer-embed-and-identity-contracts.md) | Embed the viewer in an iframe, and give it no identity of its own | Accepted |
 
 ## Decisions not yet recorded
 

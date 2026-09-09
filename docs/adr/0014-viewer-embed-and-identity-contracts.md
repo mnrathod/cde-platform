@@ -1,6 +1,6 @@
 # 14. Embed the viewer in an iframe, and give it no identity of its own
 
-- **Status:** **Proposed.** Not yet accepted — see "A note on this status".
+- **Status:** **Accepted 2026-09-09.**
 - **Date:** 2026-09-09
 - **Related:** ADR 12 (viewer as a standalone product), ADR 9 (bundle
   third-party JavaScript), `cde-angular/docs/viewer-extraction-inventory.md`,
@@ -22,24 +22,28 @@ because where markup goes is the same question.
 
 ### What is actually coupled
 
-The extraction inventory counted **26 endpoints across 9 services**, by
-following the imports rather than grepping a directory. That number has been
-got wrong twice in this engagement — once as "seven", once as "fourteen" —
-both times by scanning `features/viewer/` and not the services it imports.
-The method matters more than the number: the viewer's surface is what its
-transitive imports reach, not what its own directory contains.
+**35 endpoints across 15 files** — 11 services and 4 components — reached by
+walking imports transitively from every viewer component, viewer service and
+`viewer-core` file.
 
-They group into three, and the grouping is the design:
+> **Corrected 2026-09-09, hours after acceptance.** This section first said
+> "26 endpoints across 9 services", taken from the extraction inventory, while
+> making a point about method. The number was wrong and so was citing it
+> without re-deriving it. See "A note on the count" below; the decision does
+> not change, because the grouping does not.
+
+They group into four, and the grouping is the design:
 
 | Group | Count | What it is |
 |---|---|---|
-| Content | 5 | Getting the document and its geometry |
-| Document operations | 17 | Pages, redaction, signing, forms, OCR, versions, flatten |
+| Content | 7 | The document, its geometry, its status |
+| Markup | 7 | Annotations and replies — read *and* write |
+| Document operations | 19 | Pages, redaction, signing, forms, OCR, versions, flatten, upload |
 | Identity | 2 | Login and register — not the viewer's business at all |
 
-Annotations sit inside the content group on the read path and inside document
-operations on the write path, which is the first hint that "read" and "write"
-is the seam that matters.
+Markup is its own group rather than split across the other two, and that is
+the first hint that "read" and "write" is the seam that matters: the same
+seven endpoints serve both, and only the write half needs a host.
 
 ### What is already true
 
@@ -235,19 +239,43 @@ deployment question. What the protocol's messages actually are. Whether
 `@cde/viewer-core` is published publicly or handed to integrators directly,
 which is the `UNLICENSED` decision in `cde-angular/docs/licences.md` §3.4.
 
-## A note on this status
+## A note on the count
 
-The README for this directory says an ADR is a record, not a proposal, and
-this one is marked **Proposed**. That is a deliberate exception and it should
-stay rare.
+Four numbers have been given for the viewer's endpoint surface in this
+engagement: seven, fourteen, twenty-six, and thirty-six. The measured figure
+is **35 across 15 files**, and the reason for the spread is worth recording
+because it is not carelessness of a kind that more care would fix.
 
-The reason is that this was written to give a decision something concrete to
-react to, rather than to record one already taken. Marking it Accepted would
-misrepresent who decided it; leaving it unwritten would leave four pieces of
-work blocked on a conversation nobody had scheduled. ADR 13 went the same way
-in reverse — the engineering recommendation there was overridden, correctly,
-by a product decision — and the same is likely and welcome here.
+Seven and fourteen came from grepping `features/viewer/` — the viewer's own
+directory rather than what it imports. That is a scope error and the
+extraction inventory called it out.
 
-Accept it, amend it, or replace it; but the status should not stay Proposed
-for long, because a proposal in the ADR directory is indistinguishable from a
-decision to anyone reading quickly.
+Twenty-six and thirty-six came from import walks, and the gap between them is
+a resolver bug: resolving `../core/services/role.service` by taking the path
+and applying a "replace the extension with .ts" operation yields
+`role.ts`, because the extension it replaces is `.service`. Every
+`*.service.ts` import silently fails to resolve, the walk stops early, and the
+count comes out low with no error to notice. The fix is to append `.ts` rather
+than substitute it.
+
+The lesson is not "count more carefully". It is that **a measurement whose
+failure mode is a plausible smaller number needs a check that would catch it**
+— here, asserting that a file known to import `RoleService` actually reaches
+`role.service.ts`. Without that, the walk reported 34 files and looked fine.
+
+## A note on how this was accepted
+
+This was drafted as **Proposed** — against this directory's rule that an ADR
+is a record rather than a proposal — because it was written to give a
+decision something concrete to react to, and marking it Accepted before
+anyone had decided would have misrepresented who did.
+
+Accepted as drafted on 2026-09-09, unamended. The exception was open for a
+few hours, which is the length it was meant to last: a proposal sitting in
+this directory is indistinguishable from a decision to anyone reading
+quickly.
+
+The protocol it calls for is specified in
+`cde-angular/docs/viewer-embed-protocol.md`, written before implementation
+for the reason the consequences section gives — the guide is where the
+protocol's awkwardness shows first, and it is cheaper to find it there.
