@@ -45,12 +45,17 @@ application artifact, so no combined work is created and their copyleft terms
 do not reach this software:
 
   ClamAV                               GPL-2.0      https://clamav.net
-  LibreDWG                             GPL-3.0      https://gnu.org/software/libredwg
   LibreOffice (headless conversion)    MPL-2.0      https://libreoffice.org
 
 Keeping them out-of-process is a licence requirement, not an implementation
-preference. Linking any of them into the application would change the
+preference. Linking either of them into the application would change the
 licensing position of the whole product.
+
+LibreDWG (GPL-3.0) was in this list and is no longer in the converter image.
+Out-of-process invocation kept its copyleft away from our code, but it said
+nothing about *distributing the binary*, which GPL-3.0 §6 obliges separately —
+and a product customers install is distribution. Removed by ADR 13; DWG now
+goes through the operator-supplied ODA File Converter (docs/licences.md §4).
 
 ────────────────────────────────────────────────────────────────────────────
 STANDARDS
