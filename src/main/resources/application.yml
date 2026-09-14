@@ -149,6 +149,27 @@ cde:
     # reporting directive; the policy still blocks, it just tells nobody.
     csp-report-uri: ${CDE_WEB_CSP_REPORT_URI:}
 
+    # Which host applications may put /embed in an iframe (ADR 14). Empty
+    # means none — frame-ancestors 'none', the same policy every other route
+    # gets — so adding an integrator is a deliberate act of configuration.
+    # Each entry is a bare origin; wildcards, paths and the null origin are
+    # refused at startup, because a source a browser cannot parse is dropped
+    # rather than reported and silently widens the policy.
+    #
+    #   CDE_WEB_EMBED_PARENT_ORIGINS=https://cde.customer.example
+    embed-parent-origins: ${CDE_WEB_EMBED_PARENT_ORIGINS:}
+
+    app:
+      # Directory holding the built browser bundle, when this image serves it
+      # (ADR 15) — the directory containing index.html, which for the Angular
+      # application builder is dist/cde-web/browser.
+      #
+      # Empty means this image serves no application and answers page routes
+      # with 404, which is what it did before the setting existed and what a
+      # deployment fronting it with its own web tier wants. The container
+      # stages a bundle at /app/web; set this to that path to serve it.
+      path: ${CDE_WEB_APP_PATH:}
+
   # Second factor (4.4). Off unless a deployment provisions an encryption key:
   # a TOTP secret is a bearer credential with nothing to crack, so a built-in
   # key would make every deployment's second factors forgeable by anyone who

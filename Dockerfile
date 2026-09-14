@@ -33,6 +33,20 @@ WORKDIR /app
 
 COPY --from=builder /app/build/libs/*.jar app.jar
 
+# The built browser application, when one has been staged (ADR 15).
+#
+# Copied from the context rather than built in a stage of its own: the Angular
+# sources are in a sibling repository, which a build context cannot reach.
+# scripts/stage-browser-app.sh brings the bundle across first.
+#
+# A clean checkout has only web/.gitkeep here, so this copies almost nothing
+# and the image serves no application — which is the default and a supported
+# one. CDE_WEB_APP_PATH is what switches serving on, and it is set by the
+# deployment (docker-compose.yml, k8s/configmap.yaml), not here: an
+# unstaged image must behave exactly as it did before this existed rather
+# than fail at startup looking for a bundle nobody staged.
+COPY web /app/web
+
 # Non-root. uploads/ is a mounted volume, so it must be owned by the
 # runtime user or every write fails with EACCES.
 RUN addgroup -g 10001 cde \

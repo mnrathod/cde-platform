@@ -1,0 +1,8 @@
+This directory is where scripts/stage-browser-app.sh puts the built browser
+application, and where the Dockerfile copies it from. Its contents are build
+output and are not committed — only this file is, so that `COPY web /app/web`
+succeeds in a clean checkout where nothing has been staged.
+
+An image built without staging serves no application. That is a supported
+configuration: cde.web.app.path is unset by default, and a deployment that
+serves the Angular build from its own web tier wants exactly that.

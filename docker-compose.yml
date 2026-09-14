@@ -74,6 +74,17 @@ services:
       SPRING_PROFILES_ACTIVE: docker
       CDE_CONVERTER_URL: http://converter:5001
       CDE_STORAGE_UPLOAD_DIR: /app/uploads
+      # Serve the browser application from this image (ADR 15). The bundle
+      # has to be staged into the build context before `docker compose build`
+      # — scripts/stage-browser-app.sh — or the image has an empty /app/web
+      # and this container refuses to start rather than answering every page
+      # with a 404 that reads as a routing fault.
+      #
+      # To run the API alone, as this stack did before ADR 15, put an empty
+      # CDE_WEB_APP_PATH= in your .env.
+      CDE_WEB_APP_PATH: ${CDE_WEB_APP_PATH:-/app/web}
+      # Hosts allowed to frame /embed (ADR 14). Closed by default.
+      CDE_WEB_EMBED_PARENT_ORIGINS: ${CDE_WEB_EMBED_PARENT_ORIGINS:-}
       # Override in deployment. The application.yml default is a shipped
       # placeholder and must not be used anywhere real.
       CDE_JWT_SECRET: ${CDE_JWT_SECRET:?set CDE_JWT_SECRET before starting}

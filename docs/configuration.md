@@ -427,10 +427,94 @@ deployment where a separate web tier serves the Angular build, that tier serves
 the `/embed` document and must carry the same `frame-ancestors` value; the
 backend's copy governs only what the backend answers.
 
-As the manifests stand, `k8s/ingress.yaml` routes everything to this service
-and the image contains no frontend, so **nothing currently serves `/embed` at
-all**. Configuring this setting is necessary for the embed and is not on its
-own sufficient to put a rendered viewer in a customer's iframe.
+The supported way to avoid that split is to let this image serve the document
+too — set [`cde.web.app.path`](#cdewebapppath) and one component emits both the
+document and the header that governs it. `k8s/ingress.yaml` already routes `/`
+here, so with that set there is nothing else to configure.
+
+### `cde.web.app.path`
+
+| | |
+|---|---|
+| Type | Filesystem path |
+| Default | *(empty — this image serves no browser application)* |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_APP_PATH` |
+
+The directory holding the built browser application — **the one containing
+`index.html`**, which for the Angular application builder is
+`dist/cde-web/browser`, one level below the output path. Naming the level above
+it is the usual mistake, and the startup error says so.
+
+Setting it makes this application serve the viewer's pages as well as its API:
+`/`, `/login`, `/projects`, `/embed`, `/viewer/{id}`, `/viewer3d/{id}`,
+`/compare` and `/visual-compare`. The container image stages a bundle at
+`/app/web`, so in a container this is:
+
+```bash
+CDE_WEB_APP_PATH=/app/web
+```
+
+**Empty means this image serves no application**, and page routes answer 404 —
+the behaviour before ADR 15, and the right one where a separate web tier serves
+the build.
+
+#### The bundle has to be staged before the image is built
+
+The Angular sources live in a sibling repository, outside this repository's
+Docker build context, so the Dockerfile cannot build them and cannot reach
+them. `scripts/stage-browser-app.sh` copies an already-built bundle into
+`web/`, and `COPY web /app/web` carries it into the image:
+
+```bash
+cd ../cde-angular && npx ng build --configuration production && cd -
+scripts/stage-browser-app.sh
+docker compose build cde-app
+```
+
+The Jenkins pipeline does this in its Build stage. `web/` is not committed —
+only a `.gitkeep`, so a clean checkout still builds.
+
+An image built **without** staging has an empty `/app/web`, and a deployment
+that points this setting at it **fails at startup** naming the script. That is
+deliberate: the alternative is an application that serves its API perfectly and
+answers every page with a 404, which reads as a routing fault and is a mounting
+one. To run the API alone, set `CDE_WEB_APP_PATH=` empty rather than pointing
+it somewhere hopeful.
+
+#### Why the backend serves static files at all
+
+§2 puts static assets at the Apache web tier, and for the hosted service that
+is still where they belong — put Apache in front and leave this unset. This
+exists for the other deployment ADR 12 describes: the viewer sold as a product
+a customer installs, where "run this one image" beats "run this image, and
+serve this other artefact, and configure your web tier's `frame-ancestors` to
+match". ADR 15 records the trade and its limits.
+
+#### What it serves, and what it does not
+
+The document is rendered per request, not served as a file, because it carries
+a `Content-Security-Policy` nonce that must match the header on the same
+response. It is sent `Cache-Control: no-store` for that reason — a cached copy
+would be handed to a later visitor whose policy names a different nonce, and
+the application would render unstyled until the cache expired.
+
+**The frontend build has to cooperate.** The nonce is substituted into a
+`CDE_CSP_NONCE` placeholder that the Angular build stamps onto the inlined
+critical CSS, the module scripts and the stylesheet-promoting script — it does
+that because the frontend's `src/index.html` carries
+`ngCspNonce="CDE_CSP_NONCE"` on `<app-root>`. A bundle built without it has no
+placeholder, and this application **refuses to start** rather than serve a page
+whose every style the browser will reject.
+
+Everything else — scripts, styles, fonts, assets — is served as a static file
+with a one-year immutable cache, which is safe because the Angular build
+fingerprints those filenames.
+
+Uploaded files are **not** served from here and must not be. They go through
+the storage abstraction and its authorising download endpoint; §5.13.7 keeps
+user content off any path a web server serves directly.
 
 ### `cde.web.hsts-enabled`
 

@@ -22,6 +22,24 @@ data:
 
   SPRING_PROFILES_ACTIVE: "kubernetes"
 
+  # Where the image stages the built browser application (ADR 15). Setting
+  # this is what makes the pod serve the viewer and its /embed document as
+  # well as the API — ingress.yaml routes "/" here, so without it every page
+  # request reaches this container and gets a 404.
+  #
+  # Comment it out if you serve the Angular build from your own web tier. Do
+  # not point it anywhere else: an image built without staging has only an
+  # empty /app/web, and the application refuses to start rather than serve
+  # pages that are not there.
+  CDE_WEB_APP_PATH: "/app/web"
+
+  # Hosts permitted to frame /embed (ADR 14). Empty, so nothing may — set it
+  # to your integrator's origin to open the embed, and note that this alone
+  # is what makes the viewer framable. Wildcards are refused at startup.
+  #
+  #   CDE_WEB_EMBED_PARENT_ORIGINS: "https://cde.customer.example"
+  CDE_WEB_EMBED_PARENT_ORIGINS: ""
+
   # Heap tracks the container memory limit rather than the node's, which is
   # what makes the limit below actually bound the JVM instead of the kernel
   # OOM-killing it. Already the image default; repeated here so changing the

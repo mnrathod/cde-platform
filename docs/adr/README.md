@@ -46,6 +46,7 @@ it and by when.
 | [12](0012-viewer-as-a-standalone-product.md) | Ship the viewer as its own product, fed by integrator-minted URLs | Accepted |
 | [13](0013-dwg-conversion-in-a-distributed-product.md) | Licence the ODA File Converter for redistribution, or ship no DWG support | **Resolved — LibreDWG removed; DWG needs an operator-supplied ODA** |
 | [14](0014-viewer-embed-and-identity-contracts.md) | Embed the viewer in an iframe, and give it no identity of its own | Accepted |
+| [15](0015-serve-the-browser-application-from-the-backend-image.md) | Serve the browser application from the backend image, so one artefact emits the embed document and its policy | Accepted — deviates from §2's web tier, deliberately |
 
 ## Decisions not yet recorded
 

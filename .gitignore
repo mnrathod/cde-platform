@@ -63,3 +63,11 @@ __pycache__/
 .build/
 .swiftpm/
 Package.resolved
+
+### Staged frontend build ###
+# scripts/stage-browser-app.sh copies the Angular build here so the image can
+# serve it (ADR 15). It is build output produced in the sibling repository —
+# committing it would put a second, silently stale copy of the frontend in
+# this repository's history. .gitkeep is tracked so COPY web always succeeds.
+web/*
+!web/.gitkeep

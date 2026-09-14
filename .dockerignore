@@ -9,6 +9,12 @@ bin/
 # developer's documents into an image is both slow and a data leak.
 uploads/
 
+# web/ is NOT listed here, deliberately. It is build output like build/
+# above, and the same reasoning would exclude it — but it is output from the
+# *sibling* repository that this build context cannot otherwise reach, staged
+# by scripts/stage-browser-app.sh precisely so the image can carry it
+# (ADR 15). Excluding it produces an image that starts and 404s every page.
+
 # VCS and IDE
 .git/
 .gitignore

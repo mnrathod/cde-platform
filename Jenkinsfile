@@ -149,6 +149,23 @@ pipeline {
                 dir('../cde-angular') {
                     sh 'npx ng build --configuration production'
                 }
+                // Bring the bundle into this repository's Docker build
+                // context, which is where the Dockerfile copies it from
+                // (ADR 15). Without this the frontend is built and then
+                // discarded — the state before ADR 15, where the image
+                // shipped an API with no page behind "/" while
+                // k8s/ingress.yaml routed every page request to it.
+                //
+                // This pipeline has no container stage yet (see "Not
+                // configured" below), so today this only proves the staging
+                // step works and archives the bundle with the build. When
+                // the image build lands it must run after this.
+                //
+                // The guards first, against synthetic directories: both of
+                // the things the script refuses produce an image that builds
+                // and starts, so neither shows up in a container build.
+                sh 'scripts/stage-browser-app.test.sh'
+                sh 'scripts/stage-browser-app.sh'
             }
         }
 

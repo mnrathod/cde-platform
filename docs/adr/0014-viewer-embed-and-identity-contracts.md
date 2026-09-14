@@ -2,9 +2,10 @@
 
 - **Status:** **Accepted 2026-09-09.** The `frame-ancestors` consequence below
   is **implemented 2026-09-14** as `cde.web.embed-parent-origins`, closed by
-  default; see `docs/configuration.md`. Two consequences remain open:
-  collaboration's own authentication, and the accessibility re-test across the
-  frame boundary.
+  default; see `docs/configuration.md`. The image now also serves the `/embed`
+  document itself (ADR 15), so the allow-list and the document it governs come
+  from one component. Two consequences remain open: collaboration's own
+  authentication, and the accessibility re-test across the frame boundary.
 - **Date:** 2026-09-09
 - **Related:** ADR 12 (viewer as a standalone product), ADR 9 (bundle
   third-party JavaScript), `cde-angular/docs/viewer-extraction-inventory.md`,

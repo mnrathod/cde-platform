@@ -163,7 +163,7 @@ class EmbedFramingPolicyTest {
         @Test
         @DisplayName("says 'none' when no host is configured")
         void closedByDefault() {
-            assertThat(SecurityConfig.frameAncestorsFor(List.of())).isEqualTo("'none'");
+            assertThat(ContentSecurityPolicies.frameAncestorsFor(List.of())).isEqualTo("'none'");
         }
 
         @Test
@@ -173,7 +173,7 @@ class EmbedFramingPolicyTest {
             // one source the browser cannot parse, which it drops while
             // applying what is left — so the mistake shows up as a frame that
             // works for the first customer and not the second.
-            assertThat(SecurityConfig.frameAncestorsFor(List.of(HOST_CDE, HOST_STAGING)))
+            assertThat(ContentSecurityPolicies.frameAncestorsFor(List.of(HOST_CDE, HOST_STAGING)))
                 .isEqualTo(HOST_CDE + " " + HOST_STAGING)
                 .doesNotContain(",");
         }
@@ -184,15 +184,15 @@ class EmbedFramingPolicyTest {
             // 'none' alongside any other source makes the whole directive
             // invalid, and an invalid directive is ignored — which leaves the
             // route framable by anyone. The opposite of what it looks like.
-            assertThat(SecurityConfig.frameAncestorsFor(List.of(HOST_CDE)))
+            assertThat(ContentSecurityPolicies.frameAncestorsFor(List.of(HOST_CDE)))
                 .doesNotContain("'none'");
         }
 
         @Test
         @DisplayName("relaxes framing and nothing else")
         void onlyFramingChanges() {
-            String strict = SecurityConfig.policyPermittingAncestors("'none'");
-            String open = SecurityConfig.policyPermittingAncestors(HOST_CDE);
+            String strict = ContentSecurityPolicies.api("'none'");
+            String open = ContentSecurityPolicies.api(HOST_CDE);
 
             // The rest of the policy is what stops an injected script running
             // in the frame. Opening the frame must not open that too.

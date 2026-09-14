@@ -19,6 +19,7 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.HeaderWriterFilter;
 import org.springframework.security.web.header.writers.ContentSecurityPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHeaderWriter.CrossOriginOpenerPolicy;
 import org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy;
@@ -26,6 +27,10 @@ import org.springframework.security.web.header.writers.DelegatingRequestMatcherH
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
 import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter.XFrameOptionsMode;
+import com.cde.platform.security.ContentSecurityPolicyNonce;
+import com.cde.platform.web.BrowserApplicationRoutes;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import static org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher.pathPattern;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
@@ -129,14 +134,21 @@ public class SecurityConfig {
                 // needed (/index.html, /viewer.html, /js, /css, /img) went
                 // with it rather than being left as permits for files that no
                 // longer exist.
-                // The embed route holds no session and must not redirect to a
-                // login: ADR 14 makes the viewer authenticate nobody, and a
-                // login form inside someone else's iframe is both a broken
-                // integration and an invitation to type a password into a
-                // frame. Permitted so that whatever serves the document is
-                // reachable; the framing decision is the CSP allow-list below,
-                // not this line.
-                .requestMatchers("/embed", "/embed/**").permitAll()
+                // The browser application's own pages, and the fingerprinted
+                // files they load. These carry no data — the application
+                // authenticates against /api like any other client, and every
+                // API request is authorised on its own.
+                //
+                // The embed route in particular holds no session and must not
+                // redirect to a login: ADR 14 makes the viewer authenticate
+                // nobody, and a login form inside someone else's iframe is both
+                // a broken integration and an invitation to type a password
+                // into a frame. The framing decision is the CSP allow-list, not
+                // this line.
+                .requestMatchers(BrowserApplicationRoutes.ALL).permitAll()
+                .requestMatchers(BrowserApplicationRoutes.EMBED + "/**").permitAll()
+                .requestMatchers("/*.js", "/*.css", "/*.ico", "/*.webmanifest", "/*.txt",
+                                 "/assets/**", "/icons/**", "/media/**").permitAll()
                 .requestMatchers("/api/auth/**",
                                  "/favicon.ico", "/favicon.png",
                                  "/api/logs/**").permitAll()
@@ -149,75 +161,21 @@ public class SecurityConfig {
             .exceptionHandling(e -> e
                 .authenticationEntryPoint(authenticationEntryPoint)
                 .accessDeniedHandler(accessDeniedHandler))
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            // Before the header writer, because the policy it composes names
+            // the nonce this generates. Registered here rather than as a plain
+            // @Component so the ordering is stated where it matters instead of
+            // depending on filter-registration defaults.
+            .addFilterBefore(new ContentSecurityPolicyNonce(), HeaderWriterFilter.class);
         return http.build();
     }
 
     /**
-     * The API's own content-security policy.
+     * Paths whose responses are markup rendered by a browser.
      *
-     * <p>This server answers with JSON, so it has no legitimate need to load a
-     * script, a stylesheet, a frame or a plugin from anywhere — {@code 'none'}
-     * is both the strictest policy and the accurate one. It matters on the
-     * paths that <em>do</em> return markup: an error page, and anything a
-     * future misconfiguration causes to be rendered rather than serialised.
-     *
-     * <p>{@code frame-ancestors 'none'} is the modern replacement for
-     * X-Frame-Options and is what actually stops the viewer being framed by a
-     * site that wants a user's clicks; both are sent, because older browsers
-     * read only the latter.
+     * <p>The policies themselves live in {@link ContentSecurityPolicies}; what
+     * is here is which one each request gets.
      */
-    /**
-     * Package-private so it can be asserted without a Spring context.
-     *
-     * <p>The integration assertions in {@code EmbedFramingPolicyTest} need a
-     * database container to raise a context at all. This composition — which
-     * is where a comma instead of a space, or a stray {@code 'none'} left
-     * beside a real origin, would hide — is a pure function and is tested as
-     * one, so it stays verifiable wherever the container does not start.
-     */
-    static String policyPermittingAncestors(String frameAncestors) {
-        return "default-src 'none'; frame-ancestors " + frameAncestors
-            + "; base-uri 'none'; form-action 'none'";
-    }
-
-    /**
-     * The {@code frame-ancestors} source list for a set of configured hosts.
-     *
-     * <p>Space-separated, because that is what the CSP grammar says; a
-     * comma-separated list is not a syntax error the browser reports, it is one
-     * source it cannot parse, which it drops while applying what is left. An
-     * empty configuration yields {@code 'none'} rather than an empty directive,
-     * because an empty {@code frame-ancestors} is invalid and an invalid
-     * directive is ignored — which would leave the route framable by anyone.
-     */
-    static String frameAncestorsFor(List<String> embeddingHosts) {
-        return embeddingHosts.isEmpty() ? "'none'" : String.join(" ", embeddingHosts);
-    }
-
-    private static final String API_CONTENT_SECURITY_POLICY =
-        policyPermittingAncestors("'none'");
-
-    /**
-     * A narrower relaxation for the API documentation page only.
-     *
-     * <p>Swagger UI is a real single-page application: it loads its bundle
-     * from this origin and applies inline styles as it renders. {@code
-     * style-src 'unsafe-inline'} is therefore unavoidable for it to display,
-     * and is scoped to this one path rather than granted everywhere.
-     *
-     * <p>The concession is to <em>styles</em>, not scripts. An inline style
-     * cannot execute JavaScript; {@code script-src 'self'} still refuses any
-     * injected script, which is the property that matters. The alternative —
-     * relaxing the global policy — would have weakened every path in order to
-     * render one developer-facing page.
-     */
-    private static final String DOCS_CONTENT_SECURITY_POLICY =
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        + "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
-        + "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
-
-    /** Paths whose responses are markup rendered by a browser. */
     private static final RequestMatcher DOCUMENTATION_PAGES =
         new OrRequestMatcher(pathPattern("/api/docs/**"),
                              pathPattern("/api/docs"),
@@ -232,11 +190,25 @@ public class SecurityConfig {
      * change to a policy string that happens to apply everywhere.
      */
     private static final RequestMatcher EMBED_ROUTE =
-        new OrRequestMatcher(pathPattern("/embed"), pathPattern("/embed/**"));
+        new OrRequestMatcher(pathPattern(BrowserApplicationRoutes.EMBED),
+                             pathPattern(BrowserApplicationRoutes.EMBED + "/**"));
 
-    /** Every path that keeps the default, unframable policy. */
-    private static final RequestMatcher STANDARD_ROUTES =
-        new NegatedRequestMatcher(new OrRequestMatcher(DOCUMENTATION_PAGES, EMBED_ROUTE));
+    /**
+     * Every route the browser application owns, including the embed one.
+     *
+     * <p>These serve markup rather than JSON, so {@code default-src 'none'}
+     * would refuse the application's own scripts and styles and render a blank
+     * page. The list is {@link BrowserApplicationRoutes#ALL}; the controller
+     * repeats it literally and a test asserts the two agree.
+     */
+    private static final RequestMatcher APP_DOCUMENT_ROUTES = new OrRequestMatcher(
+        java.util.Arrays.stream(BrowserApplicationRoutes.ALL)
+            .map(route -> (RequestMatcher) pathPattern(route))
+            .toList());
+
+    /** Every path that keeps the default, unframable, load-nothing policy. */
+    private static final RequestMatcher STANDARD_ROUTES = new NegatedRequestMatcher(
+        new OrRequestMatcher(DOCUMENTATION_PAGES, APP_DOCUMENT_ROUTES));
 
     /**
      * The response headers a browser needs in order to apply the protections
@@ -273,9 +245,10 @@ public class SecurityConfig {
             .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
                 DOCUMENTATION_PAGES,
                 new ContentSecurityPolicyHeaderWriter(documentationPolicy())))
+            // Not a ContentSecurityPolicyHeaderWriter: this policy carries a
+            // nonce, so it is composed per request rather than once at startup.
             .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
-                EMBED_ROUTE,
-                new ContentSecurityPolicyHeaderWriter(embedPolicy())))
+                APP_DOCUMENT_ROUTES, this::writeDocumentPolicy))
             .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
                 STANDARD_ROUTES,
                 new ContentSecurityPolicyHeaderWriter(apiPolicy())));
@@ -300,30 +273,38 @@ public class SecurityConfig {
     }
 
     private String apiPolicy() {
-        return withReportUri(API_CONTENT_SECURITY_POLICY);
+        return withReportUri(ContentSecurityPolicies.api("'none'"));
     }
 
     private String documentationPolicy() {
-        return withReportUri(DOCS_CONTENT_SECURITY_POLICY);
+        return withReportUri(ContentSecurityPolicies.documentation());
     }
 
     /**
-     * The embed route's policy: the strict one, with framing opened to named
-     * origins and to nothing else.
+     * The policy for a page this application serves, composed per request.
      *
-     * <p>An unconfigured deployment gets {@code frame-ancestors 'none'} —
-     * byte-for-byte the policy every other route gets. That is the point:
-     * adding this route must not, on its own, make anything framable. Opening
-     * it is a deliberate configuration act, and until someone performs it this
-     * route is exactly as closed as it was before the route existed.
+     * <p>Per request because it names a nonce, and a nonce reused across
+     * requests is not a nonce. {@link ContentSecurityPolicyNonce} puts the
+     * value where both this and the controller rendering the document can read
+     * it; if they ever disagreed the page would render unstyled, which is a
+     * visible failure rather than a quiet weakening.
+     *
+     * <p>The embed route is the only one whose framing is ever opened, and only
+     * when a deployment has named the hosts. Everywhere else — including the
+     * application's own pages — stays {@code 'none'}.
      */
-    private String embedPolicy() {
-        // Built from the same template as the strict policy rather than by
-        // editing the finished string: a later change to the policy would make
-        // a search-and-replace quietly stop matching, and the embed route would
-        // keep saying 'none' with nothing to show why.
-        return withReportUri(policyPermittingAncestors(
-            frameAncestorsFor(webProperties.getEmbedParentOrigins())));
+    private void writeDocumentPolicy(HttpServletRequest request, HttpServletResponse response) {
+        if (response.containsHeader("Content-Security-Policy")) {
+            return;
+        }
+        String nonce = ContentSecurityPolicyNonce.currentNonce(request);
+        boolean framable = EMBED_ROUTE.matches(request);
+        String policy = framable
+            ? ContentSecurityPolicies.embeddedViewer(
+                nonce, ContentSecurityPolicies.frameAncestorsFor(
+                    webProperties.getEmbedParentOrigins()))
+            : ContentSecurityPolicies.singlePageApp(nonce);
+        response.setHeader("Content-Security-Policy", withReportUri(policy));
     }
 
     private String withReportUri(String policy) {
