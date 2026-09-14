@@ -358,6 +358,80 @@ Permitted request headers are enumerated (`Authorization`, `Content-Type`,
 `Accept`, `X-Requested-With`, `Idempotency-Key`) rather than reflected;
 reflecting whatever the caller asks for makes the allow-list a formality.
 
+### `cde.web.embed-parent-origins`
+
+| | |
+|---|---|
+| Type | Comma-separated list of full origins |
+| Default | *(empty — the embed route refuses framing, like every other route)* |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_EMBED_PARENT_ORIGINS` |
+
+Which host applications may put the viewer's `/embed` route in an iframe. This
+is the `frame-ancestors` allow-list ADR 14 requires.
+
+**Empty means `'none'`.** An unconfigured deployment refuses framing exactly as
+it did before this setting existed, on the embed route and everywhere else.
+Opening the embed is a deliberate act; it is never a default and never a
+side-effect of upgrading.
+
+```bash
+CDE_WEB_EMBED_PARENT_ORIGINS=https://cde.customer.example,https://staging.cde.customer.example
+```
+
+Every other route keeps `frame-ancestors 'none'`, and there is a test that
+fails if a relaxation lands globally instead of on the embed route.
+
+**This is authorisation, not addressing.** `frame-ancestors` decides who may
+frame the viewer. The `parentOrigin` the viewer is given in its URL only tells
+it where to post messages. A deployment that set the second and not the first
+would have a viewer no one can frame; one that somehow relaxed only the second
+would have a viewer anybody can frame, as long as they sent the right message.
+
+#### What is refused, and why each one matters
+
+Validated at startup rather than when a browser first parses the header,
+because **a `frame-ancestors` source a browser cannot parse is not a closed
+door** — the browser drops the unparseable source and applies what is left, so
+a typo silently widens the policy instead of breaking visibly.
+
+| Rejected | Why |
+|---|---|
+| `*`, `https://*.customer.example` | Any matching site may frame the viewer. The control, gone |
+| `null` | The origin a sandboxed iframe and a `data:` document report — it grants exactly the contexts least worth trusting, while reading like a way to switch the setting off |
+| `'self'`, `'none'` | CSP keywords, not origins. They read as deliberate and are not what the deployment meant |
+| `https://a.example/embed` | Not an origin. A browser matches the origin and ignores the path, so it works by accident until something tightens |
+| `ftp://a.example` | Not a scheme a browser will match here |
+
+The startup error names the offending value, because a list of five origins
+with one typo is not searchable from a generic message.
+
+#### The limit worth knowing before you deploy
+
+**This is deployment-level, not per-tenant.** The embed route carries no
+credential by design — ADR 14 makes the viewer authenticate nobody — so there
+is no authenticated principal to derive a tenant from. Deriving one from a
+query parameter or a header instead would let a caller nominate its own
+allow-list, which is a wildcard with extra steps. Narrowing this per tenant
+needs a discriminator the request cannot forge, and that is an open decision
+rather than a setting.
+
+For the viewer as ADR 12 sells it — a product a customer installs — one
+deployment is one customer, and that is the boundary this setting draws.
+
+#### It has to be set on whatever serves the document
+
+This application emits the header on the responses **it** serves. In a
+deployment where a separate web tier serves the Angular build, that tier serves
+the `/embed` document and must carry the same `frame-ancestors` value; the
+backend's copy governs only what the backend answers.
+
+As the manifests stand, `k8s/ingress.yaml` routes everything to this service
+and the image contains no frontend, so **nothing currently serves `/embed` at
+all**. Configuring this setting is necessary for the embed and is not on its
+own sufficient to put a rendered viewer in a customer's iframe.
+
 ### `cde.web.hsts-enabled`
 
 | | |

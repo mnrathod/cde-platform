@@ -1,6 +1,10 @@
 # 14. Embed the viewer in an iframe, and give it no identity of its own
 
-- **Status:** **Accepted 2026-09-09.**
+- **Status:** **Accepted 2026-09-09.** The `frame-ancestors` consequence below
+  is **implemented 2026-09-14** as `cde.web.embed-parent-origins`, closed by
+  default; see `docs/configuration.md`. Two consequences remain open:
+  collaboration's own authentication, and the accessibility re-test across the
+  frame boundary.
 - **Date:** 2026-09-09
 - **Related:** ADR 12 (viewer as a standalone product), ADR 9 (bundle
   third-party JavaScript), `cde-angular/docs/viewer-extraction-inventory.md`,

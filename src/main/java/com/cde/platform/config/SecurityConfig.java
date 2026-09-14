@@ -24,6 +24,8 @@ import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHe
 import org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy;
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
+import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
+import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter.XFrameOptionsMode;
 import static org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher.pathPattern;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
@@ -127,6 +129,14 @@ public class SecurityConfig {
                 // needed (/index.html, /viewer.html, /js, /css, /img) went
                 // with it rather than being left as permits for files that no
                 // longer exist.
+                // The embed route holds no session and must not redirect to a
+                // login: ADR 14 makes the viewer authenticate nobody, and a
+                // login form inside someone else's iframe is both a broken
+                // integration and an invitation to type a password into a
+                // frame. Permitted so that whatever serves the document is
+                // reachable; the framing decision is the CSP allow-list below,
+                // not this line.
+                .requestMatchers("/embed", "/embed/**").permitAll()
                 .requestMatchers("/api/auth/**",
                                  "/favicon.ico", "/favicon.png",
                                  "/api/logs/**").permitAll()
@@ -157,8 +167,36 @@ public class SecurityConfig {
      * site that wants a user's clicks; both are sent, because older browsers
      * read only the latter.
      */
+    /**
+     * Package-private so it can be asserted without a Spring context.
+     *
+     * <p>The integration assertions in {@code EmbedFramingPolicyTest} need a
+     * database container to raise a context at all. This composition — which
+     * is where a comma instead of a space, or a stray {@code 'none'} left
+     * beside a real origin, would hide — is a pure function and is tested as
+     * one, so it stays verifiable wherever the container does not start.
+     */
+    static String policyPermittingAncestors(String frameAncestors) {
+        return "default-src 'none'; frame-ancestors " + frameAncestors
+            + "; base-uri 'none'; form-action 'none'";
+    }
+
+    /**
+     * The {@code frame-ancestors} source list for a set of configured hosts.
+     *
+     * <p>Space-separated, because that is what the CSP grammar says; a
+     * comma-separated list is not a syntax error the browser reports, it is one
+     * source it cannot parse, which it drops while applying what is left. An
+     * empty configuration yields {@code 'none'} rather than an empty directive,
+     * because an empty {@code frame-ancestors} is invalid and an invalid
+     * directive is ignored — which would leave the route framable by anyone.
+     */
+    static String frameAncestorsFor(List<String> embeddingHosts) {
+        return embeddingHosts.isEmpty() ? "'none'" : String.join(" ", embeddingHosts);
+    }
+
     private static final String API_CONTENT_SECURITY_POLICY =
-        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+        policyPermittingAncestors("'none'");
 
     /**
      * A narrower relaxation for the API documentation page only.
@@ -187,6 +225,20 @@ public class SecurityConfig {
                              pathPattern("/swagger-ui/**"));
 
     /**
+     * The one route a host application is permitted to frame (ADR 14).
+     *
+     * <p>Deliberately narrow. {@code frame-ancestors} is relaxed here and
+     * nowhere else, so widening it is a change to this constant rather than a
+     * change to a policy string that happens to apply everywhere.
+     */
+    private static final RequestMatcher EMBED_ROUTE =
+        new OrRequestMatcher(pathPattern("/embed"), pathPattern("/embed/**"));
+
+    /** Every path that keeps the default, unframable policy. */
+    private static final RequestMatcher STANDARD_ROUTES =
+        new NegatedRequestMatcher(new OrRequestMatcher(DOCUMENTATION_PAGES, EMBED_ROUTE));
+
+    /**
      * The response headers a browser needs in order to apply the protections
      * it already implements.
      *
@@ -197,10 +249,16 @@ public class SecurityConfig {
      */
     private void hardenResponseHeaders(HeadersConfigurer<HttpSecurity> headers) {
         headers
-            // Retained from the previous configuration: the viewer must not be
-            // framable by another origin. frame-ancestors in the CSP above is
-            // the directive that modern browsers actually honour.
-            .frameOptions(frame -> frame.sameOrigin())
+            // X-Frame-Options has no allow-list form — ALLOW-FROM was removed
+            // from every browser — so on the embed route it can only say
+            // SAMEORIGIN, and a browser honouring it would refuse the frame
+            // whatever frame-ancestors says. Spring's own frameOptions() is
+            // therefore off, and the header is written for every route except
+            // the embed one, where CSP is the sole and sufficient control.
+            .frameOptions(HeadersConfigurer.FrameOptionsConfig::disable)
+            .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                new NegatedRequestMatcher(EMBED_ROUTE),
+                new XFrameOptionsHeaderWriter(XFrameOptionsMode.SAMEORIGIN)))
             .referrerPolicy(referrer -> referrer.policy(
                 ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
             // Isolates this origin's browsing context, so a window it opens —
@@ -216,7 +274,10 @@ public class SecurityConfig {
                 DOCUMENTATION_PAGES,
                 new ContentSecurityPolicyHeaderWriter(documentationPolicy())))
             .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
-                new NegatedRequestMatcher(DOCUMENTATION_PAGES),
+                EMBED_ROUTE,
+                new ContentSecurityPolicyHeaderWriter(embedPolicy())))
+            .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                STANDARD_ROUTES,
                 new ContentSecurityPolicyHeaderWriter(apiPolicy())));
 
         // Not chained with the rest: permissionsPolicy returns its own config
@@ -244,6 +305,25 @@ public class SecurityConfig {
 
     private String documentationPolicy() {
         return withReportUri(DOCS_CONTENT_SECURITY_POLICY);
+    }
+
+    /**
+     * The embed route's policy: the strict one, with framing opened to named
+     * origins and to nothing else.
+     *
+     * <p>An unconfigured deployment gets {@code frame-ancestors 'none'} —
+     * byte-for-byte the policy every other route gets. That is the point:
+     * adding this route must not, on its own, make anything framable. Opening
+     * it is a deliberate configuration act, and until someone performs it this
+     * route is exactly as closed as it was before the route existed.
+     */
+    private String embedPolicy() {
+        // Built from the same template as the strict policy rather than by
+        // editing the finished string: a later change to the policy would make
+        // a search-and-replace quietly stop matching, and the embed route would
+        // keep saying 'none' with nothing to show why.
+        return withReportUri(policyPermittingAncestors(
+            frameAncestorsFor(webProperties.getEmbedParentOrigins())));
     }
 
     private String withReportUri(String policy) {

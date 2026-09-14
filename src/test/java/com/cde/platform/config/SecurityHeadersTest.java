@@ -100,10 +100,28 @@ class SecurityHeadersTest {
     }
 
     @Test
-    @DisplayName("The viewer cannot be framed by another origin")
+    @DisplayName("The API cannot be framed by another origin")
     void framingIsRefused() throws Exception {
         mockMvc.perform(get("/api/openapi.yaml"))
             .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
+            .andExpect(header().string("Content-Security-Policy",
+                containsString("frame-ancestors 'none'")));
+    }
+
+    @Test
+    @DisplayName("The embed route is the only exception, and only once configured")
+    void onlyTheEmbedRouteCanEverBeFramed() throws Exception {
+        // This assertion used to read "'none' everywhere". ADR 14 turned the
+        // embed into a product feature, so it now reads "'none' everywhere
+        // except one route" — and the route is still 'none' here, because
+        // nothing in this context configures an embedding host.
+        //
+        // EmbedFramingPolicyTest is where the allow-list itself is asserted,
+        // with a context that configures one. Keeping both matters: this class
+        // is where someone widening the global policy would look, and a
+        // relaxation that landed here rather than on the embed route would
+        // pass every assertion in that class and fail this one.
+        mockMvc.perform(get("/embed"))
             .andExpect(header().string("Content-Security-Policy",
                 containsString("frame-ancestors 'none'")));
     }
