@@ -225,7 +225,7 @@ class EmbedFramingPolicyTest {
         void acceptsExactOrigins() {
             assertThatCode(() -> withEmbedOrigins(
                 HOST_CDE, "http://localhost:4401", "https://a.example:8443")
-                .rejectWildcardOrigins()).doesNotThrowAnyException();
+                .requireValidOrigins()).doesNotThrowAnyException();
         }
 
         @Test
@@ -240,7 +240,7 @@ class EmbedFramingPolicyTest {
             // need told is that a wildcard would let any matching site frame
             // the viewer.
             for (String wildcard : List.of("*", "https://*.customer.example", "*.example")) {
-                assertThatThrownBy(() -> withEmbedOrigins(wildcard).rejectWildcardOrigins())
+                assertThatThrownBy(() -> withEmbedOrigins(wildcard).requireValidOrigins())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining(wildcard)
                     .hasMessageContaining("a wildcard");
@@ -254,7 +254,7 @@ class EmbedFramingPolicyTest {
             // their origin, so permitting it grants exactly the contexts least
             // worth trusting — and it reads, in a config file, like a way of
             // switching the setting off.
-            assertThatThrownBy(() -> withEmbedOrigins("null").rejectWildcardOrigins())
+            assertThatThrownBy(() -> withEmbedOrigins("null").requireValidOrigins())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("sandboxed");
         }
@@ -262,7 +262,7 @@ class EmbedFramingPolicyTest {
         @Test
         @DisplayName("refuses a CSP keyword offered as an origin")
         void refusesKeywords() {
-            assertThatThrownBy(() -> withEmbedOrigins("'self'").rejectWildcardOrigins())
+            assertThatThrownBy(() -> withEmbedOrigins("'self'").requireValidOrigins())
                 .isInstanceOf(IllegalStateException.class);
         }
 
@@ -274,7 +274,7 @@ class EmbedFramingPolicyTest {
             // someone tightens the parser, and then a customer's frame breaks
             // for a reason nobody changed.
             assertThatThrownBy(() ->
-                withEmbedOrigins("https://cde.customer.example/embed").rejectWildcardOrigins())
+                withEmbedOrigins("https://cde.customer.example/embed").requireValidOrigins())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(HOST_CDE);
         }
@@ -283,7 +283,7 @@ class EmbedFramingPolicyTest {
         @DisplayName("refuses a scheme a browser will not match")
         void refusesNonHttpSchemes() {
             assertThatThrownBy(() ->
-                withEmbedOrigins("ftp://cde.customer.example").rejectWildcardOrigins())
+                withEmbedOrigins("ftp://cde.customer.example").requireValidOrigins())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("http or https");
         }
@@ -292,8 +292,39 @@ class EmbedFramingPolicyTest {
         @DisplayName("an empty list is valid and means framing stays refused")
         void emptyListIsTheClosedDefault() {
             var properties = new WebSecurityHeadersProperties();
-            assertThatCode(properties::rejectWildcardOrigins).doesNotThrowAnyException();
+            assertThatCode(properties::requireValidOrigins).doesNotThrowAnyException();
             assertThat(properties.hasEmbeddingHosts()).isFalse();
+        }
+
+        @Test
+        @DisplayName("holds the document origins to the same rules, and names that setting")
+        void documentOriginsAreValidatedToo() {
+            // The same validator, reached through a second list. The setting
+            // name is asserted because the whole value of these messages is
+            // that a deployer can find the line they typed — a wildcard in
+            // embed-document-origins reported against embed-parent-origins
+            // sends them to the wrong file.
+            var properties = new WebSecurityHeadersProperties();
+            properties.setEmbedDocumentOrigins(List.of("https://*.sharepoint.example"));
+
+            assertThatThrownBy(properties::requireValidOrigins)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cde.web.embed-document-origins")
+                .hasMessageContaining("a wildcard")
+                .hasMessageContaining("permit any https origin");
+        }
+
+        @Test
+        @DisplayName("accepts a plain-http document origin, which is what a local demo needs")
+        void documentOriginsMayBePlainHttp() {
+            // Deliberate: the demo host ships in the frontend repository and
+            // serves its samples over http on localhost. Refusing http here
+            // would leave the demo unable to open a document against a
+            // stock-served viewer, which is the one thing it exists to show.
+            var properties = new WebSecurityHeadersProperties();
+            properties.setEmbedDocumentOrigins(List.of("http://localhost:4401"));
+
+            assertThatCode(properties::requireValidOrigins).doesNotThrowAnyException();
         }
     }
 }

@@ -432,6 +432,40 @@ too — set [`cde.web.app.path`](#cdewebapppath) and one component emits both th
 document and the header that governs it. `k8s/ingress.yaml` already routes `/`
 here, so with that set there is nothing else to configure.
 
+### `cde.web.embed-document-origins`
+
+| | |
+|---|---|
+| Type | Comma-separated list of full origins |
+| Default | *(empty — any `https` origin)* |
+| Required | No |
+| Secret | No |
+| Environment variable | `CDE_WEB_EMBED_DOCUMENT_ORIGINS` |
+
+Where an embedded viewer may fetch documents from — the `connect-src` of the
+embed route's policy.
+
+**Empty means `'self' https:`.** That is the only default that can work: the
+document URL is minted by the *integrator*, on their own storage — SharePoint,
+S3, Azure Blob, a customer's own host — and none of those are knowable when
+this image is built. It still refuses plain `http:`, and it is not `*`.
+
+```bash
+CDE_WEB_EMBED_DOCUMENT_ORIGINS=https://contoso.sharepoint.example
+```
+
+**Naming origins replaces the blanket rather than adding to it**, so
+configuring this *narrows* the policy — which is the point of it, and why
+there is no way to say "https: and also these". A deployment that needs both
+keeps the default. Values are validated at startup by the same rules as
+[`cde.web.embed-parent-origins`](#cdewebembed-parent-origins), and the error
+names which setting the bad value is in.
+
+**Plain `http` is accepted here**, unlike anywhere else in this file. It is the
+only way to run the demo host — which serves its sample documents over `http`
+on localhost — against a viewer this image is serving. Do not use it for
+anything reachable from outside a laptop.
+
 ### `cde.web.app.path`
 
 | | |

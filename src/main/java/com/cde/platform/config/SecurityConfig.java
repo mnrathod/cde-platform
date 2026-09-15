@@ -62,7 +62,7 @@ public class SecurityConfig {
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.accessDeniedHandler = accessDeniedHandler;
         this.webProperties = webProperties;
-        webProperties.rejectWildcardOrigins();
+        webProperties.requireValidOrigins();
     }
 
     @Bean
@@ -301,8 +301,11 @@ public class SecurityConfig {
         boolean framable = EMBED_ROUTE.matches(request);
         String policy = framable
             ? ContentSecurityPolicies.embeddedViewer(
-                nonce, ContentSecurityPolicies.frameAncestorsFor(
-                    webProperties.getEmbedParentOrigins()))
+                nonce,
+                ContentSecurityPolicies.frameAncestorsFor(
+                    webProperties.getEmbedParentOrigins()),
+                ContentSecurityPolicies.connectSourcesFor(
+                    webProperties.getEmbedDocumentOrigins()))
             : ContentSecurityPolicies.singlePageApp(nonce);
         response.setHeader("Content-Security-Policy", withReportUri(policy));
     }

@@ -165,8 +165,51 @@ policy and driven with Chromium on `/`, `/login` and `/embed`:
    not start.
 
 All three routes now load with zero CSP violations, the inlined critical CSS
-and the main stylesheet both applied. Still unverified: the pdf.js worker and a
-cross-origin document fetch, which need a document to open.
+and the main stylesheet both applied.
+
+**Then the demo host was run against it, end to end, and found four more.**
+The demo frames the viewer from a second origin and drives the whole protocol —
+open, draw, store, reload, restore, command, refuse — which is the first thing
+to exercise the served viewer as an integrator will:
+
+1. **The pdf.js worker URL had never resolved.** `new URL('pdfjs-dist/…',
+   import.meta.url)` with a bare package specifier is not rewritten by the
+   bundler, so it asked the page's own origin for a path no deployment has.
+   pdf.js fell back to a "fake worker", which loaded the same missing URL and
+   gave up — surfacing as "the document could not be opened", which points at
+   the document. Fixed in the frontend by shipping the worker to
+   `assets/pdfjs/` like the wasm, cmaps and fonts beside it.
+2. **`connect-src 'self' https:` refused the demo's document**, which is served
+   over plain `http` on localhost. That is correct for production and made the
+   demo unable to open anything against a stock-served viewer. The policy was
+   already documented as something a deployment "should narrow" with no way to
+   narrow it; `cde.web.embed-document-origins` is that way, and naming origins
+   replaces the blanket rather than adding to it.
+3. **The Angular service worker served the entry document from its cache**,
+   which defeats the nonce by construction — see the consequence below.
+4. **Markup never rendered, in either direction.** The overlay bound
+   `[innerHTML]` to a string of SVG and Angular's HTML sanitiser strips SVG
+   elements, so every shape was removed on its way to the DOM while every
+   protocol message stayed correct. Fixed by rendering typed primitives through
+   attribute bindings — which is also the only safe option, since that markup
+   comes from the host (§5.12 A03).
+
+The whole journey now runs: three pages render, markup is drawn and stored by
+the host, the host page is reloaded and the markup is handed back and painted,
+`goToPage` and `setZoom` drive the viewer, and an ungranted capability does not
+render its control. No CSP violations, no console errors.
+
+**A service worker and a per-request nonce cannot both be real.** The Angular
+service worker's purpose is to serve a cached copy of the entry document; that
+document carries a nonce valid for one response and is sent `no-store`, so a
+cached copy names a nonce no header does and the page renders unstyled. It also
+prefetched `/index.html`, which this image does not serve at all. The service
+worker is now configured not to touch navigations —
+`navigationRequestStrategy: "freshness"`, and the document removed from its
+prefetch list — so it caches only fingerprinted assets. **That leaves the PWA
+with no offline navigation, which means no offline at all in practice.**
+Whether to keep a service worker on these terms is a product decision, not an
+engineering one, and it is open.
 
 **The image is larger**, by the size of the bundle. §7.1 caps the initial JS at
 250 KB gzipped, so this is tens of megabytes at most including lazy chunks, and

@@ -100,7 +100,7 @@ class CrossOriginPolicyTest {
             // wildcard that is never exercised in testing is a wildcard that
             // reaches production.
             org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
-                properties::rejectWildcardOrigins);
+                properties::requireValidOrigins);
         }
     }
 }

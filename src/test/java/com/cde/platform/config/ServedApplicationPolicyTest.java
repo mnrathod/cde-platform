@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -70,10 +71,31 @@ class ServedApplicationPolicyTest {
     @DisplayName("The embed document policy")
     class EmbedDocumentPolicy {
 
+        private static final String STORAGE = "https://contoso.sharepoint.example";
+        private static final String OTHER_STORAGE = "https://files.customer.example";
+
+        /** One directive's value, so a substring cannot pass for the whole. */
+        private static String directive(String policy, String name) {
+            return java.util.Arrays.stream(policy.split(";"))
+                .map(String::trim)
+                .filter(part -> part.startsWith(name + " "))
+                .map(part -> part.substring(name.length() + 1))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(name + " absent from: " + policy));
+        }
+
+        /** The composition SecurityConfig performs, in one place. */
+        private static String embedPolicy(String host, List<String> documentOrigins) {
+            return ContentSecurityPolicies.embeddedViewer(
+                NONCE,
+                ContentSecurityPolicies.frameAncestorsFor(List.of(host)),
+                ContentSecurityPolicies.connectSourcesFor(documentOrigins));
+        }
+
         @Test
         @DisplayName("names the configured hosts and never a wildcard")
         void framingIsOpenedOnlyToNamedHosts() {
-            String policy = ContentSecurityPolicies.embeddedViewer(NONCE, HOST_CDE);
+            String policy = embedPolicy(HOST_CDE, List.of());
 
             assertThat(policy)
                 .contains("frame-ancestors " + HOST_CDE)
@@ -82,15 +104,43 @@ class ServedApplicationPolicyTest {
         }
 
         @Test
-        @DisplayName("permits the cross-origin fetch an embed is for")
+        @DisplayName("permits any https origin when none are named")
         void connectSourcePermitsTheIntegratorsStorage() {
             // The one real widening over the application's own policy, and the
             // reason is structural: the document URL is minted by the
             // integrator on their own storage, which is not knowable when this
             // image is built. connect-src 'self' would frame correctly and then
             // open nothing.
-            assertThat(ContentSecurityPolicies.embeddedViewer(NONCE, HOST_CDE))
-                .contains("connect-src 'self' https:");
+            assertThat(directive(embedPolicy(HOST_CDE, List.of()), "connect-src"))
+                .isEqualTo("'self' https:");
+        }
+
+        @Test
+        @DisplayName("narrows to the named storage origins, dropping the blanket https:")
+        void namedDocumentOriginsReplaceTheBlanket() {
+            String policy = embedPolicy(HOST_CDE, List.of(STORAGE, "http://localhost:4401"));
+
+            // Replacing rather than adding is the whole point: a deployment
+            // that names its integrators' storage should end up with a
+            // narrower policy, not the same one with extra entries. Keeping
+            // https: alongside would make configuring this a no-op.
+            //
+            // Asserted as the whole directive rather than a substring. A
+            // doesNotContain("'self' https:") reads correctly and is wrong:
+            // "'self' https://contoso…" contains it, so the check would pass
+            // whatever the code did.
+            assertThat(directive(policy, "connect-src"))
+                .isEqualTo("'self' " + STORAGE + " http://localhost:4401");
+        }
+
+        @Test
+        @DisplayName("lists sources space-separated, as the CSP grammar requires")
+        void sourcesAreSpaceSeparated() {
+            // A comma is not a syntax error the browser reports: it is one
+            // source it cannot parse, which it drops while applying the rest.
+            assertThat(ContentSecurityPolicies.connectSourcesFor(List.of(STORAGE, OTHER_STORAGE)))
+                .isEqualTo("'self' " + STORAGE + " " + OTHER_STORAGE)
+                .doesNotContain(",");
         }
 
         @Test
@@ -104,7 +154,7 @@ class ServedApplicationPolicyTest {
         @Test
         @DisplayName("still refuses plain http and object embedding")
         void theWideningIsNotADoorLeftOpen() {
-            assertThat(ContentSecurityPolicies.embeddedViewer(NONCE, HOST_CDE))
+            assertThat(embedPolicy(HOST_CDE, List.of()))
                 .doesNotContain("http:;")
                 .contains("object-src 'none'")
                 .contains("base-uri 'self'");

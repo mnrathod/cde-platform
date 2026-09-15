@@ -159,6 +159,18 @@ cde:
     #   CDE_WEB_EMBED_PARENT_ORIGINS=https://cde.customer.example
     embed-parent-origins: ${CDE_WEB_EMBED_PARENT_ORIGINS:}
 
+    # Where an embedded viewer may fetch documents from — the embed route's
+    # connect-src. Empty means any https origin, which is the only default that
+    # can work: the document URL is minted by the integrator on their own
+    # storage, which is not knowable when this image is built.
+    #
+    # Naming origins REPLACES that blanket rather than adding to it, so setting
+    # this narrows the policy. It is also how a local demo works at all — the
+    # demo host serves its samples over plain http on localhost.
+    #
+    #   CDE_WEB_EMBED_DOCUMENT_ORIGINS=https://contoso.sharepoint.com
+    embed-document-origins: ${CDE_WEB_EMBED_DOCUMENT_ORIGINS:}
+
     app:
       # Directory holding the built browser bundle, when this image serves it
       # (ADR 15) — the directory containing index.html, which for the Angular

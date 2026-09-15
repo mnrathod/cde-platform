@@ -82,21 +82,38 @@ final class ContentSecurityPolicies {
      * The embed route's document — the same application, with two differences.
      *
      * <p>{@code frame-ancestors} names the hosts permitted to frame it, and
-     * {@code connect-src} additionally permits {@code https:}. The second is
-     * the one worth explaining, because it is a real widening: an embedded
-     * viewer fetches the document from a short-lived URL the <em>integrator</em>
-     * mints, on their own storage — SharePoint, S3, Azure Blob, a customer's
-     * own host. Those origins are not knowable when this image is built, and a
-     * {@code connect-src 'self'} would refuse every one of them, so the embed
-     * would frame correctly and then open nothing.
+     * {@code connect-src} permits somewhere other than this origin to fetch a
+     * document from. The second is the one worth explaining, because it is a
+     * real widening: an embedded viewer fetches the document from a short-lived
+     * URL the <em>integrator</em> mints, on their own storage — SharePoint, S3,
+     * Azure Blob, a customer's own host. A {@code connect-src 'self'} would
+     * refuse every one of them, so the embed would frame correctly and then
+     * open nothing.
      *
-     * <p>It is scoped to the embed document and no further, it still refuses
-     * plain {@code http:}, and it is not {@code *}. A deployment that does know
-     * its integrators' storage origins should narrow it; see
-     * {@code docs/configuration.md}.
+     * @param connectSources from {@link #connectSourcesFor}
      */
-    static String embeddedViewer(String nonce, String frameAncestors) {
-        return browserApplication(nonce, "'self' https:", frameAncestors);
+    static String embeddedViewer(String nonce, String frameAncestors, String connectSources) {
+        return browserApplication(nonce, connectSources, frameAncestors);
+    }
+
+    /**
+     * The embed route's {@code connect-src}, from the configured storage
+     * origins.
+     *
+     * <p>Empty yields {@code 'self' https:} — the only default that can work,
+     * since the integrator's storage is not knowable at image-build time. It is
+     * scoped to the embed document and no further, still refuses plain
+     * {@code http:}, and is not {@code *}.
+     *
+     * <p>Naming origins <strong>replaces</strong> the blanket rather than
+     * adding to it, so configuring this narrows the policy — which is the point
+     * of it, and why there is no way to say "https: and also these". A
+     * deployment needing both keeps the default.
+     */
+    static String connectSourcesFor(List<String> documentOrigins) {
+        return documentOrigins.isEmpty()
+            ? "'self' https:"
+            : "'self' " + String.join(" ", documentOrigins);
     }
 
     /**

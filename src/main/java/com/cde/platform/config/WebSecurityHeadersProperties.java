@@ -65,6 +65,25 @@ public class WebSecurityHeadersProperties {
     private List<String> embedParentOrigins = new ArrayList<>();
 
     /**
+     * Where an embedded viewer may fetch documents from — the {@code
+     * connect-src} of the embed route's policy.
+     *
+     * <p>Empty means {@code 'self' https:}: any https origin, which is the only
+     * default that can work, because the document URL is minted by the
+     * <em>integrator</em> on their own storage — SharePoint, S3, Azure Blob, a
+     * customer's own host — and none of those are knowable when this image is
+     * built.
+     *
+     * <p>Naming origins here <strong>replaces</strong> that blanket rather than
+     * adding to it, so a deployment that knows its integrators narrows the
+     * policy to exactly them. It is also how a local demo works at all: the
+     * demo host serves its sample documents over plain {@code http} on
+     * localhost, which {@code https:} refuses, and the alternative to this
+     * setting was a viewer that framed correctly and then opened nothing.
+     */
+    private List<String> embedDocumentOrigins = new ArrayList<>();
+
+    /**
      * Whether to send HSTS. On by default. It is inert over plain HTTP, so
      * leaving it on costs a local deployment nothing, and switching it off in
      * the one environment that terminates TLS is the mistake worth preventing.
@@ -97,6 +116,15 @@ public class WebSecurityHeadersProperties {
     /** @return true when a deployment has named at least one embedding host. */
     public boolean hasEmbeddingHosts() {
         return !embedParentOrigins.isEmpty();
+    }
+
+    public List<String> getEmbedDocumentOrigins() {
+        return embedDocumentOrigins;
+    }
+
+    public void setEmbedDocumentOrigins(List<String> embedDocumentOrigins) {
+        this.embedDocumentOrigins =
+            embedDocumentOrigins == null ? new ArrayList<>() : embedDocumentOrigins;
     }
 
     public void setAllowedOrigins(List<String> allowedOrigins) {
@@ -136,12 +164,15 @@ public class WebSecurityHeadersProperties {
     }
 
     /**
-     * @throws IllegalStateException when a wildcard was configured. Reported at
-     *         startup rather than at the first cross-origin request, because a
-     *         wildcard that is never exercised in testing is a wildcard that
-     *         reaches production.
+     * Validate every configured origin list, at startup.
+     *
+     * <p>Reported here rather than at the first cross-origin request or the
+     * first framed page, because a wildcard that is never exercised in testing
+     * is a wildcard that reaches production.
+     *
+     * @throws IllegalStateException naming the offending value and its setting
      */
-    public void rejectWildcardOrigins() {
+    public void requireValidOrigins() {
         if (allowedOrigins.stream().anyMatch(origin -> origin.contains("*"))) {
             throw new IllegalStateException("""
                 cde.web.allowed-origins contains a wildcard. Name each origin \
@@ -149,7 +180,16 @@ public class WebSecurityHeadersProperties {
                 browsers for credentialed requests and, for the rest, lets any \
                 site on the internet read this API's responses.""");
         }
-        embedParentOrigins.forEach(WebSecurityHeadersProperties::requireExactOrigin);
+        embedParentOrigins.forEach(origin -> requireExactOrigin(
+            "cde.web.embed-parent-origins", origin,
+            "Name each embedding host as one exact origin "
+            + "(https://cde.customer.example), scheme and host and port, nothing else. "
+            + "Leave the list empty to refuse framing altogether."));
+        embedDocumentOrigins.forEach(origin -> requireExactOrigin(
+            "cde.web.embed-document-origins", origin,
+            "Name each storage origin the embed may fetch a document from "
+            + "(https://contoso.sharepoint.com), scheme and host and port, nothing else. "
+            + "Leave the list empty to permit any https origin."));
     }
 
     /**
@@ -177,15 +217,12 @@ public class WebSecurityHeadersProperties {
      *         of five origins with one typo is not searchable from a generic
      *         message.
      */
-    private static void requireExactOrigin(String candidate) {
+    private static void requireExactOrigin(String setting, String candidate, String advice) {
         String value = candidate == null ? "" : candidate.trim();
         String reason = reasonItIsNotAnOrigin(value);
         if (reason != null) {
             throw new IllegalStateException(
-                "cde.web.embed-parent-origins contains " + describe(candidate) + ": " + reason
-                + " Name each embedding host as one exact origin "
-                + "(https://cde.customer.example), scheme and host and port, nothing else. "
-                + "Leave the list empty to refuse framing altogether.");
+                setting + " contains " + describe(candidate) + ": " + reason + " " + advice);
         }
     }
 
@@ -194,7 +231,7 @@ public class WebSecurityHeadersProperties {
             return "an empty entry.";
         }
         if (value.contains("*")) {
-            return "a wildcard, which would let any matching site frame the viewer.";
+            return "a wildcard, which matches sites nobody has vetted.";
         }
         if (value.equals("null") || value.startsWith("'")) {
             return "a CSP keyword rather than an origin; 'null' in particular matches "
