@@ -66,7 +66,20 @@ pipeline {
                             sh '''
                                 set -eu
                                 npm ci
-                                npx tsc --noEmit
+                                # --build, not a bare --noEmit. tsconfig.json
+                                # carries "files": [] and project references,
+                                # so `tsc --noEmit` type-checks nothing at all
+                                # and exits 0 — proven by putting a type error
+                                # in a production file and watching it pass.
+                                #
+                                # --noEmit is still passed, alongside --build:
+                                # this stage wants the check, not the output,
+                                # and emitting would make the referenced
+                                # projects' outDir/rootDir layout a build
+                                # failure (TS5011) that says nothing about the
+                                # code. --force so a stale .tsbuildinfo cannot
+                                # turn the gate into a no-op.
+                                npx tsc --build --force --noEmit
                                 npm run check:no-remote-code
                             '''
                         }
