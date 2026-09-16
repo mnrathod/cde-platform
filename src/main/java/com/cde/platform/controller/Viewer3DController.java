@@ -228,6 +228,115 @@ public class Viewer3DController {
         return java.util.List.of(root);
     }
 
+    // ── Model geometry, as bytes ──────────────────────────────────
+    @Operation(
+        operationId = "getModelGeometry",
+        summary = "Get a model's renderable geometry as a binary buffer",
+        description = """
+            The render payload for an IFC model: vertex positions, normals and triangle \
+            indices, preceded by a JSON header describing the counts, the bounding box and \
+            one group per element type.
+
+            Binary rather than JSON because the arrays are already numbers. Base64 inside a \
+            JSON body costs four bytes of transfer for every three of payload, and on a \
+            building-sized model that is tens of megabytes spent encoding bytes that were \
+            never text. The layout is documented in the conversion service alongside the \
+            encoder; clients should read the header's `vertexCount` and `triangleCount` \
+            rather than assuming any buffer's length.
+
+            Colour is carried per element type in the header, not per vertex. **Group offsets \
+            are in index units, not vertex units.**
+
+            A model this service cannot read returns `200` with a JSON body rather than a \
+            buffer — check the response's content type before parsing.
+
+            Requires the `document:read` permission.""")
+    @ApiResponse(responseCode = "200",
+        description = "The geometry buffer, or a JSON explanation if the model could not be read.",
+        content = {
+            @Content(mediaType = MediaType.APPLICATION_OCTET_STREAM_VALUE,
+                     schema = @Schema(type = "string", format = "binary")),
+            @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                     schema = @Schema(implementation = ViewerPayload.class)),
+        })
+    @ApiResponse(responseCode = "404",
+        description = "No document with that id is visible to the caller.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @GetMapping("/{documentId}/geometry")
+    public ResponseEntity<?> getModelGeometry(
+        @Parameter(description = "Identifier of the model document.", example = "1212")
+        @PathVariable Long documentId
+    ) {
+        var docOpt = documentRepo.findById(documentId);
+        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
+        var doc = docOpt.get();
+
+        if (doc.getFilePath() == null)
+            return ResponseEntity.ok(Map.of("success", false, "error", "File not found"));
+
+        Path path = Paths.get(doc.getFilePath());
+        if (!Files.exists(path))
+            return ResponseEntity.ok(Map.of("success", false, "error", "File not found"));
+
+        /*
+         * Only IFC produces extracted geometry; everything else this route
+         * handles is either served as its own file or cannot be opened at
+         * all. Answering here rather than asking the converter to open a GLB
+         * as IFC saves a round trip and a guaranteed failure, and tells the
+         * client to go and get the specific reason from the JSON sibling.
+         */
+        String name = doc.getFileName() != null ? doc.getFileName().toLowerCase() : "";
+        String ext  = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1) : "";
+        String declaredType = doc.getFileType() != null ? doc.getFileType().toLowerCase() : "";
+        if (!ext.equals("ifc") && !declaredType.contains("ifc") && !declaredType.contains("step")) {
+            return ResponseEntity.ok(Map.of(
+                "success", false,
+                "error", "not_extracted_geometry"));
+        }
+
+        try {
+            ObjectNode body = mapper.createObjectNode();
+            body.put("path", path.toAbsolutePath().toString());
+
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(converterUrl + "/ifc-geometry"))
+                .timeout(Duration.ofSeconds(180))
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+                .build();
+
+            /*
+             * Bytes, and streamed.
+             *
+             * The JSON sibling of this endpoint reads the converter's reply
+             * with BodyHandlers.ofString, which materialises the whole
+             * payload as a Java String — UTF-16, so twice the bytes on the
+             * wire — and then readTree copies it again into a node tree. On a
+             * model of any size that is hundreds of megabytes of heap to move
+             * data this service only forwards, which is what §7.7 forbids.
+             */
+            HttpResponse<java.io.InputStream> resp =
+                http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+
+            String contentType = resp.headers().firstValue("content-type")
+                .orElse(MediaType.APPLICATION_OCTET_STREAM_VALUE);
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(new org.springframework.core.io.InputStreamResource(resp.body()));
+
+        } catch (java.net.ConnectException e) {
+            return ResponseEntity.ok(Map.of(
+                "success", false,
+                "error", "converter_offline",
+                "detail", "Start the converter: python converter/app.py"));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
     private ResponseEntity<?> convertIFC(Path path, com.cde.platform.model.Document doc) {
         try {
             ObjectNode body = mapper.createObjectNode();

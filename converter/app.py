@@ -5,7 +5,7 @@ Cross-platform: Windows + Ubuntu/Linux/Mac
 """
 
 import os, sys, io, json, shutil, tempfile, subprocess, traceback, time, platform
-import re, html
+import re, html, base64, struct
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 from pathlib import Path
@@ -891,17 +891,31 @@ def is_revit(path: str) -> bool:
         return False
 
 
-def ifc_to_gltf_json(ifc_path: str) -> dict:
+def extract_ifc_geometry(ifc_path: str) -> dict:
     """
-    Convert IFC file to a glTF-compatible JSON structure containing
-    mesh data (vertices, faces, colors per element type) for Three.js.
-    Returns {"success": True, "gltfData": {...}} or {"success": False, "error": ...}
+    Pull renderable geometry out of an IFC file, grouped by element type.
+
+    Returns either {"success": False, "error": ...} or a dict holding the
+    numpy arrays and the group table. Serialising it is somebody else's job —
+    `ifc_geometry_json` and `ifc_geometry_binary` are the two callers, and
+    keeping the extraction free of either encoding is what lets the binary
+    one exist without duplicating any of this.
+
+    Geometry is accumulated **per IFC type rather than in iterator order**, so
+    that each type ends up as one contiguous run of indices. That run is what
+    a renderer needs to draw the type with its own material.
+
+    This replaced a per-vertex colour attribute. Every vertex used to carry a
+    float32x3 copy of its element type's colour — twelve bytes each, to encode
+    one of sixteen values that are a property of the type, not of the vertex.
+    On a million-vertex model that is 12 MB of tiling, and it also fused the
+    whole building into a single material, which is why nothing could hide a
+    layer.
     """
     try:
         import ifcopenshell
         import ifcopenshell.geom
         import numpy as np
-        import json, base64, struct
     except ImportError as e:
         return {"success": False, "error": f"ifcopenshell not installed: {e}\nRun: pip install ifcopenshell"}
 
@@ -935,12 +949,9 @@ def ifc_to_gltf_json(ifc_path: str) -> dict:
     settings.set(settings.USE_WORLD_COORDS, True)
     settings.set(settings.WELD_VERTICES, True)
 
-    all_positions = []
-    all_normals   = []
-    all_indices   = []
-    all_colors    = []
-    vertex_offset = 0
-    mesh_count    = 0
+    # type -> its own arrays, so each type can be emitted as one run.
+    buckets    = {}
+    mesh_count = 0
 
     try:
         # Filter to only element types that have geometry
@@ -984,14 +995,16 @@ def ifc_to_gltf_json(ifc_path: str) -> dict:
                 if not it.next(): break
                 continue
 
-            col = TYPE_COLORS.get(shape.type, DEFAULT_COLOR)
-            colors = np.tile(col[:3], (len(verts), 1)).astype(np.float32)
-
-            all_positions.append(verts)
-            all_normals.append(norms)
-            all_indices.append(faces + vertex_offset)
-            all_colors.append(colors)
-            vertex_offset += len(verts)
+            # Faces are offset within the bucket here and shifted again to
+            # global positions at assembly, because a bucket's final place in
+            # the vertex array is not known until every element has been read.
+            bucket = buckets.setdefault(shape.type, {
+                "positions": [], "normals": [], "faces": [], "vertexCount": 0,
+            })
+            bucket["positions"].append(verts)
+            bucket["normals"].append(norms)
+            bucket["faces"].append(faces + bucket["vertexCount"])
+            bucket["vertexCount"] += len(verts)
             mesh_count += 1
 
             if not it.next():
@@ -1004,34 +1017,173 @@ def ifc_to_gltf_json(ifc_path: str) -> dict:
         return {"success": False, "error": "No geometry found in IFC file. "
                 "Ensure the file contains IfcWall, IfcSlab or other building elements with geometry."}
 
-    # Concatenate all geometry
-    positions = np.concatenate(all_positions, axis=0).astype(np.float32)
-    normals   = np.concatenate(all_normals,   axis=0).astype(np.float32)
-    indices   = np.concatenate(all_indices,   axis=0).astype(np.uint32)
-    colors    = np.concatenate(all_colors,    axis=0).astype(np.float32)
+    assembled = assemble_geometry_buckets(buckets, TYPE_COLORS, DEFAULT_COLOR)
 
-    print(f"[IFC] Total: {len(positions)} verts, {len(indices)} triangles, {mesh_count} elements", flush=True)
+    print(f"[IFC] Total: {assembled['vertexCount']} verts, "
+          f"{assembled['triangleCount']} triangles, {mesh_count} elements, "
+          f"{len(assembled['groups'])} groups", flush=True)
 
-    def to_b64(arr):
-        return base64.b64encode(arr.tobytes()).decode()
+    assembled["elementCount"] = int(mesh_count)
+    assembled["schema"] = ifc.schema
+    return assembled
 
-    # Build minimal glTF-compatible data packet for Three.js
-    gltf_data = {
-        "positions": to_b64(positions),
-        "normals":   to_b64(normals),
-        "indices":   to_b64(indices),
-        "colors":    to_b64(colors),
+
+def assemble_geometry_buckets(buckets: dict, type_colors: dict, default_color: list) -> dict:
+    """
+    Flatten per-type buckets into one set of buffers plus a group table.
+
+    Each type becomes one contiguous run of indices, and one group naming it.
+    Two offsets are in play and they are not interchangeable:
+
+      * Faces arrive numbered relative to their own bucket, so each run is
+        shifted by the number of vertices already emitted before it. Miss this
+        and every type after the first indexes into the wrong vertices.
+      * A group's `start`/`count` are in INDEX units — what three.js
+        `addGroup` wants on indexed geometry. Vertex units there would draw
+        the wrong elements rather than raising anything.
+
+    Separate from the extraction above so it can be tested without an IFC file
+    or ifcopenshell: this arithmetic is where the silent-corruption bugs live.
+    """
+    import numpy as np
+
+    positions     = []
+    normals       = []
+    indices       = []
+    groups        = []
+    vertex_offset = 0
+    index_offset  = 0
+
+    for ifc_type, bucket in sorted(buckets.items()):
+        type_faces = np.concatenate(bucket["faces"], axis=0) + vertex_offset
+        positions.append(np.concatenate(bucket["positions"], axis=0))
+        normals.append(np.concatenate(bucket["normals"], axis=0))
+        indices.append(type_faces)
+
+        colour = type_colors.get(ifc_type, default_color)
+        groups.append({
+            "type":    ifc_type,
+            "start":   int(index_offset),
+            "count":   int(type_faces.size),
+            "color":   [float(channel) for channel in colour[:3]],
+            # The colour table always carried an alpha and `col[:3]` always
+            # dropped it, so a window rendered as solid as a wall. One
+            # material per type is what makes honouring it possible.
+            "opacity": float(colour[3]) if len(colour) > 3 else 1.0,
+        })
+        vertex_offset += bucket["vertexCount"]
+        index_offset  += type_faces.size
+
+    positions = np.concatenate(positions, axis=0).astype("<f4")
+    normals   = np.concatenate(normals,   axis=0).astype("<f4")
+    indices   = np.concatenate(indices,   axis=0).astype("<u4")
+
+    return {
+        "success":       True,
+        "type":          "ifc3d",
+        "positions":     positions,
+        "normals":       normals,
+        "indices":       indices,
+        "groups":        groups,
         "vertexCount":   int(len(positions)),
         "triangleCount": int(len(indices)),
-        "elementCount":  int(mesh_count),
-        "schema":        ifc.schema,
         "bounds": {
             "min": positions.min(axis=0).tolist(),
             "max": positions.max(axis=0).tolist(),
-        }
+        },
     }
 
-    return {"success": True, "type": "ifc3d", "gltfData": gltf_data}
+
+# Header of the binary geometry container, in order. Little-endian throughout,
+# which `<f4`/`<u4`/`<I` state explicitly rather than inheriting from whatever
+# the host happens to be — a format that only works on x86 is not a format.
+GEOMETRY_MAGIC   = b"CDEG"
+GEOMETRY_VERSION = 1
+
+
+def _geometry_meta(geometry: dict) -> dict:
+    """The parts of an extraction that describe it, without the buffers."""
+    return {key: value for key, value in geometry.items()
+            if key not in ("positions", "normals", "indices")}
+
+
+def ifc_geometry_json(ifc_path: str) -> dict:
+    """
+    The extraction as JSON with base64 buffers.
+
+    Kept for `GET /api/viewer3d/{documentId}`, whose media type is part of a
+    published contract (§3.4) even though the geometry inside it is documented
+    as opaque. New clients use the binary container instead: base64 is four
+    bytes of transfer for every three of payload, which on a real model is
+    tens of megabytes spent encoding numbers that were already bytes.
+    """
+    geometry = extract_ifc_geometry(ifc_path)
+    if not geometry.get("success"):
+        return geometry
+
+    def to_b64(array):
+        return base64.b64encode(array.tobytes()).decode()
+
+    payload = _geometry_meta(geometry)
+    payload.pop("success", None)
+    payload.pop("type", None)
+    payload.update({
+        "positions": to_b64(geometry["positions"]),
+        "normals":   to_b64(geometry["normals"]),
+        "indices":   to_b64(geometry["indices"]),
+    })
+    return {"success": True, "type": "ifc3d", "gltfData": payload}
+
+
+def encode_geometry_container(geometry: dict) -> bytes:
+    """
+    The extraction as a self-describing binary blob.
+
+    Layout, all little-endian:
+
+        magic        4   b"CDEG"
+        version      4   uint32
+        headerLength 4   uint32
+        header       n   UTF-8 JSON — counts, schema, bounds, groups
+        padding      0-3 zero bytes, to a 4-byte boundary
+        positions        float32 x 3 x vertexCount
+        normals          float32 x 3 x vertexCount
+        indices          uint32  x 3 x triangleCount
+
+    The padding is not decoration. A reader takes typed-array views directly
+    over the received bytes, and both `Float32Array` and `Uint32Array` refuse
+    a byteOffset that is not a multiple of four — so a header of the wrong
+    length would throw rather than merely being untidy.
+
+    Takes an extraction rather than a path, so it can be exercised on
+    synthetic geometry without an IFC file and without ifcopenshell present.
+    """
+    header = json.dumps(_geometry_meta(geometry), separators=(",", ":")).encode("utf-8")
+    padding = (-len(header)) % 4
+
+    return b"".join([
+        GEOMETRY_MAGIC,
+        struct.pack("<I", GEOMETRY_VERSION),
+        struct.pack("<I", len(header)),
+        header,
+        b"\0" * padding,
+        geometry["positions"].tobytes(),
+        geometry["normals"].tobytes(),
+        geometry["indices"].tobytes(),
+    ])
+
+
+def ifc_geometry_binary(ifc_path: str):
+    """
+    Extract one IFC file and encode it.
+
+    Returns `(bytes, None)` on success or `(None, error_dict)` on failure, so
+    the caller can send the error as JSON rather than as a broken model.
+    """
+    geometry = extract_ifc_geometry(ifc_path)
+    if not geometry.get("success"):
+        return None, geometry
+    return encode_geometry_container(geometry), None
 
 
 def convert(file_path: str, content_type: str = "", target_format: str = "") -> dict:
@@ -1119,8 +1271,8 @@ def convert(file_path: str, content_type: str = "", target_format: str = "") -> 
                     "error": "A 3D model has no defined PDF form. Use the model "
                              "tree endpoint to read its structure, or export a "
                              "drawing sheet from the authoring tool first."}
-        print(f"[IFC] Routing to ifc_to_gltf_json: {abs_path}", flush=True)
-        return ifc_to_gltf_json(abs_path)
+        print(f"[IFC] Routing to ifc_geometry_json: {abs_path}", flush=True)
+        return ifc_geometry_json(abs_path)
 
     if ext in ("rvt", "rfa"):
         return {
@@ -1258,6 +1410,22 @@ class Handler(BaseHTTPRequestHandler):
         if ppath == "/ifc-tree":
             result = extract_ifc_tree(body.get("path",""))
             self._json(200, result)
+            return
+
+        if ppath == "/ifc-geometry":
+            # Binary on success, JSON on failure — the caller tells them apart
+            # by Content-Type, so a failed extraction never arrives looking
+            # like a model with a very short header.
+            blob, error = ifc_geometry_binary(body.get("path", "").strip())
+            if error is not None:
+                self._json(200, error)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(blob)
             return
 
         if ppath == "/compare":
