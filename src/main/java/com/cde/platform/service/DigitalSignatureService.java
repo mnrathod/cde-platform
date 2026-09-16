@@ -30,6 +30,22 @@ import java.util.*;
 public class DigitalSignatureService {
 
     /**
+     * How the signing time is written on the stamp.
+     *
+     * <p>Formatted explicitly because the previous version took
+     * {@code signedAt.toString().substring(0, 19)}, and
+     * {@code LocalDateTime.toString()} is not a fixed width: it omits the
+     * seconds when they are zero and the nanoseconds when those are zero. A
+     * signing timestamp that lands on a whole second — which a clock with
+     * millisecond or coarser resolution produces routinely, and which is also
+     * what comes back from a column stored at second precision — yields a
+     * 16-character string and the substring throws. The failure is on the
+     * signing path, after the document has already been written.
+     */
+    private static final java.time.format.DateTimeFormatter STAMP_TIMESTAMP =
+        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /**
      * Generate a self-signed X.509 certificate for a user.
      * In production, this would be replaced by a CA-signed certificate.
      */
@@ -150,11 +166,24 @@ public class DigitalSignatureService {
     }
 
     /**
-     * Generate a visual signature stamp (for embedding in PDF/DXF viewer).
-     * Returns an SVG string representing the digital signature block.
+     * Draws the visual signature stamp that is embedded into the document.
+     *
+     * <p>Every interpolated value is XML-escaped by {@link #escapeXml}. Three
+     * of them — the signer's name, the capacity signed in, and the reason —
+     * are text a person typed, and this builds markup by concatenation, which
+     * §5.12 A03 names as injection whether the target is SQL or a template.
+     * An ampersand in a company name was enough to produce a document whose
+     * stamp would not parse; a reason containing a closing tag could put
+     * chosen markup inside a signed document, which is a worse thing to be
+     * wrong about than most, because the stamp is the part a reader treats as
+     * evidence.
+     *
+     * <p>The viewer does not render this. It builds its preview from the
+     * signature record, because Angular's sanitiser strips SVG and the
+     * alternative is a banned bypass — see `DocumentSignatureComponent`.
      */
     public String generateSignatureStampSvg(SignatureRecord record) {
-        String ts = record.signedAt().toString().replace("T", " ").substring(0, 19);
+        String signedAt = STAMP_TIMESTAMP.format(record.signedAt());
         return String.format("""
             <svg xmlns="http://www.w3.org/2000/svg" width="240" height="70">
               <rect width="240" height="70" fill="#f0f8ff" stroke="#1e5fbe" stroke-width="1.5" rx="4"/>
@@ -166,9 +195,39 @@ public class DigitalSignatureService {
               <text x="8" y="67" font-family="Arial" font-size="7" fill="#999">Ref: %s</text>
             </svg>
             """,
-            record.signerName(), record.role(), record.reason(),
-            ts, record.id().substring(0, 8).toUpperCase()
+            escapeXml(record.signerName()), escapeXml(record.role()), escapeXml(record.reason()),
+            escapeXml(signedAt), escapeXml(record.id().substring(0, 8).toUpperCase())
         );
+    }
+
+    /**
+     * Escapes text for use as XML character data or an attribute value.
+     *
+     * <p>Written out rather than pulled from a library because the five
+     * predefined XML entities are the whole of the job, and an HTML escaper is
+     * the wrong tool: HTML defines named entities such as {@code &nbsp;} that
+     * XML does not, so escaping with one can produce a document an XML parser
+     * rejects — which for an SVG being drawn into a PDF means a stamp that
+     * silently fails to render.
+     *
+     * <p>Null becomes empty. A missing reason should leave a blank line on the
+     * stamp, not the word "null" in a signed document.
+     */
+    private static String escapeXml(String text) {
+        if (text == null) return "";
+        StringBuilder escaped = new StringBuilder(text.length() + 16);
+        for (int index = 0; index < text.length(); index++) {
+            char character = text.charAt(index);
+            switch (character) {
+                case '&'  -> escaped.append("&amp;");
+                case '<'  -> escaped.append("&lt;");
+                case '>'  -> escaped.append("&gt;");
+                case '"'  -> escaped.append("&quot;");
+                case '\'' -> escaped.append("&apos;");
+                default   -> escaped.append(character);
+            }
+        }
+        return escaped.toString();
     }
 
     // ── Value types ───────────────────────────────────────────────
