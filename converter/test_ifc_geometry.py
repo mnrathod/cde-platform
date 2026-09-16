@@ -36,18 +36,24 @@ COLORS = {
 DEFAULT_COLOR = [0.70, 0.68, 0.65, 1.0]
 
 
-def bucket(vertex_count, triangles):
+def bucket(vertex_count, triangles, element_count=1):
     """
     One type's accumulated arrays, as the extractor builds them.
 
     `triangles` are numbered relative to this bucket, which is the whole point
     — assembly has to shift them by the vertices emitted before it.
+
+    `element_count` is how many elements of the type went into the bucket, and
+    is a separate quantity from anything derivable from the arrays: one wall is
+    hundreds of indices, and two walls welded into one bucket are
+    indistinguishable from one long wall by looking at the geometry.
     """
     return {
         "positions": [np.arange(vertex_count * 3, dtype=np.float32).reshape(-1, 3)],
         "normals": [np.zeros((vertex_count, 3), dtype=np.float32)],
         "faces": [np.array(triangles, dtype=np.uint32).reshape(-1, 3)],
         "vertexCount": vertex_count,
+        "elementCount": element_count,
     }
 
 
@@ -298,3 +304,56 @@ class TestBucketAssembly:
 
         assert len(assembled["bounds"]["min"]) == 3
         assert len(assembled["bounds"]["max"]) == 3
+
+
+class TestElementCounts:
+    """
+    How many elements of each type the model holds.
+
+    The viewer's model tree shows this as a quantity. It used to invent it —
+    `Math.floor(Math.random() * 20) + 1`, per type, for a fixed list of ten
+    types the model need not contain — whenever no hierarchy endpoint answered.
+    §1A.4 makes that tree the accessible equivalent of a WebGL canvas, so it is
+    the one route that must not be guessed at. Carrying a counted number here
+    is what let the guess be deleted.
+    """
+
+    def test_reports_the_number_of_elements_the_bucket_held(self):
+        buckets = {"IfcWall": bucket(3, [[0, 1, 2]], element_count=17)}
+
+        groups = assemble_geometry_buckets(buckets, COLORS, DEFAULT_COLOR)["groups"]
+
+        assert groups[0]["elementCount"] == 17
+
+    def test_counts_each_type_separately(self):
+        buckets = {
+            "IfcWall":   bucket(3, [[0, 1, 2]], element_count=12),
+            "IfcWindow": bucket(3, [[0, 1, 2]], element_count=4),
+        }
+
+        groups = assemble_geometry_buckets(buckets, COLORS, DEFAULT_COLOR)["groups"]
+
+        # Sorted order: IfcWall then IfcWindow.
+        assert [group["elementCount"] for group in groups] == [12, 4]
+
+    def test_element_count_is_not_the_index_count(self):
+        # The two are named apart deliberately. One wall of two triangles is
+        # six indices; reading `count` as a quantity would tell a reader their
+        # model holds six walls.
+        buckets = {"IfcWall": bucket(4, [[0, 1, 2], [1, 2, 3]], element_count=1)}
+
+        group = assemble_geometry_buckets(buckets, COLORS, DEFAULT_COLOR)["groups"][0]
+
+        assert group["count"] == 6
+        assert group["elementCount"] == 1
+
+    def test_survives_a_bucket_written_without_a_count(self):
+        # Assembly is called with buckets the extractor built, but it is also
+        # the testable seam, so it should not raise on one that predates the
+        # field. Zero reads downstream as "not known".
+        legacy = bucket(3, [[0, 1, 2]])
+        del legacy["elementCount"]
+
+        groups = assemble_geometry_buckets({"IfcWall": legacy}, COLORS, DEFAULT_COLOR)["groups"]
+
+        assert groups[0]["elementCount"] == 0

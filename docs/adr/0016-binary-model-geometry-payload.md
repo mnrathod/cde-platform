@@ -64,6 +64,8 @@ magic        4   "CDEG"
 version      4   uint32
 headerLength 4   uint32
 header       n   UTF-8 JSON: counts, schema, bounds, groups
+                 (each group: type, start, count — index units —
+                  color, opacity, elementCount)
 padding      0-3 zero bytes, to a 4-byte boundary
 positions        float32 x 3 x vertexCount
 normals          float32 x 3 x vertexCount
@@ -94,6 +96,20 @@ them up; it removes the reason they could not work.
 The type colour table always carried an alpha channel that `colour[:3]`
 discarded, so glazing rendered as solid as a wall. Per-type materials can
 honour it, and now do.
+
+Each group also carries `elementCount` — how many elements of that type the
+extractor read, which is not derivable from the geometry: two walls welded
+into one bucket look exactly like one long wall. It was added after this
+format shipped, so a reader must treat its absence as unknown rather than as
+zero elements, and `decodeGeometryContainer` normalises it for that reason.
+
+This turned out to matter more than a statistic. The viewer's model tree
+fabricated its contents whenever no hierarchy endpoint answered — ten fixed
+IFC types, each given `Math.floor(Math.random() * 20) + 1` as a quantity — and
+§1A.4 makes that tree the accessible equivalent of a canvas some readers
+cannot see at all. Carrying a counted number is what allowed the invention to
+be deleted rather than merely flagged. The derived tree is flat, with no
+storeys in it; one level of real types beats three levels of invented ones.
 
 Two encoders exist in the conversion service: `ifc_geometry_json` for the
 older route, and `ifc_geometry_binary` for this one. They share one

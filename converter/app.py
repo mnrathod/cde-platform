@@ -999,12 +999,18 @@ def extract_ifc_geometry(ifc_path: str) -> dict:
             # global positions at assembly, because a bucket's final place in
             # the vertex array is not known until every element has been read.
             bucket = buckets.setdefault(shape.type, {
-                "positions": [], "normals": [], "faces": [], "vertexCount": 0,
+                "positions": [], "normals": [], "faces": [],
+                "vertexCount": 0, "elementCount": 0,
             })
             bucket["positions"].append(verts)
             bucket["normals"].append(norms)
             bucket["faces"].append(faces + bucket["vertexCount"])
             bucket["vertexCount"] += len(verts)
+            # How many elements of this type the model holds, counted rather
+            # than guessed. The viewer's model tree used to invent this with
+            # Math.random() when no hierarchy endpoint answered, so a reader
+            # was shown fabricated quantities for their own building.
+            bucket["elementCount"] += 1
             mesh_count += 1
 
             if not it.next():
@@ -1065,6 +1071,10 @@ def assemble_geometry_buckets(buckets: dict, type_colors: dict, default_color: l
             "type":    ifc_type,
             "start":   int(index_offset),
             "count":   int(type_faces.size),
+            # Elements of this type, not triangles. `count` above is an index
+            # count and the two are nothing like each other — a single wall is
+            # hundreds of indices — so they are named apart deliberately.
+            "elementCount": int(bucket.get("elementCount", 0)),
             "color":   [float(channel) for channel in colour[:3]],
             # The colour table always carried an alpha and `col[:3]` always
             # dropped it, so a window rendered as solid as a wall. One
