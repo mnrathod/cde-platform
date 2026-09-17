@@ -21,10 +21,14 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
     private final UserDetailsService userDetailsService;
+    private final SessionCookie sessionCookie;
 
-    public JwtFilter(JwtTokenService jwtTokenService, @Lazy UserDetailsService userDetailsService) {
+    public JwtFilter(JwtTokenService jwtTokenService,
+                     @Lazy UserDetailsService userDetailsService,
+                     SessionCookie sessionCookie) {
         this.jwtTokenService = jwtTokenService;
         this.userDetailsService = userDetailsService;
+        this.sessionCookie = sessionCookie;
     }
 
     @Override
@@ -41,20 +45,34 @@ public class JwtFilter extends OncePerRequestFilter {
         // and an unbound thread does not fail — it silently reads nothing.
         Optional<Long> previous = TenantContext.currentTenantId();
         try {
-            authenticateFromBearerToken(req);
+            authenticateFromToken(req);
             chain.doFilter(req, res);
         } finally {
             TenantContextBinder.restore(previous);
         }
     }
 
-    private void authenticateFromBearerToken(HttpServletRequest req) {
-        String header = req.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
+    /**
+     * Authenticates from whichever credential the client carries.
+     *
+     * <p>Two, deliberately. Browsers send the session cookie, which a script
+     * cannot read and so cannot steal through an XSS (§4.6, {@link
+     * SessionCookie}). Machine and mobile clients send a bearer header, which
+     * is their published contract and which a native application has no safer
+     * place for anyway.
+     *
+     * <p>The header wins when both are present. A caller that went to the
+     * trouble of setting one is saying which identity it means, and silently
+     * preferring an ambient cookie would let a stale browser session decide
+     * what an explicit API call did.
+     */
+    private void authenticateFromToken(HttpServletRequest req) {
+        Optional<String> presented = bearerToken(req).or(() -> sessionCookie.readFrom(req));
+        if (presented.isEmpty()) {
             return;
         }
 
-        String token = header.substring(7);
+        String token = presented.get();
         if (!jwtTokenService.isTokenValid(token)) {
             return;
         }
@@ -70,5 +88,12 @@ public class JwtFilter extends OncePerRequestFilter {
         var auth = new UsernamePasswordAuthenticationToken(ud, null, ud.getAuthorities());
         auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
         SecurityContextHolder.getContext().setAuthentication(auth);
+    }
+
+    private static Optional<String> bearerToken(HttpServletRequest req) {
+        String header = req.getHeader("Authorization");
+        return header != null && header.startsWith("Bearer ")
+            ? Optional.of(header.substring(7))
+            : Optional.empty();
     }
 }

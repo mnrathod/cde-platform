@@ -3,6 +3,7 @@ package com.cde.platform.config;
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.security.JwtFilter;
 import com.cde.platform.security.RolePermissions;
+import com.cde.platform.security.SessionCookie;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
@@ -18,6 +19,7 @@ import org.springframework.security.core.userdetails.*;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.HeaderWriterFilter;
 import org.springframework.security.web.header.writers.ContentSecurityPolicyHeaderWriter;
@@ -37,6 +39,7 @@ import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.*;
 import java.util.List;
+import java.util.Set;
 
 @Configuration
 @EnableWebSecurity
@@ -51,25 +54,48 @@ public class SecurityConfig {
     private final AuthenticationEntryPoint authenticationEntryPoint;
     private final AccessDeniedHandler accessDeniedHandler;
     private final WebSecurityHeadersProperties webProperties;
+    private final SessionCookie sessionCookie;
 
     public SecurityConfig(JwtFilter jwtFilter,
                           UserRepository userRepo,
                           AuthenticationEntryPoint authenticationEntryPoint,
                           AccessDeniedHandler accessDeniedHandler,
-                          WebSecurityHeadersProperties webProperties) {
+                          WebSecurityHeadersProperties webProperties,
+                          SessionCookie sessionCookie) {
         this.jwtFilter = jwtFilter;
         this.userRepo = userRepo;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.accessDeniedHandler = accessDeniedHandler;
         this.webProperties = webProperties;
+        this.sessionCookie = sessionCookie;
         webProperties.requireValidOrigins();
     }
+
+    /** Methods that are not supposed to change anything, so need no token. */
+    private static final Set<String> SAFE_METHODS =
+        Set.of("GET", "HEAD", "OPTIONS", "TRACE");
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsSource()))
-            .csrf(csrf -> csrf.disable())
+            // Switched on when the session moved into a cookie, and scoped to
+            // exactly the requests that changed. A bearer header is not sent
+            // by a browser on its own, so a cross-site form could never forge
+            // an authenticated call while that was the only credential — which
+            // is why disabling this was defensible before and is not now: an
+            // ambient cookie rides along on a cross-site POST unless something
+            // stops it. SameSite=Lax is that something, and §5.4 asks for a
+            // token as well, on the principle that one mechanism is not a
+            // control.
+            //
+            // withHttpOnlyFalse because the token is meant to be read by our
+            // own script and echoed in a header; it is not a credential, it is
+            // proof that the caller could read a value from this origin. The
+            // session cookie beside it stays HttpOnly.
+            .csrf(csrf -> csrf
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .requireCsrfProtectionMatcher(this::needsCsrfToken))
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 // The WebSocket handshake is a plain GET with no Authorization
@@ -149,7 +175,13 @@ public class SecurityConfig {
                 .requestMatchers(BrowserApplicationRoutes.EMBED + "/**").permitAll()
                 .requestMatchers("/*.js", "/*.css", "/*.ico", "/*.webmanifest", "/*.txt",
                                  "/assets/**", "/icons/**", "/media/**").permitAll()
-                .requestMatchers("/api/auth/**",
+                // Named rather than "/api/auth/**": these two are the only
+                // ones a caller reaches without a credential, and the wildcard
+                // also opened /session and /logout, which exist to tell an
+                // authenticated caller who they are and to end their session.
+                // Both take an Authentication, so permitting them anonymously
+                // meant handing the controller a null principal.
+                .requestMatchers("/api/auth/login", "/api/auth/register",
                                  "/favicon.ico", "/favicon.png",
                                  "/api/logs/**").permitAll()
                 .anyRequest().authenticated()
@@ -356,6 +388,40 @@ public class SecurityConfig {
      * "*"} tells the browser to allow whatever the caller asks for, which
      * makes the allow-list a formality.
      */
+
+    /**
+     * Which requests must carry a CSRF token.
+     *
+     * <p>Only the ones a browser could be tricked into making with a
+     * credential it did not choose to send — that is, state-changing requests
+     * authenticated by the session cookie. Three exclusions, each for a
+     * reason:
+     *
+     * <ul>
+     *   <li><b>Safe methods.</b> GET, HEAD, OPTIONS and TRACE are not supposed
+     *       to change anything, and requiring a token on them would break
+     *       ordinary navigation to no purpose.</li>
+     *   <li><b>Bearer callers.</b> A browser never attaches an Authorization
+     *       header by itself, so a request carrying one was constructed by a
+     *       client that already had the token. Demanding CSRF of the mobile
+     *       SDKs would break their published contract to defend against an
+     *       attack they are not exposed to.</li>
+     *   <li><b>Sign-in and registration.</b> They carry no session to abuse,
+     *       and a login that required a token fetched beforehand would fail
+     *       for anyone arriving with a cold cache.</li>
+     * </ul>
+     */
+    private boolean needsCsrfToken(HttpServletRequest request) {
+        if (SAFE_METHODS.contains(request.getMethod())) {
+            return false;
+        }
+        String path = request.getRequestURI();
+        if ("/api/auth/login".equals(path) || "/api/auth/register".equals(path)) {
+            return false;
+        }
+        return sessionCookie.authenticatesByCookie(request);
+    }
+
     @Bean
     public CorsConfigurationSource corsSource() {
         var source = new UrlBasedCorsConfigurationSource();

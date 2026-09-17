@@ -20,6 +20,7 @@ import com.cde.platform.repository.TenantRepository;
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.security.AuthenticationThrottle;
 import com.cde.platform.security.JwtTokenService;
+import com.cde.platform.security.SessionCookie;
 import com.cde.platform.tenancy.LoginTenantResolver;
 import com.cde.platform.tenancy.TenancyProperties;
 import com.cde.platform.tenancy.TenantContext;
@@ -28,6 +29,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.*;
 import org.springframework.security.authentication.*;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
@@ -54,6 +56,7 @@ public class AuthController {
     private final RegistrationService registrationService;
     private final RequestAuditor auditor;
     private final AuthenticationThrottle throttle;
+    private final SessionCookie sessionCookie;
 
     public AuthController(UserRepository userRepo,
                           JwtTokenService jwtTokenService,
@@ -61,7 +64,8 @@ public class AuthController {
                           LoginTenantResolver loginTenantResolver,
                           RegistrationService registrationService,
                           RequestAuditor auditor,
-                          AuthenticationThrottle throttle) {
+                          AuthenticationThrottle throttle,
+                          SessionCookie sessionCookie) {
         this.userRepo = userRepo;
         this.jwtTokenService = jwtTokenService;
         this.authManager = authManager;
@@ -69,6 +73,7 @@ public class AuthController {
         this.registrationService = registrationService;
         this.auditor = auditor;
         this.throttle = throttle;
+        this.sessionCookie = sessionCookie;
     }
 
     /**
@@ -173,8 +178,11 @@ public class AuthController {
 
                 String token = jwtTokenService.generateToken(
                     registered.user().getUsername(), registered.tenant().getId());
-                yield ResponseEntity.status(HttpStatus.CREATED).body(new AuthResponse(
-                    token, registered.user().getUsername(), registered.user().getRole().name()));
+                yield ResponseEntity.status(HttpStatus.CREATED)
+                    .header(HttpHeaders.SET_COOKIE, sessionCookie.issueFor(token).toString())
+                    .body(new AuthResponse(
+                        token, registered.user().getUsername(),
+                        registered.user().getRole().name()));
             }
 
             // One message covering username and email alike. Saying which one
@@ -324,13 +332,96 @@ public class AuthController {
                 httpRequest);
 
             String token = jwtTokenService.generateToken(user.getUsername(), tenantId.get());
-            return ResponseEntity.ok(
-                new AuthResponse(token, user.getUsername(), user.getRole().name()));
+            // Both, deliberately. The cookie is what the browser will use and
+            // is the one a script cannot read (§4.6); the body token is the
+            // mobile SDKs' published contract, and a native client has no
+            // cookie jar to protect. See SessionCookie.
+            return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, sessionCookie.issueFor(token).toString())
+                .body(new AuthResponse(token, user.getUsername(), user.getRole().name()));
         } finally {
             // JwtFilter clears this for authenticated requests, but a login
             // arrives without a token and so never passes through that branch.
             TenantContextBinder.clear();
         }
+    }
+
+    @Operation(
+        operationId = "getSession",
+        summary = "Who the current session belongs to",
+        description = """
+            Names the account this request is authenticated as. It exists because a browser \
+            session lives in an `HttpOnly` cookie: the client cannot read the token, so it \
+            cannot read the subject out of it either, and asking the server is the only honest \
+            way to find out who is signed in.
+
+            Deliberately returns no token. Handing the same value back in a body would put it \
+            within reach of any script on the page and undo the reason for the cookie.
+
+            Requires only a valid session; any authenticated caller may ask about their own.""")
+    @ApiResponse(responseCode = "200", description = "The session's account.",
+        content = @Content(mediaType = "application/json",
+                           schema = @Schema(implementation = SessionResponse.class)))
+    @ApiResponse(responseCode = "401",
+        description = "No credential was presented, or the one presented is expired or invalid.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @ApiResponse(responseCode = "500",
+        description = "The session could not be read for a reason the caller cannot act on. "
+                    + "Quote the `traceId` when reporting it.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @GetMapping("/session")
+    public ResponseEntity<?> session(Authentication authentication) {
+        return userRepo.findByUsername(authentication.getName())
+            .<ResponseEntity<?>>map(user -> ResponseEntity.ok(
+                new SessionResponse(user.getUsername(), user.getRole().name())))
+            // Authenticated against a user row that is no longer readable —
+            // deleted, or moved out of this tenant mid-session. Treated as no
+            // session rather than as a server fault, because that is what it
+            // is from the caller's side, and the cookie is cleared so the
+            // browser stops presenting a credential that resolves to nobody.
+            .orElseGet(() -> ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .header(HttpHeaders.SET_COOKIE, sessionCookie.clear().toString())
+                .build());
+    }
+
+    @Operation(
+        operationId = "logout",
+        summary = "End the browser session",
+        description = """
+            Clears the session cookie. Needed because the cookie is `HttpOnly`: script cannot \
+            delete what script cannot see, so signing out has to be something the server does.
+
+            Bearer callers have nothing to clear — a token is valid until it expires — so for \
+            them this records the event and does nothing else. Revoking a bearer token before \
+            its expiry needs a revocation list, which is §4.6's separate concern.
+
+            Requires only a valid session.""")
+    @ApiResponse(responseCode = "204", description = "Signed out.")
+    @ApiResponse(responseCode = "401",
+        description = "No credential was presented, or the one presented is expired or invalid.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @ApiResponse(responseCode = "500",
+        description = "Sign-out failed for a reason the caller cannot act on. Quote the "
+                    + "`traceId` when reporting it.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(Authentication authentication,
+                                       HttpServletRequest httpRequest) {
+        userRepo.findByUsername(authentication.getName()).ifPresent(user ->
+            auditor.record(
+                AuditRequest.by(user.getId(), user.getUsername())
+                    .did(AuditAction.SIGN_OUT)
+                    .outcome(AuditOutcome.SUCCESS)
+                    .to("User", user.getId()),
+                httpRequest));
+
+        return ResponseEntity.noContent()
+            .header(HttpHeaders.SET_COOKIE, sessionCookie.clear().toString())
+            .build();
     }
 
     /**

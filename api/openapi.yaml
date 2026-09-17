@@ -1188,6 +1188,36 @@ paths:
       summary: Exchange a username and password for a token
       tags:
       - Authentication
+  /api/auth/logout:
+    post:
+      description: |-
+        Clears the session cookie. Needed because the cookie is `HttpOnly`: script cannot delete what script cannot see, so signing out has to be something the server does.
+
+        Bearer callers have nothing to clear — a token is valid until it expires — so for them this records the event and does nothing else. Revoking a bearer token before its expiry needs a revocation list, which is §4.6's separate concern.
+
+        Requires only a valid session.
+      operationId: logout
+      responses:
+        "204":
+          description: Signed out.
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: Sign-out failed for a reason the caller cannot act on. Quote
+            the `traceId` when reporting it.
+      security: []
+      summary: End the browser session
+      tags:
+      - Authentication
   /api/auth/register:
     post:
       description: |-
@@ -1264,6 +1294,40 @@ paths:
             Quote the `traceId` when reporting it.
       security: []
       summary: "Create an account, in a new organisation or an inviting one"
+      tags:
+      - Authentication
+  /api/auth/session:
+    get:
+      description: |-
+        Names the account this request is authenticated as. It exists because a browser session lives in an `HttpOnly` cookie: the client cannot read the token, so it cannot read the subject out of it either, and asking the server is the only honest way to find out who is signed in.
+
+        Deliberately returns no token. Handing the same value back in a body would put it within reach of any script on the page and undo the reason for the cookie.
+
+        Requires only a valid session; any authenticated caller may ask about their own.
+      operationId: getSession
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+          description: The session's account.
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "No credential was presented, or the one presented is expired\
+            \ or invalid."
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: The session could not be read for a reason the caller cannot
+            act on. Quote the `traceId` when reporting it.
+      security: []
+      summary: Who the current session belongs to
       tags:
       - Authentication
   /api/cde/containers/{containerId}:
@@ -8032,6 +8096,24 @@ components:
         transition:
           $ref: "#/components/schemas/ContainerTransitionResponse"
           description: The transition that was recorded.
+    SessionResponse:
+      type: object
+      description: "Who the current session belongs to. Carries no token: a browser\
+        \ session lives in an HttpOnly cookie precisely so that no script can read\
+        \ it, and handing the same value back in a body would undo that."
+      properties:
+        role:
+          type: string
+          description: Role the account holds. Presentation only — every permission
+            is re-checked server-side on every request.
+          example: ENGINEER
+        username:
+          type: string
+          description: Sign-in name this session authenticates.
+          example: j.okafor
+      required:
+      - role
+      - username
     SignatureRequest:
       type: object
       description: Optional context recorded alongside a signature. The signer's identity

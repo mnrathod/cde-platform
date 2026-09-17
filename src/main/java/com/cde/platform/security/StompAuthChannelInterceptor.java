@@ -15,6 +15,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Authenticates a STOMP session from the JWT the client sends on CONNECT.
@@ -23,9 +24,19 @@ import java.util.List;
  * {@code Authorization} header to, so the usual servlet filter never sees a
  * token and the socket would otherwise be anonymous — meaning anyone who
  * could reach the server could subscribe to any document's collaboration
- * traffic. The token travels in the CONNECT frame instead, and the
- * authenticated user is attached to the session so every later frame from it
- * carries a known identity.
+ * traffic. The authenticated user is attached to the session so every later
+ * frame from it carries a known identity.
+ *
+ * <p>Two places the credential can come from, for the same reason there are
+ * two elsewhere. A native client sends it on the CONNECT frame, which is its
+ * published contract. A browser has no token to send — the web client holds
+ * none since the session moved into an {@code HttpOnly} cookie (§4.6) — so its
+ * credential rides the handshake as that cookie and {@link
+ * SessionCookieHandshake} leaves it where this can find it.
+ *
+ * <p>The CONNECT frame wins when both are present, matching {@link JwtFilter}:
+ * a client that went to the trouble of naming an identity should not be
+ * overruled by an ambient one.
  */
 @Component
 public class StompAuthChannelInterceptor implements ChannelInterceptor {
@@ -68,6 +79,9 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     /** @return the authenticated user, or null when the token is absent or invalid */
     private UserDetails authenticate(StompHeaderAccessor accessor) {
         String token = bearerToken(accessor.getNativeHeader(AUTH_HEADER));
+        if (token == null) {
+            token = handshakeToken(accessor);
+        }
         if (token == null || !jwtTokenService.isTokenValid(token)) return null;
 
         try {
@@ -78,6 +92,14 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             log.warn("Rejected a WebSocket connection: {}", e.getMessage());
             return null;
         }
+    }
+
+    /** The session cookie lifted off the handshake, if there was one. */
+    private String handshakeToken(StompHeaderAccessor accessor) {
+        Map<String, Object> attributes = accessor.getSessionAttributes();
+        if (attributes == null) return null;
+        Object token = attributes.get(SessionCookieHandshake.TOKEN_ATTRIBUTE);
+        return token instanceof String value && !value.isBlank() ? value : null;
     }
 
     private String bearerToken(List<String> headerValues) {

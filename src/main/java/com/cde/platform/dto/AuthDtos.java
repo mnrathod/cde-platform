@@ -123,4 +123,20 @@ public final class AuthDtos {
                 example = "ENGINEER", requiredMode = Schema.RequiredMode.REQUIRED)
         String role
     ) {}
+
+    @Schema(name = "SessionResponse",
+            description = "Who the current session belongs to. Carries no token: a browser "
+                        + "session lives in an HttpOnly cookie precisely so that no script can "
+                        + "read it, and handing the same value back in a body would undo that.")
+    public record SessionResponse(
+
+        @Schema(description = "Sign-in name this session authenticates.", example = "j.okafor",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        String username,
+
+        @Schema(description = "Role the account holds. Presentation only — every permission is "
+                            + "re-checked server-side on every request.",
+                example = "ENGINEER", requiredMode = Schema.RequiredMode.REQUIRED)
+        String role
+    ) {}
 }
