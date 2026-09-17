@@ -207,9 +207,22 @@ public class TenantAwareDataSource extends DelegatingDataSource {
                 // connection would replace the real error with a confusing one.
                 return;
             }
-            try (Statement statement = delegate.createStatement()) {
-                statement.execute("SELECT set_config('" + TENANT_SETTING + "', '', false)");
-                statement.execute("RESET ROLE");
+            try {
+                // Bound, not concatenated, so this reads the same as
+                // applyTenantSetting and so the §5.12 grep for built-up SQL
+                // has nothing to find here. The interpolated value was a
+                // compile-time constant and could not be injected, but a
+                // forbidden pattern sitting in the tenancy class is the worst
+                // place to leave one: it is where a reader looks to learn the
+                // house style for this kind of statement.
+                try (PreparedStatement statement =
+                         delegate.prepareStatement("SELECT set_config(?, '', false)")) {
+                    statement.setString(1, TENANT_SETTING);
+                    statement.execute();
+                }
+                try (Statement statement = delegate.createStatement()) {
+                    statement.execute("RESET ROLE");
+                }
             } catch (SQLException e) {
                 // Returning a connection that still carries another tenant's
                 // context is a cross-tenant leak, so the connection is broken
