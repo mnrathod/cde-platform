@@ -81,6 +81,22 @@ pipeline {
                                 # turn the gate into a no-op.
                                 npx tsc --build --force --noEmit
                                 npm run check:no-remote-code
+
+                                # The message catalogue is generated, and a
+                                # generated file nothing compares to its
+                                # source rots. A stale one is worse than
+                                # none: translators work from it, so a
+                                # missing entry ships an untranslated string
+                                # to every language at once.
+                                npm run check:i18n
+
+                                # Text a user reads that no translator will
+                                # ever see. A script rather than a spec: a
+                                # source file pulled into the test bundle as
+                                # raw text collapses to a one-line module and
+                                # silently empties the coverage denominator.
+                                npm run check:i18n-markup
+                                npm run test:scripts
                             '''
                         }
                     }
