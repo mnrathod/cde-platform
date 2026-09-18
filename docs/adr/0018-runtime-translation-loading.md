@@ -112,13 +112,30 @@ as a message and the template guard cannot see it either. Those have to move
 into the component as `$localize` tagged templates. This is a real gap in the
 guard and is worth knowing about rather than discovering during a translation.
 
-**Most of the application is still untranslated.** The infrastructure, the
-guard and two components are done; twenty-two templates remain on the
-baseline. The work is mechanical but it is not finished, and the baseline is
-the honest record of how much is left.
+**The baseline is empty.** All 33 component templates are marked up, along
+with the string tables behind them — tool names, document types, project
+phases, document statuses, redaction presets — which the template guard
+cannot see and which are where untranslated text otherwise survives a sweep.
+484 messages.
 
-**RTL is supported but not yet proven.** `dir` is set correctly and the
-layout has begun moving to logical properties (`start`/`end` rather than
-`left`/`right`), but no right-to-left language is deployed, so nothing has
-been seen rendered in one. The claim in this document is that the mechanism
-works; it is not a claim that the layout is correct in Arabic.
+**Three construction patterns had to be unpicked rather than marked.** A
+lowercase fragment the caller capitalised with `charAt(0).toUpperCase()`;
+a tooltip assembled as `"${label} (${key}) — ${hint}"`; and
+`"{action} failed."` built from an English noun. None of them can be
+translated: casing rules differ, word order differs, and agreement does not
+survive interpolation. Each is now whole messages with named placeholders.
+Expect more of these — they are invisible to a guard that reads markup.
+
+**A nested ICU sub-message cannot take a custom ID.** Angular does not accept
+`@@` inside one, so the plural forms have generated numeric IDs and will lose
+their translations if the wording changes. The parent messages keep stable
+IDs. This is a framework constraint, not a choice.
+
+**RTL is supported but not proven.** `dir` is set from the negotiated locale
+and the layout uses logical properties throughout — with two deliberate
+exceptions, the markup overlay and the print stylesheet, which position
+against the document's own coordinate system and would put annotations off
+the page if they flipped. Both carry comments saying so. Nothing has been
+seen rendered in a right-to-left language, because no such catalogue is
+deployed. The claim here is that the mechanism is right, not that the layout
+is.
