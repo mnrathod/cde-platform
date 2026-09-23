@@ -26,6 +26,14 @@ import pytest
 from pathlib import Path
 
 import app
+import cad_comparison
+import dwg_oda
+import dxf_render
+
+# The converter is no longer one module (§3.3), so a stub goes on the module
+# that owns the function under test rather than on `app`, which now merely
+# re-exports it. Patching the re-export would leave the real lookup alone
+# and the test would pass on a stub nobody consulted.
 
 
 @pytest.fixture
@@ -55,9 +63,9 @@ def oda_stub(tmp_path):
 @pytest.fixture(autouse=True)
 def forget_probe_result():
     """The probe caches; each test needs its own answer."""
-    app._ODA_STATUS = None
+    dwg_oda._ODA_STATUS = None
     yield
-    app._ODA_STATUS = None
+    dwg_oda._ODA_STATUS = None
 
 
 class TestFindingIt:
@@ -122,7 +130,7 @@ class TestLaunchingItHeadless:
         # Asserted on the argv actually built, because the prefix existing and
         # the prefix being used are different things.
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
-        monkeypatch.setattr(app, "oda_launch_prefix", lambda: ["/usr/bin/xvfb-run", "-a"])
+        monkeypatch.setattr(dwg_oda, "oda_launch_prefix", lambda: ["/usr/bin/xvfb-run", "-a"])
 
         seen = []
 
@@ -130,7 +138,7 @@ class TestLaunchingItHeadless:
             seen.append(cmd)
             return 0, "", ""
 
-        monkeypatch.setattr(app, "run_cmd", record)
+        monkeypatch.setattr(dwg_oda, "run_cmd", record)
         source = tmp_path / "plan.dwg"
         source.write_bytes(b"AC1032" + b"\0" * 32)
 
@@ -166,7 +174,7 @@ class TestSayingWhetherItWorks:
 
     def test_no_install_is_reported_as_a_fallback_not_a_fault(self, monkeypatch):
         # Absent ODA is the supported default, so it must not read as broken.
-        monkeypatch.setattr(app, "find_oda", lambda: None)
+        monkeypatch.setattr(dwg_oda, "find_oda", lambda: None)
         status = app.probe_oda()
         assert status == {"installed": False, "runnable": False, "path": None,
                           "detail": "not configured — DWG cannot be converted"}
@@ -177,7 +185,7 @@ class TestSayingWhetherItWorks:
         # waste for no new information.
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
         calls = []
-        monkeypatch.setattr(app, "probe_oda",
+        monkeypatch.setattr(dwg_oda, "probe_oda",
                             lambda *a, **k: calls.append(1) or {"installed": True})
 
         app.oda_status()
@@ -187,7 +195,7 @@ class TestSayingWhetherItWorks:
 
     def test_a_refresh_re_probes(self, monkeypatch):
         calls = []
-        monkeypatch.setattr(app, "probe_oda",
+        monkeypatch.setattr(dwg_oda, "probe_oda",
                             lambda *a, **k: calls.append(1) or {"installed": False})
         app.oda_status()
         app.oda_status(refresh=True)
@@ -199,8 +207,8 @@ class TestSayingWhetherItWorks:
         # directories each time fills a disk slowly enough not to be noticed.
         monkeypatch.setenv("ODA_PATH", str(oda_stub))
         made = []
-        real_make = app.make_temp_dir
-        monkeypatch.setattr(app, "make_temp_dir",
+        real_make = dwg_oda.make_temp_dir
+        monkeypatch.setattr(dwg_oda, "make_temp_dir",
                             lambda: made.append(real_make()) or made[-1])
 
         app.probe_oda()
@@ -225,7 +233,7 @@ class TestDwgWithoutOda:
     """
 
     def test_dwg_without_oda_fails_and_says_what_to_do(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(app, "find_oda", lambda: None)
+        monkeypatch.setattr(dwg_oda, "find_oda", lambda: None)
 
         source = tmp_path / "plan.dwg"
         source.write_bytes(b"AC1032" + b"\0" * 32)
@@ -244,8 +252,8 @@ class TestDwgWithoutOda:
     def test_dxf_still_renders_without_oda(self, monkeypatch, tmp_path):
         # DXF never went through a DWG converter — ezdxf reads it directly —
         # and the risk in removing LibreDWG is taking this with it.
-        monkeypatch.setattr(app, "find_oda", lambda: None)
-        monkeypatch.setattr(app, "render_dxf_string",
+        monkeypatch.setattr(dwg_oda, "find_oda", lambda: None)
+        monkeypatch.setattr(dxf_render, "render_dxf_string",
                             lambda content: {"success": True, "svg": "<svg/>"})
 
         source = tmp_path / "plan.dxf"
@@ -333,12 +341,18 @@ class TestComparingTwoDwgFiles:
                 "0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n")
             return (0, "", "")
 
-        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
-        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
-        monkeypatch.setattr(app, "run_cmd", spy_run)
-        monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
-        monkeypatch.setattr(app, "make_temp_dir", fresh_dir)
-        monkeypatch.setattr(app, "render_dxf_string", lambda content: {"success": True})
+        # Counted in both modules, not just the one under test. ODA is only
+        # ever started through `run_cmd`, but there are two bindings of it
+        # now, and a spy on one alone made this test unable to see a second
+        # conversion issued from the other — which is precisely the
+        # regression it exists for.
+        for module in (cad_comparison, dwg_oda):
+            monkeypatch.setattr(module, "find_oda",
+                                lambda: "/opt/oda/ODAFileConverter")
+            monkeypatch.setattr(module, "run_cmd", spy_run)
+            monkeypatch.setattr(module, "make_temp_dir", fresh_dir)
+            monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(dxf_render, "render_dxf_string", lambda content: {"success": True})
 
         source = tmp_path / "plan.dwg"
         source.write_bytes(b"AC1032" + b"\0" * 32)
@@ -354,15 +368,15 @@ class TestComparingTwoDwgFiles:
         in_dir = tmp_path / "in"
         in_dir.mkdir()
 
-        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
-        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
-        monkeypatch.setattr(app, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
-        monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(cad_comparison, "find_oda",
+                            lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(cad_comparison, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
+        monkeypatch.setattr(cad_comparison.time, "sleep", lambda seconds: None)
         dirs = iter([str(in_dir), str(out_dir)])
-        monkeypatch.setattr(app, "make_temp_dir", lambda: next(dirs))
+        monkeypatch.setattr(cad_comparison, "make_temp_dir", lambda: next(dirs))
 
         rendered = []
-        monkeypatch.setattr(app, "render_dxf_string",
+        monkeypatch.setattr(dxf_render, "render_dxf_string",
                             lambda content: rendered.append(content) or {"success": True})
 
         source = tmp_path / "plan.dwg"

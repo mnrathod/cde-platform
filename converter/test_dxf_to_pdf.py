@@ -23,6 +23,13 @@ import pypdf
 import pytest
 
 import app
+import dwg_oda
+import dxf_render
+
+# The converter is no longer one module (§3.3), so a stub goes on the module
+# that owns the function under test rather than on `app`, which now merely
+# re-exports it. Patching the re-export would leave the real lookup alone
+# and the test would pass on a stub nobody consulted.
 
 
 pytestmark = pytest.mark.skipif(
@@ -299,14 +306,14 @@ class TestTheDwgRouteUsesTheSameRenderer:
         out_dir.mkdir()
         (out_dir / "out.dxf").write_text("DXF CONTENT")
 
-        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
-        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
-        monkeypatch.setattr(app, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
+        monkeypatch.setattr(dwg_oda, "find_oda", lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(dwg_oda, "oda_launch_prefix", lambda: [])
+        monkeypatch.setattr(dwg_oda, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
         monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
         # in_dir then out_dir, in the order dwg_via_oda asks for them.
         dirs = iter([str(tmp_path / "in"), str(out_dir)])
         (tmp_path / "in").mkdir()
-        monkeypatch.setattr(app, "make_temp_dir", lambda: next(dirs))
+        monkeypatch.setattr(dwg_oda, "make_temp_dir", lambda: next(dirs))
 
         seen = {}
 
@@ -328,13 +335,13 @@ class TestTheDwgRouteUsesTheSameRenderer:
         out_dir.mkdir()
         (out_dir / "out.dxf").write_text("DXF CONTENT")
 
-        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
-        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
-        monkeypatch.setattr(app, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
+        monkeypatch.setattr(dwg_oda, "find_oda", lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(dwg_oda, "oda_launch_prefix", lambda: [])
+        monkeypatch.setattr(dwg_oda, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
         monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
         dirs = iter([str(tmp_path / "in"), str(out_dir)])
         (tmp_path / "in").mkdir()
-        monkeypatch.setattr(app, "make_temp_dir", lambda: next(dirs))
+        monkeypatch.setattr(dwg_oda, "make_temp_dir", lambda: next(dirs))
 
         seen = {}
 
@@ -342,7 +349,7 @@ class TestTheDwgRouteUsesTheSameRenderer:
             seen["called"] = True
             return {"success": True, "svg": "<svg/>"}
 
-        monkeypatch.setattr(app, "render_dxf_string", viewer_render)
+        monkeypatch.setattr(dxf_render, "render_dxf_string", viewer_render)
 
         source = tmp_path / "whatever.dwg"
         source.write_bytes(b"AC1032" + b"\0" * 32)
