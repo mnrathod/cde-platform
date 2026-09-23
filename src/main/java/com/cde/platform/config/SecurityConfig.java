@@ -285,10 +285,14 @@ public class SecurityConfig {
                 STANDARD_ROUTES,
                 new ContentSecurityPolicyHeaderWriter(apiPolicy())));
 
-        // Not chained with the rest: permissionsPolicy returns its own config
-        // object rather than the HeadersConfigurer, so it terminates a chain
-        // instead of continuing one.
-        headers.permissionsPolicy(permissions -> permissions.policy(
+        // `permissionsPolicyHeader`, not `permissionsPolicy`: the latter is
+        // deprecated for removal in Spring Security 7 (§0.2), and returns its
+        // own config object rather than the HeadersConfigurer, which is why
+        // this call used to sit outside the chain above. The replacement takes
+        // the same customiser and returns the configurer, so it could be
+        // chained — it is left standing alone because the header it sets has
+        // nothing to do with the content-security policies above it.
+        headers.permissionsPolicyHeader(permissions -> permissions.policy(
             "accelerometer=(), autoplay=(), camera=(), display-capture=(), "
             + "encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), "
             + "magnetometer=(), microphone=(), midi=(), payment=(), "

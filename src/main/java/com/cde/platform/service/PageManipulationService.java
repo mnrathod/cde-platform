@@ -247,7 +247,7 @@ public class PageManipulationService {
             // The converter validates the whole plan before writing, so its
             // message names the offending entry — more use than a generic one.
             throw new DocumentProcessingException(
-                result.path("error").asText("The pages could not be rearranged."));
+                result.path("error").asString("The pages could not be rearranged."));
         }
     }
 
@@ -255,7 +255,7 @@ public class PageManipulationService {
         JsonNode info = describePages(documentId);
         if (!info.path("success").asBoolean(false)) {
             throw new DocumentProcessingException(
-                info.path("error").asText("This document's pages could not be read."));
+                info.path("error").asString("This document's pages could not be read."));
         }
         return info.path("pageCount").asInt(0);
     }

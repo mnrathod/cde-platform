@@ -137,7 +137,7 @@ public class ViewerController {
                 var result = converter.convert(path, doc.getFileName());
                 if (result.success()) {
                     String by = result.rawJson() != null
-                        ? result.rawJson().path("convertedBy").asText("ezdxf") : "java-fallback";
+                        ? result.rawJson().path("convertedBy").asString("ezdxf") : "java-fallback";
                     return ResponseEntity.ok(Map.of(
                         "type","svg","content",result.svg(),
                         "name",doc.getName(),
@@ -153,7 +153,7 @@ public class ViewerController {
                 if (result.rawJson() != null) {
                     result.rawJson().properties().forEach(e ->
                         resp.put(e.getKey(), e.getValue().isBoolean()
-                            ? e.getValue().asBoolean() : e.getValue().asText()));
+                            ? e.getValue().asBoolean() : e.getValue().asString()));
                 } else {
                     resp.put("version", s(result.error()).replace("DWG_BINARY:",""));
                     resp.put("odaInstalled", false);
@@ -373,7 +373,7 @@ public class ViewerController {
             if (!json.path("success").asBoolean(false)) {
                 return ResponseEntity.ok(Map.of(
                     "type", "error",
-                    "error", json.path("error").asText("IFC conversion failed")));
+                    "error", json.path("error").asString("IFC conversion failed")));
             }
             return ResponseEntity.ok(json);
 

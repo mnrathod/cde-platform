@@ -64,9 +64,9 @@ public class ConverterService {
             JsonNode json = mapper.readTree(resp.body());
             boolean success = json.path("success").asBoolean(false);
 
-            if (success) return new ConvertResult(true, json.path("svg").asText(), null, json);
+            if (success) return new ConvertResult(true, json.path("svg").asString(), null, json);
 
-            String error = json.path("error").asText("");
+            String error = json.path("error").asString("");
             if (error.startsWith("DWG_BINARY:") || error.equals("DWG_NEED_CONVERTER"))
                 return new ConvertResult(false, null, error, json);
 
@@ -108,7 +108,7 @@ public class ConverterService {
 
         // Converter returned a JSON error
         JsonNode json = mapper.readTree(resp.body());
-        throw new RuntimeException(json.path("error").asText("Conversion failed"));
+        throw new RuntimeException(json.path("error").asString("Conversion failed"));
     }
 
     /**
@@ -169,7 +169,7 @@ public class ConverterService {
             try (java.io.InputStream errorBody = response.body()) {
                 JsonNode json = mapper.readTree(
                     new String(errorBody.readNBytes(8192), java.nio.charset.StandardCharsets.UTF_8));
-                String reason = json.path("error").asText("");
+                String reason = json.path("error").asString("");
                 if (!reason.isBlank()) {
                     throw new ConversionRefusedException(reason);
                 }
@@ -178,7 +178,7 @@ public class ConverterService {
                 // ask for — and untrue is worse than unhelpful, because it
                 // sends whoever reads it to look at their file.
                 throw new ConversionRefusedException(
-                    "The converter produced " + json.path("type").asText("something else")
+                    "The converter produced " + json.path("type").asString("something else")
                     + " rather than a PDF. Support can trace it from the job id.");
             }
         }

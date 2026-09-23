@@ -129,7 +129,7 @@ public class DocumentProcessingService {
             "/find-text", searchRequest(document, search), INSPECT_TIMEOUT);
         if (!found.path("success").asBoolean(false)) {
             throw new DocumentProcessingException(
-                found.path("error").asText("The document could not be searched."));
+                found.path("error").asString("The document could not be searched."));
         }
 
         JsonNode regions = found.path("matches");
@@ -211,7 +211,7 @@ public class DocumentProcessingService {
             int skipped    = result.path("skippedPages").asInt(0);
             details.put("ocrPages",     recognised);
             details.put("skippedPages", skipped);
-            details.put("language",     result.path("language").asText(language));
+            details.put("language",     result.path("language").asString(language));
             return skipped > 0
                 ? "Recognised %d page(s), skipped %d already containing text"
                       .formatted(recognised, skipped)
@@ -324,7 +324,7 @@ public class DocumentProcessingService {
             JsonNode result = call.invoke(output);
 
             if (!result.path("success").asBoolean(false)) {
-                String reason = result.path("error").asText("The converter could not process this file.");
+                String reason = result.path("error").asString("The converter could not process this file.");
                 log.warn("{} failed for document {}: {}", operation, document.getId(), reason);
                 throw new DocumentProcessingException(reason);
             }

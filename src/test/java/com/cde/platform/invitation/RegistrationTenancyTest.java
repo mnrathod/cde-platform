@@ -1,9 +1,13 @@
 package com.cde.platform.invitation;
 
 import com.cde.platform.model.Project;
+import com.cde.platform.model.Tenant;
 import com.cde.platform.model.User;
 import com.cde.platform.repository.ProjectRepository;
+import com.cde.platform.repository.TenantRepository;
 import com.cde.platform.repository.UserRepository;
+import com.cde.platform.tenancy.TenancyProperties;
+import com.cde.platform.tenancy.TenantContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +46,8 @@ class RegistrationTenancyTest {
     @Autowired MockMvc mockMvc;
     @Autowired UserRepository users;
     @Autowired ProjectRepository projects;
+    @Autowired TenantRepository tenants;
+    @Autowired TenancyProperties tenancyProperties;
 
     private static String unique(String prefix) {
         return prefix + "-" + System.nanoTime();
@@ -77,6 +83,14 @@ class RegistrationTenancyTest {
         return Long.parseLong(created.substring(start, created.indexOf(',', start)).trim());
     }
 
+    /** The tenant a registration used to land in, before it got one of its own. */
+    private Tenant defaultTenant() {
+        return tenants.findBySlug(tenancyProperties.getDefaultTenantSlug()).orElseThrow(
+            () -> new IllegalStateException(
+                "No tenant with slug '" + tenancyProperties.getDefaultTenantSlug()
+                + "'. The deployment always has one; if this fires, tenancy setup changed."));
+    }
+
     // ── The fix ──────────────────────────────────────────────────────────────
 
     @Test
@@ -100,15 +114,28 @@ class RegistrationTenancyTest {
     @Test
     @DisplayName("a new registration cannot see what was already in the deployment")
     void aNewAccountSeesNothingThatExistedBefore() throws Exception {
-        // Seeded into the default tenant, which is the tenant every earlier
-        // registration silently joined — so before the fix a fresh signup
-        // listed this project, and everything else in the deployment with it.
-        User owner = users.findAll().stream().findFirst().orElseThrow(
-            () -> new IllegalStateException("The default tenant has no user to own a project."));
-        projects.save(Project.builder()
-            .name("Pre-existing work " + System.nanoTime()).owner(owner).build());
+        // Put the pre-existing work there rather than hoping to find it. This
+        // used to take whatever `users.findAll()` returned first and assume it
+        // belonged to the default tenant, which made the test depend on the
+        // demonstration seeder having run — and the seeder only runs on an
+        // empty database, so whether this test had a precondition at all came
+        // down to which Spring context started first. It passed in a full run
+        // and failed on its own, which is the wrong way round: a guard nobody
+        // can run in isolation is a guard nobody trusts.
+        long defaultTenantId = defaultTenant().getId();
+        TenantContext.runAsTenant(defaultTenantId, () -> {
+            User owner = users.save(User.builder()
+                .username(unique("incumbent"))
+                .email(unique("incumbent") + "@example.test")
+                .password("not-used-in-this-test")
+                .role(User.Role.ADMIN).build());
+            projects.save(Project.builder()
+                .name("Pre-existing work " + System.nanoTime()).owner(owner).build());
+        });
 
-        assertThat(projects.count())
+        long projectsInDefaultTenant =
+            TenantContext.callAsTenant(defaultTenantId, projects::count);
+        assertThat(projectsInDefaultTenant)
             .as("the default tenant needs a project for this test to mean anything")
             .isGreaterThan(0);
 

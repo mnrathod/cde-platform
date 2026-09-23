@@ -52,8 +52,8 @@ class XfdfWriter {
         String date   = ann.getCreatedAt() != null
             ? ann.getCreatedAt().format(XFDF_DATE) : XFDF_DATE.format(LocalDateTime.now());
         int page      = ann.getPageNumber() != null ? ann.getPageNumber() - 1 : 0;
-        String color  = data.path("color").asText("#FF0000");
-        String width  = data.path("strokeWidth").asText("2");
+        String color  = data.path("color").asString("#FF0000");
+        String width  = data.path("strokeWidth").asString("2");
         String comment = ann.getComment() != null ? escapeXml(ann.getComment()) : "";
 
         return switch (ann.getType()) {
@@ -78,7 +78,7 @@ class XfdfWriter {
                                  String color, String width, String comment) {
         // The frontend's ShapeData JSON key is "tool" (see viewer-state.service.ts),
         // not "shape" — read the field that's actually present.
-        String shape = d.path("tool").asText("line");
+        String shape = d.path("tool").asString("line");
         return switch (shape) {
             case "line"      -> lineAnnot(d, author, date, page, color, width, comment, false);
             case "arrow"     -> lineAnnot(d, author, date, page, color, width, comment, true);
@@ -234,7 +234,7 @@ class XfdfWriter {
         // records as x2/y2; plain text has no leader.
         double x2 = callout ? d.path("x2").asDouble(x + 200) : x + 200;
         double y2 = callout ? d.path("y2").asDouble(y + 30)  : y + 30;
-        String text   = escapeXml(d.path("text").asText(comment));
+        String text   = escapeXml(d.path("text").asString(comment));
         String intent = callout ? " IT=\"FreeTextCallout\"" : "";
         return String.format(
             "    <freetext page=\"%d\" rect=\"%s\" color=\"%s\"%s\n" +
@@ -292,7 +292,7 @@ class XfdfWriter {
     private String stampAnnot(JsonNode d, String author, String date, int page,
                                String comment) {
         double x = d.path("x").asDouble(0), y = d.path("y").asDouble(0);
-        String name = escapeXml(d.path("text").asText("Approved"));
+        String name = escapeXml(d.path("text").asString("Approved"));
         return String.format(
             "    <stamp page=\"%d\" rect=\"%s\" name=\"%s\"\n" +
             "           author=\"%s\" date=\"%s\">\n" +
@@ -306,7 +306,7 @@ class XfdfWriter {
         // Dimension rendered as line with measurement text
         double x1 = d.path("x1").asDouble(0), y1 = d.path("y1").asDouble(0);
         double x2 = d.path("x2").asDouble(100), y2 = d.path("y2").asDouble(100);
-        String measurement = d.path("measurement").asText("");
+        String measurement = d.path("measurement").asString("");
         String contents = measurement.isEmpty() ? comment : measurement + (comment.isEmpty() ? "" : " - " + comment);
         String rect = rect(Math.min(x1,x2), Math.min(y1,y2), Math.max(x1,x2), Math.max(y1,y2));
         return String.format(

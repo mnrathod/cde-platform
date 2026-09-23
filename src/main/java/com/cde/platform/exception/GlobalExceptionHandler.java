@@ -67,7 +67,7 @@ public class GlobalExceptionHandler {
             ? "Request validation failed."
             : fields.size() + (fields.size() == 1 ? " field is invalid." : " fields are invalid.");
 
-        ProblemDetail problem = ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
+        ProblemDetail problem = ApiProblem.of(HttpStatus.UNPROCESSABLE_CONTENT,
             "validation-failed", "Validation failed", detail, request);
         problem.setProperty(ApiDocumentation.PROBLEM_INVALID_FIELDS, fields);
         return problem;
@@ -89,7 +89,7 @@ public class GlobalExceptionHandler {
                                                  HttpServletRequest request) {
         log.error("Document processing failed", ex);
         // This message is authored by us for the user, so it is safe to echo.
-        return ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
+        return ApiProblem.of(HttpStatus.UNPROCESSABLE_CONTENT,
             "document-processing-failed", "Document processing failed",
             ex.getMessage(), request);
     }
@@ -194,7 +194,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UploadRejectedException.class)
     public ProblemDetail handleUploadRejected(UploadRejectedException ex,
                                               HttpServletRequest request) {
-        return ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
+        return ApiProblem.of(HttpStatus.UNPROCESSABLE_CONTENT,
             "upload-rejected", "Upload rejected", ex.getMessage(), request);
     }
 
@@ -214,7 +214,7 @@ public class GlobalExceptionHandler {
         // working. It is worth seeing — a run of them is someone probing — but
         // it is not a fault.
         log.warn("Refused to fetch an integrator-supplied URL: {}", ex.getMessage());
-        return ApiProblem.of(HttpStatus.UNPROCESSABLE_ENTITY,
+        return ApiProblem.of(HttpStatus.UNPROCESSABLE_CONTENT,
             "fetch-not-permitted", "Link not permitted", ex.getMessage(), request);
     }
 

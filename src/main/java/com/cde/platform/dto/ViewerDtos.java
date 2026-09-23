@@ -181,8 +181,14 @@ public final class ViewerDtos {
          * corresponding-source obligation travels with every copy. DWG now
          * goes through the ODA File Converter alone, so read
          * {@code odaInstalled} and {@code remedy} instead.
+         *
+         * <p>No {@code @Deprecated} annotation: on a record component it lands
+         * on the constructor parameter, where it does nothing but raise a
+         * warning of its own, and there is no Java call site for it to warn in
+         * any case — this field is only ever written, through a map. The
+         * deprecation that reaches somebody is the one in the schema below,
+         * which is what an API consumer is told, and this note.
          */
-        @Deprecated(since = "2026-09-08")
         @Schema(description = "Always false. **Deprecated — sunset 2027-04-01.** LibreDWG is no "
                             + "longer bundled (ADR 13); DWG conversion requires the ODA File "
                             + "Converter. Read `odaInstalled` and `remedy` instead. "

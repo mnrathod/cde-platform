@@ -199,8 +199,8 @@ public class RegistrationController {
             // used, and issued to another address. Distinguishing them tells
             // someone holding a guessed token whether they guessed a real one.
             case RegistrationService.Outcome.InvitationNotUsable ignored ->
-                ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ApiProblem.of(
-                    HttpStatus.UNPROCESSABLE_ENTITY, "invitation-not-usable",
+                ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(ApiProblem.of(
+                    HttpStatus.UNPROCESSABLE_CONTENT, "invitation-not-usable",
                     "Invitation cannot be used",
                     "That invitation is not valid for this email address, or it has expired "
                         + "or already been used. Ask for a new one.", httpRequest));

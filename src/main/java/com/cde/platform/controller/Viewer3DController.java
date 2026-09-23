@@ -356,7 +356,7 @@ public class Viewer3DController {
             if (!json.path("success").asBoolean(false)) {
                 return ResponseEntity.ok(Map.of(
                     "success", false,
-                    "error", json.path("error").asText("IFC conversion failed")));
+                    "error", json.path("error").asString("IFC conversion failed")));
             }
 
             ((ObjectNode) json).put("docName", doc.getName());

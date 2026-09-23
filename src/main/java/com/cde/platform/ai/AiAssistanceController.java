@@ -128,8 +128,8 @@ public class AiAssistanceController {
                     + "be reached. The comparison itself is unaffected.", httpRequest));
         }
         if (outcome.wasRefused()) {
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ApiProblem.of(
-                HttpStatus.UNPROCESSABLE_ENTITY, "classified-content-refused",
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(ApiProblem.of(
+                HttpStatus.UNPROCESSABLE_CONTENT, "classified-content-refused",
                 "Content cannot be sent to a model provider",
                 outcome.refusalDetail(), httpRequest));
         }

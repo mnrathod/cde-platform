@@ -103,7 +103,7 @@ public class CompareController {
             orEmpty(first.getName()), orEmpty(second.getName()),
             orEmpty(first.getFileName()), orEmpty(second.getFileName()),
             orEmpty(first.getRevision()), orEmpty(second.getRevision()),
-            comparison.hasNonNull("error") ? comparison.get("error").asText() : null,
+            comparison.hasNonNull("error") ? comparison.get("error").asString() : null,
             toMap(comparison)));
     }
 

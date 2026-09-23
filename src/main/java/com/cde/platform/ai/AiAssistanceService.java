@@ -179,8 +179,8 @@ public class AiAssistanceService {
         }
         var text = new StringBuilder();
         content.forEach(block -> {
-            if ("text".equals(block.path("type").asText())) {
-                text.append(block.path("text").asText());
+            if ("text".equals(block.path("type").asString())) {
+                text.append(block.path("text").asString());
             }
         });
         return text.toString();
