@@ -49,7 +49,7 @@ class InvitationExpiryTest {
                     """.formatted(username, username, PASSWORD)))
             .andExpect(status().isCreated())
             .andReturn().getResponse().getContentAsString();
-        String host = objectMapper.readTree(founded).get("token").asText();
+        String host = objectMapper.readTree(founded).get("token").asString();
 
         String email = unique("stale") + "@example.test";
         String issued = mockMvc.perform(post("/api/invitations")
@@ -60,7 +60,7 @@ class InvitationExpiryTest {
                     """.formatted(email)))
             .andExpect(status().isCreated())
             .andReturn().getResponse().getContentAsString();
-        String token = objectMapper.readTree(issued).get("token").asText();
+        String token = objectMapper.readTree(issued).get("token").asString();
 
         Thread.sleep(1_500);
 
@@ -69,6 +69,6 @@ class InvitationExpiryTest {
                 .content("""
                     {"username":"%s","email":"%s","password":"%s","invitationToken":"%s"}
                     """.formatted(unique("too-slow"), email, PASSWORD, token)))
-            .andExpect(status().isUnprocessableEntity());
+            .andExpect(status().isUnprocessableContent());
     }
 }

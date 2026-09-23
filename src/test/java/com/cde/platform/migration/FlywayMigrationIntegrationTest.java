@@ -9,7 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
@@ -45,8 +45,8 @@ class FlywayMigrationIntegrationTest {
 
     // Digest-pinned, so it needs asCompatibleSubstituteFor for the same
     // reason PostgresTestSessionListener does — see the comment there.
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>(DockerImageName
+    static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(DockerImageName
                     .parse("postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
                     .asCompatibleSubstituteFor("postgres"))
                     .withDatabaseName("cdedb")

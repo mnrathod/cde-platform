@@ -119,7 +119,7 @@ class ConversionJobControllerTest {
                     .with(actingAs(User.Role.ENGINEER))
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(requestBody("https://169.254.169.254/latest/meta-data/")))
-                .andExpect(status().isUnprocessableEntity())
+                .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.detail").exists());
         }
 
@@ -131,7 +131,7 @@ class ConversionJobControllerTest {
                         .with(actingAs(User.Role.ENGINEER))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody("https://" + address + "/secrets")))
-                    .andExpect(status().isUnprocessableEntity());
+                    .andExpect(status().isUnprocessableContent());
             }
         }
 
@@ -160,7 +160,7 @@ class ConversionJobControllerTest {
                     .with(actingAs(User.Role.ENGINEER))
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(requestBody("file:///etc/passwd")))
-                .andExpect(status().isUnprocessableEntity());
+                .andExpect(status().isUnprocessableContent());
         }
 
         @Test
@@ -221,7 +221,7 @@ class ConversionJobControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""
                         {"targetFormat":"PDF"}"""))
-                .andExpect(status().isUnprocessableEntity());
+                .andExpect(status().isUnprocessableContent());
         }
     }
 

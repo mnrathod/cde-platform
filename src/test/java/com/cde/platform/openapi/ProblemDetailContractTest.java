@@ -58,10 +58,10 @@ class ProblemDetailContractTest {
         }
 
         assertThat(problem.get("status").asInt()).isEqualTo(422);
-        assertThat(problem.get("type").asText()).isEqualTo("/problems/validation-failed");
-        assertThat(problem.get("traceId").asText()).matches("^[0-9a-f]{32}$");
+        assertThat(problem.get("type").asString()).isEqualTo("/problems/validation-failed");
+        assertThat(problem.get("traceId").asString()).matches("^[0-9a-f]{32}$");
         assertThat(problem.get("invalidFields")).isNotEmpty();
-        assertThat(problem.get("invalidFields").get(0).get("field").asText()).isEqualTo("name");
+        assertThat(problem.get("invalidFields").get(0).get("field").asString()).isEqualTo("name");
     }
 
     @Test
@@ -121,7 +121,7 @@ class ProblemDetailContractTest {
 
         JsonNode problem = JSON.readTree(result.getResponse().getContentAsString());
 
-        assertThat(problem.get("traceId").asText())
+        assertThat(problem.get("traceId").asString())
             .isEqualTo(result.getResponse().getHeader("X-Trace-Id"));
     }
 
@@ -136,7 +136,7 @@ class ProblemDetailContractTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"name\":\"\"}")).andReturn();
 
-        assertThat(JSON.readTree(result.getResponse().getContentAsString()).get("traceId").asText())
+        assertThat(JSON.readTree(result.getResponse().getContentAsString()).get("traceId").asString())
             .isEqualTo(traceId);
     }
 
@@ -159,7 +159,7 @@ class ProblemDetailContractTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"name\":\"\"}")).andReturn();
 
-        assertThat(JSON.readTree(result.getResponse().getContentAsString()).get("traceId").asText())
+        assertThat(JSON.readTree(result.getResponse().getContentAsString()).get("traceId").asString())
             .as("a rejected traceparent must yield a freshly generated identifier")
             .matches("^[0-9a-f]{32}$");
     }
@@ -189,7 +189,7 @@ class ProblemDetailContractTest {
     private List<String> documentedRequiredMembers() throws Exception {
         JsonNode schema = publishedProblemSchema();
         List<String> required = new ArrayList<>();
-        schema.withArray("required").forEach(member -> required.add(member.asText()));
+        schema.withArray("required").forEach(member -> required.add(member.asString()));
         return required;
     }
 

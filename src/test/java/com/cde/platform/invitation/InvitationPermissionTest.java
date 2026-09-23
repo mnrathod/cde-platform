@@ -38,7 +38,7 @@ class InvitationPermissionTest {
     }
 
     private String tokenOf(String response) throws Exception {
-        return objectMapper.readTree(response).get("token").asText();
+        return objectMapper.readTree(response).get("token").asString();
     }
 
     private String register(String username) throws Exception {
@@ -70,7 +70,7 @@ class InvitationPermissionTest {
                 .content("""
                     {"username":"%s","email":"%s","password":"%s","invitationToken":"%s"}
                     """.formatted(unique("member"), email, PASSWORD,
-                                  objectMapper.readTree(issued).get("token").asText())))
+                                  objectMapper.readTree(issued).get("token").asString())))
             .andExpect(status().isCreated())
             .andReturn().getResponse().getContentAsString());
     }

@@ -24,6 +24,16 @@ java {
     }
 }
 
+// §0.2 forbids deprecated components, and §3.3 asks for zero warnings on
+// `main`. Neither was enforced: javac reports deprecation only when asked,
+// so 32 uses had accumulated silently, one of them an API already marked
+// for removal. `-Werror` turns the next one into a build failure on the
+// pull request that introduces it, which is the only point at which it is
+// cheap to fix.
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << '-Xlint:deprecation' << '-Xlint:removal' << '-Werror'
+}
+
 repositories {
     mavenCentral()
 }

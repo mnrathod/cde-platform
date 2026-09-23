@@ -2,7 +2,7 @@ package com.cde.platform.support;
 
 import org.junit.platform.launcher.LauncherSession;
 import org.junit.platform.launcher.LauncherSessionListener;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
@@ -42,14 +42,14 @@ public class PostgresTestSessionListener implements LauncherSessionListener {
         .parse("postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
         .asCompatibleSubstituteFor("postgres");
 
-    private static PostgreSQLContainer<?> container;
+    private static PostgreSQLContainer container;
 
     @Override
     public void launcherSessionOpened(LauncherSession session) {
         if (container != null) {
             return;
         }
-        container = new PostgreSQLContainer<>(IMAGE)
+        container = new PostgreSQLContainer(IMAGE)
             .withDatabaseName("cdetest")
             .withUsername("cde")
             .withPassword("cde")

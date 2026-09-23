@@ -87,7 +87,7 @@ class SelfRegistrationModeTest {
                         {"username":"%s","email":"%s@example.test","password":"%s",
                          "invitationToken":"cdeinv_not-a-real-token"}
                         """.formatted(username, username, PASSWORD)))
-                .andExpect(status().isUnprocessableEntity());
+                .andExpect(status().isUnprocessableContent());
         }
     }
 }

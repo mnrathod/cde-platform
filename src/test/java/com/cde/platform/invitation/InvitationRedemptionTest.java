@@ -51,7 +51,7 @@ class InvitationRedemptionTest {
                     """.formatted(username, username, PASSWORD)))
             .andExpect(status().isCreated())
             .andReturn().getResponse().getContentAsString();
-        return objectMapper.readTree(response).get("token").asText();
+        return objectMapper.readTree(response).get("token").asString();
     }
 
     private JsonNode invite(String hostToken, String email, String role) throws Exception {
@@ -91,7 +91,7 @@ class InvitationRedemptionTest {
             .andExpect(status().isCreated());
 
         String invitedEmail = unique("guest") + "@example.test";
-        String token = invite(host, invitedEmail, "REVIEWER").get("token").asText();
+        String token = invite(host, invitedEmail, "REVIEWER").get("token").asString();
 
         String joined = redeem(unique("guest-user"), invitedEmail, token)
             .andExpect(status().isCreated())
@@ -100,7 +100,7 @@ class InvitationRedemptionTest {
             .andExpect(jsonPath("$.role").value("REVIEWER"))
             .andReturn().getResponse().getContentAsString();
 
-        String guestToken = objectMapper.readTree(joined).get("token").asText();
+        String guestToken = objectMapper.readTree(joined).get("token").asString();
 
         mockMvc.perform(get("/api/projects").header("Authorization", "Bearer " + guestToken))
             .andExpect(status().isOk())
@@ -115,13 +115,13 @@ class InvitationRedemptionTest {
     void aForwardedInvitationDoesNotAdmitTheReader() throws Exception {
         String host = foundOrganisation();
         String token = invite(host, unique("intended") + "@example.test", "ENGINEER")
-            .get("token").asText();
+            .get("token").asString();
 
         // The token alone is not the credential. Without this check, an
         // invitation forwarded to a colleague — or lifted from an inbox —
         // admits whoever opens it.
         redeem(unique("interloper"), unique("someone-else") + "@example.test", token)
-            .andExpect(status().isUnprocessableEntity());
+            .andExpect(status().isUnprocessableContent());
     }
 
     @Test
@@ -129,7 +129,7 @@ class InvitationRedemptionTest {
     void aRedeemedInvitationCannotBeUsedAgain() throws Exception {
         String host = foundOrganisation();
         String email = unique("once") + "@example.test";
-        String token = invite(host, email, "ENGINEER").get("token").asText();
+        String token = invite(host, email, "ENGINEER").get("token").asString();
 
         redeem(unique("first-arrival"), email, token).andExpect(status().isCreated());
 
@@ -151,8 +151,8 @@ class InvitationRedemptionTest {
             .andReturn().getResponse().getContentAsString();
 
         JsonNode spent = objectMapper.readTree(listing).get(0);
-        assertThat(spent.get("email").asText()).isEqualTo(email);
-        assertThat(spent.get("status").asText()).isEqualTo("ACCEPTED");
+        assertThat(spent.get("email").asString()).isEqualTo(email);
+        assertThat(spent.get("status").asString()).isEqualTo("ACCEPTED");
         assertThat(spent.get("acceptedAt").isNull())
             .as("a spent invitation records when it was spent")
             .isFalse();
@@ -169,8 +169,8 @@ class InvitationRedemptionTest {
                 .header("Authorization", "Bearer " + host))
             .andExpect(status().isNoContent());
 
-        redeem(unique("too-late"), email, issued.get("token").asText())
-            .andExpect(status().isUnprocessableEntity());
+        redeem(unique("too-late"), email, issued.get("token").asString())
+            .andExpect(status().isUnprocessableContent());
     }
 
     // Expiry is exercised in InvitationExpiryTest, which configures a validity
@@ -184,7 +184,7 @@ class InvitationRedemptionTest {
     void anInventedTokenIsRefused() throws Exception {
         redeem(unique("guesser"), unique("guesser") + "@example.test",
                "cdeinv_this-token-was-never-issued-by-anyone")
-            .andExpect(status().isUnprocessableEntity());
+            .andExpect(status().isUnprocessableContent());
     }
 
     // ── The token is shown once ──────────────────────────────────────────────
@@ -194,7 +194,7 @@ class InvitationRedemptionTest {
     void listingDoesNotDiscloseTokens() throws Exception {
         String host = foundOrganisation();
         String email = unique("listed") + "@example.test";
-        String token = invite(host, email, "ENGINEER").get("token").asText();
+        String token = invite(host, email, "ENGINEER").get("token").asString();
 
         String listing = mockMvc.perform(get("/api/invitations")
                 .header("Authorization", "Bearer " + host))

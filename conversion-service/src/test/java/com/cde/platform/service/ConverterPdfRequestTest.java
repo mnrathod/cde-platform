@@ -72,7 +72,7 @@ class ConverterPdfRequestTest {
         converter.convertToPdfFile(source, "application/dxf",
             dir.resolve("out.pdf"), Duration.ofSeconds(10));
 
-        assertThat(lastRequest.get().path("targetFormat").asText())
+        assertThat(lastRequest.get().path("targetFormat").asString())
             .as("without this the converter renders the viewer's SVG")
             .isEqualTo("PDF");
     }
@@ -86,7 +86,7 @@ class ConverterPdfRequestTest {
 
         converter.convertToPdf(source, "application/dxf");
 
-        assertThat(lastRequest.get().path("targetFormat").asText()).isEqualTo("PDF");
+        assertThat(lastRequest.get().path("targetFormat").asString()).isEqualTo("PDF");
     }
 
     @Test

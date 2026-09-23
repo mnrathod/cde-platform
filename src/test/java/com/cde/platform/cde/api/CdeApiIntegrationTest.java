@@ -223,7 +223,7 @@ class CdeApiIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""
                         {"toState":"SHARED","reason":"  "}"""))
-                .andExpect(status().isUnprocessableEntity())
+                .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.invalidFields[0].field").value("reason"));
         }
 

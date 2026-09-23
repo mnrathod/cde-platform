@@ -117,7 +117,7 @@ class SignatureVersioningTest {
             .andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
 
-        return mapper.readTree(response).path("signature").path("signatureId").asText();
+        return mapper.readTree(response).path("signature").path("signatureId").asString();
     }
 
     /**

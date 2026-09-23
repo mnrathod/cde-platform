@@ -140,7 +140,7 @@ class UploadInputHandlingTest {
                 .param("chunkIndex", "9")
                 .param("totalChunks", "2")
                 .param("fileName", "big.bin"))
-            .andExpect(status().isUnprocessableEntity())
+            .andExpect(status().isUnprocessableContent())
             .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                 .jsonPath("$.detail").exists());
     }
@@ -154,7 +154,7 @@ class UploadInputHandlingTest {
                 .param("chunkIndex", "-1")
                 .param("totalChunks", "2")
                 .param("fileName", "big.bin"))
-            .andExpect(status().isUnprocessableEntity());
+            .andExpect(status().isUnprocessableContent());
     }
 
     @Test
@@ -168,6 +168,6 @@ class UploadInputHandlingTest {
                 .param("chunkIndex", "0")
                 .param("totalChunks", "100000000")
                 .param("fileName", "big.bin"))
-            .andExpect(status().isUnprocessableEntity());
+            .andExpect(status().isUnprocessableContent());
     }
 }

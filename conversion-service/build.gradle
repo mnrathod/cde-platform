@@ -105,7 +105,11 @@ tasks.named('check') { dependsOn jacocoTestCoverageVerification }
 // injected from the root, because a build file that only works inside this
 // repository is not one a customer can extract.
 tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs << '-parameters'
+    // See the note in the root build.gradle: deprecation is a build
+    // failure here too, or it only accumulates in whichever module is
+    // not watched.
+    options.compilerArgs << '-parameters' << '-Xlint:deprecation'
+    options.compilerArgs << '-Xlint:removal' << '-Werror'
 }
 
 dependencyLocking { lockMode = LockMode.STRICT }
