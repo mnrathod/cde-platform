@@ -23,6 +23,8 @@ import stat
 
 import pytest
 
+from pathlib import Path
+
 import app
 
 
@@ -292,3 +294,80 @@ class TestWhatTheUserIsTold:
         result = app.convert(str(source), "application/dwg")
         assert result["error"] == "DWG_NEED_CONVERTER"
         assert result["odaInstalled"] is True
+
+
+class TestComparingTwoDwgFiles:
+    """
+    How many times the converter runs for one comparison.
+
+    <p>The DWG branch of ``_load_dxf_for_compare`` used to call
+    ``dwg_via_oda`` — which runs ODA *and* renders the result to SVG — purely
+    to read ``success`` off it, open a temp file it never wrote to or deleted,
+    and then throw all of that away and call ``_load_dxf_from_path_via_oda``,
+    which runs ODA a second time. Its own comment admitted it. So every
+    DWG-against-DWG comparison paid for two conversions and a render nobody
+    read, and leaked a temp file each time.
+    """
+
+    def test_converts_once_rather_than_twice(self, monkeypatch, tmp_path):
+        # `make_temp_dir` hands back a fresh directory every call rather than
+        # a fixed pair. A two-item iterator looked tidier and silently made
+        # this test unable to fail: the second conversion ran out of
+        # directories and died before it could be counted, so the regression
+        # it exists for went straight through.
+        made = []
+
+        def fresh_dir():
+            path = tmp_path / f"work{len(made)}"
+            path.mkdir()
+            made.append(path)
+            return str(path)
+
+        runs = []
+
+        def spy_run(cmd, timeout=120):
+            runs.append(cmd)
+            # ODA writes its output into the directory named last on the
+            # command line; the caller then looks for a .dxf there.
+            (Path(cmd[2]) / "out.dxf").write_text(
+                "0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n")
+            return (0, "", "")
+
+        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
+        monkeypatch.setattr(app, "run_cmd", spy_run)
+        monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(app, "make_temp_dir", fresh_dir)
+        monkeypatch.setattr(app, "render_dxf_string", lambda content: {"success": True})
+
+        source = tmp_path / "plan.dwg"
+        source.write_bytes(b"AC1032" + b"\0" * 32)
+
+        app._load_dxf_for_compare(str(source), "dwg")
+
+        assert len(runs) == 1, f"ODA ran {len(runs)} times for one comparison"
+
+    def test_does_not_render_a_drawing_nobody_reads(self, monkeypatch, tmp_path):
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        (out_dir / "out.dxf").write_text("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n")
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+
+        monkeypatch.setattr(app, "find_oda", lambda: "/opt/oda/ODAFileConverter")
+        monkeypatch.setattr(app, "oda_launch_prefix", lambda: [])
+        monkeypatch.setattr(app, "run_cmd", lambda cmd, timeout=120: (0, "", ""))
+        monkeypatch.setattr(app.time, "sleep", lambda seconds: None)
+        dirs = iter([str(in_dir), str(out_dir)])
+        monkeypatch.setattr(app, "make_temp_dir", lambda: next(dirs))
+
+        rendered = []
+        monkeypatch.setattr(app, "render_dxf_string",
+                            lambda content: rendered.append(content) or {"success": True})
+
+        source = tmp_path / "plan.dwg"
+        source.write_bytes(b"AC1032" + b"\0" * 32)
+
+        app._load_dxf_for_compare(str(source), "dwg")
+
+        assert rendered == [], "a comparison rendered SVG it had no use for"
