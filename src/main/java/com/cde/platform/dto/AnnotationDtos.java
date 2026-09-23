@@ -84,7 +84,24 @@ public final class AnnotationDtos {
                 format = "date-time", accessMode = Schema.AccessMode.READ_ONLY,
                 requiredMode = Schema.RequiredMode.REQUIRED)
         LocalDateTime createdAt
-    ) {}
+    ) {
+        /**
+         * The stored markup as the API describes it.
+         *
+         * <p>Here rather than in a controller because two of them now return
+         * this shape — the annotation endpoints and the XFDF import — and a
+         * second private copy of the mapping is how the two would come to
+         * disagree about what a null author or a detached document renders as.
+         */
+        public static AnnotationResponse of(Annotation annotation) {
+            return new AnnotationResponse(
+                annotation.getId(),
+                annotation.getDocument() != null ? annotation.getDocument().getId() : null,
+                annotation.getAuthor() != null ? annotation.getAuthor().getUsername() : null,
+                annotation.getType(), annotation.getShapeData(), annotation.getComment(),
+                annotation.getStatus(), annotation.getPageNumber(), annotation.getCreatedAt());
+        }
+    }
 
     @Schema(name = "ReplyRequest", description = "A reply to add to a markup thread.")
     public record ReplyRequest(

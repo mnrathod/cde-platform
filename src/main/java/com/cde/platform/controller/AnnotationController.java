@@ -15,7 +15,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import com.cde.platform.repository.*;
-import com.cde.platform.service.XfdfService;
 import jakarta.validation.Valid;
 import org.springframework.http.*;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -38,7 +37,6 @@ public class AnnotationController {
     private final AnnotationReplyRepository replyRepo;
     private final DocumentRepository        documentRepo;
     private final UserRepository            userRepo;
-    private final XfdfService              xfdfService;
     private final CollaborationBroadcaster broadcaster;
 
     public AnnotationController(
@@ -46,14 +44,12 @@ public class AnnotationController {
         AnnotationReplyRepository replyRepo,
         DocumentRepository        documentRepo,
         UserRepository            userRepo,
-        XfdfService              xfdfService,
         CollaborationBroadcaster broadcaster
     ) {
         this.annotationRepo = annotationRepo;
         this.replyRepo       = replyRepo;
         this.documentRepo    = documentRepo;
         this.userRepo        = userRepo;
-        this.xfdfService     = xfdfService;
         this.broadcaster     = broadcaster;
     }
 
@@ -77,7 +73,7 @@ public class AnnotationController {
         @Parameter(description = "Identifier of the document.", example = "1180")
         @PathVariable Long documentId
     ) {
-        return annotationRepo.findByDocument_Id(documentId).stream().map(this::toResponse).toList();
+        return annotationRepo.findByDocument_Id(documentId).stream().map(AnnotationResponse::of).toList();
     }
 
     @Operation(
@@ -115,7 +111,7 @@ public class AnnotationController {
             .status(Annotation.AnnotationStatus.OPEN)
             .createdAt(LocalDateTime.now())
             .build();
-        AnnotationResponse saved = toResponse(annotationRepo.save(ann));
+        AnnotationResponse saved = AnnotationResponse.of(annotationRepo.save(ann));
         broadcaster.annotationCreated(doc.getId(), author.getUsername(), saved);
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
@@ -147,7 +143,7 @@ public class AnnotationController {
         return annotationRepo.findById(id).map(ann -> {
             ann.setShapeData(req.shapeData());
             ann.setComment(req.comment());
-            AnnotationResponse saved = toResponse(annotationRepo.save(ann));
+            AnnotationResponse saved = AnnotationResponse.of(annotationRepo.save(ann));
             broadcaster.annotationUpdated(documentIdOf(ann), authorNameOf(ann), saved);
             return ResponseEntity.ok(saved);
         }).orElse(ResponseEntity.notFound().build());
@@ -175,7 +171,7 @@ public class AnnotationController {
     ) {
         return annotationRepo.findById(id).map(ann -> {
             ann.setStatus(Annotation.AnnotationStatus.RESOLVED);
-            AnnotationResponse saved = toResponse(annotationRepo.save(ann));
+            AnnotationResponse saved = AnnotationResponse.of(annotationRepo.save(ann));
             broadcaster.annotationResolved(documentIdOf(ann), authorNameOf(ann), saved);
             return ResponseEntity.ok(saved);
         }).orElse(ResponseEntity.notFound().build());
@@ -298,110 +294,6 @@ public class AnnotationController {
         return ResponseEntity.noContent().build();
     }
 
-    // ── XFDF Export ───────────────────────────────────────────────
-    @Operation(
-        operationId = "exportAnnotationsAsXfdf",
-        summary = "Export a document's markup as XFDF",
-        description = """
-            XFDF is the interchange format Acrobat and most PDF tools read, so markup made here \
-            can be opened elsewhere and vice versa.
-
-            The reply is a file download, not JSON.
-
-            Requires the `annotation:read` permission.""")
-    @ApiResponse(responseCode = "200", description = "The markup as an XFDF document.",
-        content = @Content(mediaType = "application/vnd.adobe.xfdf",
-                           schema = @Schema(type = "string", format = "binary")))
-    @ApiResponse(responseCode = "404",
-        description = "No document with that id is visible to the caller.",
-        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
-                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
-    @GetMapping("/document/{documentId}/xfdf")
-    public ResponseEntity<byte[]> exportXfdf(
-        @Parameter(description = "Identifier of the document.", example = "1180")
-        @PathVariable Long documentId
-    ) {
-        var docOpt = documentRepo.findById(documentId);
-        if (docOpt.isEmpty()) return ResponseEntity.notFound().build();
-        var doc  = docOpt.get();
-        var anns = annotationRepo.findByDocument_Id(documentId);
-        String xfdf = xfdfService.toXfdf(anns, doc.getFileName() != null ? doc.getFileName() : doc.getName());
-        String fn   = (doc.getName() != null ? doc.getName() : "document") + ".xfdf";
-        return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fn + "\"")
-            .header(HttpHeaders.CONTENT_TYPE, "application/vnd.adobe.xfdf")
-            .body(xfdf.getBytes(StandardCharsets.UTF_8));
-    }
-
-    @Operation(
-        operationId = "importAnnotationsFromXfdf",
-        summary = "Import markup from an XFDF file",
-        description = """
-            Adds the file's markup to the document, attributed to the authenticated caller. \
-            Existing markup is left alone — importing adds, it does not replace.
-
-            A file containing no markup is not an error: nothing is imported and the reply says \
-            so, because "the file was empty" and "the file was rejected" call for different \
-            things from the person who chose it.
-
-            The file is parsed with external entities and DTDs disabled.
-
-            Requires the `annotation:write` permission.""")
-    @ApiResponse(responseCode = "200",
-        description = "The file was read. `imported` may be zero if it held no markup.")
-    @ApiResponse(responseCode = "404",
-        description = "No document with that id is visible to the caller.",
-        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
-                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
-    @ApiResponse(responseCode = "422",
-        description = "The file is not readable XFDF.",
-        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
-                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
-    @PostMapping("/document/{documentId}/xfdf")
-    public ResponseEntity<XfdfImportResponse> importXfdf(
-        @Parameter(description = "Identifier of the document to add the markup to.", example = "1180")
-        @PathVariable Long documentId,
-        @Parameter(description = "The XFDF file.")
-        @RequestParam("file") MultipartFile file,
-        @Parameter(hidden = true) @AuthenticationPrincipal UserDetails principal
-    ) {
-        var doc = documentRepo.findById(documentId)
-            .orElseThrow(() -> new ResourceNotFoundException("No such document."));
-        var author = userRepo.findByUsername(principal.getUsername()).orElseThrow();
-
-        try {
-            var imported = xfdfService.fromXfdf(file.getBytes());
-            if (imported.isEmpty()) {
-                return ResponseEntity.ok(new XfdfImportResponse(
-                    0, List.of(), "That file contained no markup, so nothing was imported."));
-            }
-
-            var saved = imported.stream().map(imp -> {
-                var ann = Annotation.builder()
-                    .document(doc).author(author)
-                    .type(imp.type())
-                    .shapeData(imp.shapeData())
-                    .comment(imp.comment() != null ? imp.comment() : "")
-                    .pageNumber(imp.pageNumber())
-                    .status(Annotation.AnnotationStatus.OPEN)
-                    .createdAt(java.time.LocalDateTime.now())
-                    .build();
-                return toResponse(annotationRepo.save(ann));
-            }).toList();
-
-            return ResponseEntity.ok(new XfdfImportResponse(saved.size(), saved,
-                "Imported %d %s.".formatted(saved.size(),
-                    saved.size() == 1 ? "annotation" : "annotations")));
-
-        } catch (Exception e) {
-            // The parser's own message names classes and offsets, so it is
-            // logged rather than returned.
-            throw new DocumentProcessingException(
-                "That file could not be read as XFDF. Check it was exported from a PDF tool "
-                + "and is not damaged.", e);
-        }
-    }
-
     // ── Helpers ───────────────────────────────────────────────────
     /** Which document's viewers should hear about a change to this annotation. */
     private Long documentIdOf(Annotation annotation) {
@@ -414,16 +306,6 @@ public class AnnotationController {
 
     private String usernameOf(UserDetails principal) {
         return principal != null ? principal.getUsername() : null;
-    }
-
-    private AnnotationResponse toResponse(Annotation a) {
-        return new AnnotationResponse(
-            a.getId(),
-            a.getDocument() != null ? a.getDocument().getId() : null,
-            a.getAuthor() != null ? a.getAuthor().getUsername() : null,
-            a.getType(), a.getShapeData(), a.getComment(), a.getStatus(),
-            a.getPageNumber(), a.getCreatedAt()
-        );
     }
 
     private ReplyResponse toReplyResponse(AnnotationReply r) {
