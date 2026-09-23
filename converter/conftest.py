@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 
 import pypdf
+import shutil
+
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.colors import black, white
@@ -221,3 +223,11 @@ def pii_pdf(tmp_path):
         y -= 28
     pdf.save()
     return str(path)
+
+# Shared because three suites need it — OCR, redaction's searchability
+# restoration, and the composition tests. It lived in one of them and was
+# reached from the others by module-level name while they were one file.
+needs_tesseract = pytest.mark.skipif(
+    shutil.which("tesseract") is None,
+    reason="Tesseract not installed",
+)
