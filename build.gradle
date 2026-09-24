@@ -376,7 +376,7 @@ tasks.named('test') {
  * Coverage floors, as a ratchet.
  *
  * §14 requires 90% line and 85% branch. Measured on 2026-09-24 this project
- * is at 76.4% line and 63.2% branch, so switching the required figures on
+ * is at 77.5% line and 65.3% branch, so switching the required figures on
  * today would leave main permanently red — and a gate that is always red is
  * a gate everyone learns to ignore, which is worse than no gate. The
  * distance is real and is not closed by anything in this file.
@@ -401,8 +401,8 @@ tasks.named('test') {
  * number without testing anything more, and the point of the number is to be
  * uncomfortable while it is low.
  */
-def measuredLineFloor = '0.76'
-def measuredBranchFloor = '0.63'
+def measuredLineFloor = '0.77'
+def measuredBranchFloor = '0.65'
 def targetLine = '0.90'
 def targetBranch = '0.85'
 
