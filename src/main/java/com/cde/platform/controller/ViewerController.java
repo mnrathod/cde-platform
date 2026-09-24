@@ -5,6 +5,7 @@ import com.cde.platform.dto.ViewerDtos.ViewerPayload;
 import com.cde.platform.openapi.ApiDocumentation;
 import com.cde.platform.openapi.StandardErrorResponses;
 import com.cde.platform.repository.DocumentRepository;
+import com.cde.platform.web.StoredFileResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -222,12 +223,8 @@ public class ViewerController {
 
             // ── Images ──────────────────────────────────────────
             if (ct.startsWith("image/") || Set.of("png","jpg","jpeg","gif","webp","bmp").contains(ext)) {
-                byte[] bytes = Files.readAllBytes(path);
                 String mime = ct.startsWith("image/") ? ct : "image/" + (ext.equals("jpg") ? "jpeg" : ext);
-                return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(mime))
-                    .contentLength(bytes.length)
-                    .body(bytes);
+                return StoredFileResponse.streaming(path, MediaType.parseMediaType(mime));
             }
 
             // ── Unknown ─────────────────────────────────────────
@@ -293,7 +290,8 @@ public class ViewerController {
             return ResponseEntity.badRequest().body(Map.of("error","Document is not a PDF"));
 
         try {
-            return servePdf(Files.readAllBytes(path), s(doc.getFileName()));
+            return StoredFileResponse.streaming(
+                path, MediaType.APPLICATION_PDF, pdfHeaders(s(doc.getFileName())));
         } catch (IOException e) {
             return err("Read error: " + e.getMessage());
         }
@@ -313,16 +311,40 @@ public class ViewerController {
         return ResponseEntity.ok(new ConverterStatusResponse(converter.isConverterRunning()));
     }
 
+    /**
+     * The headers a PDF response carries, whether it is streamed off disk or
+     * handed over from the converter.
+     *
+     * <p>In one place because the two paths must agree: a stored PDF and a
+     * converted Office document are the same thing to the viewer, and a
+     * disposition or cache directive that differed between them would show
+     * up as one format behaving differently from the other for no reason
+     * anybody could find.
+     */
+    private HttpHeaders pdfHeaders(String filename) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"");
+        // The bytes at this URL are replaced whenever a new version is
+        // committed, so a cached response would show a stale document.
+        headers.set(HttpHeaders.CACHE_CONTROL, "no-cache, must-revalidate");
+        headers.set("X-Source-Type", "pdf");
+        return headers;
+    }
+
+    /**
+     * A PDF the converter produced, which exists only in memory.
+     *
+     * <p>The one remaining {@code byte[]} body on this controller, and it is
+     * not a stored file: {@code ConverterService.convertToPdf} returns the
+     * conversion's output directly. Streaming it needs the converter to hand
+     * back a stream or a temporary file instead, which is a change to that
+     * service's contract rather than to this route.
+     */
     private ResponseEntity<byte[]> servePdf(byte[] bytes, String filename) {
-        return ResponseEntity.ok()
-            .contentType(MediaType.APPLICATION_PDF)
-            .contentLength(bytes.length)
-            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
-            // The bytes at this URL are replaced whenever a new version is
-            // committed, so a cached response would show a stale document.
-            .header(HttpHeaders.CACHE_CONTROL, "no-cache, must-revalidate")
-            .header("X-Source-Type", "pdf")
-            .body(bytes);
+        HttpHeaders headers = pdfHeaders(filename);
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.setContentLength(bytes.length);
+        return new ResponseEntity<>(bytes, headers, org.springframework.http.HttpStatus.OK);
     }
 
     // ── 3D handler ────────────────────────────────────────────────

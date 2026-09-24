@@ -16,6 +16,8 @@ import com.cde.platform.repository.DocumentRepository;
 import com.cde.platform.repository.UserRepository;
 import com.cde.platform.service.DocumentVersionService;
 import org.springframework.http.HttpHeaders;
+import com.cde.platform.web.StoredFileResponse;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -109,7 +111,7 @@ public class DocumentVersionController {
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
     @GetMapping("/{versionNumber}/file")
-    public ResponseEntity<byte[]> downloadVersion(
+    public ResponseEntity<Resource> downloadVersion(
         @Parameter(description = "Identifier of the document.", example = "1180")
         @PathVariable Long documentId,
         @Parameter(description = "Version to download, counting from 1.", example = "2")
@@ -126,11 +128,13 @@ public class DocumentVersionController {
         Path path = Paths.get(version.getFilePath());
         if (!Files.exists(path)) return ResponseEntity.notFound().build();
 
-        return ResponseEntity.ok()
-            .contentType(MediaType.APPLICATION_PDF)
-            .header(HttpHeaders.CONTENT_DISPOSITION,
-                    "attachment; filename=\"" + downloadName(version) + "\"")
-            .body(Files.readAllBytes(path));
+        // Streamed, not read whole: a version of a large drawing set is the
+        // same file the viewer serves, and §7.7 forbids holding either of
+        // them in a byte[] for the length of a download.
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                    "attachment; filename=\"" + downloadName(version) + "\"");
+        return StoredFileResponse.streaming(path, MediaType.APPLICATION_PDF, headers);
     }
 
     @Operation(

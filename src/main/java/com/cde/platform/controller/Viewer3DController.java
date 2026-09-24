@@ -15,6 +15,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
+import com.cde.platform.web.StoredFileResponse;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Value;
@@ -372,9 +375,17 @@ public class Viewer3DController {
         }
     }
 
-    private ResponseEntity<byte[]> serveBinary(Path path, String ext) {
+    /**
+     * Sends a model's bytes to the viewer, streamed.
+     *
+     * <p>This read the whole file into a {@code byte[]} first, which §7.7
+     * forbids and §6.7.4 repeats with the reason: a federated model runs to
+     * hundreds of megabytes and a handful of concurrent downloads is all it
+     * takes to exhaust the heap serving files the application never needed
+     * to look at.
+     */
+    private ResponseEntity<Resource> serveBinary(Path path, String ext) {
         try {
-            byte[] bytes = Files.readAllBytes(path);
             String mime = switch (ext) {
                 case "glb"  -> "model/gltf-binary";
                 case "gltf" -> "model/gltf+json";
@@ -382,12 +393,10 @@ public class Viewer3DController {
                 case "dae"  -> "text/xml";
                 default     -> "application/octet-stream";
             };
-            return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(mime))
-                .contentLength(bytes.length)
-                .header("X-3D-Format", ext)
-                .header("Access-Control-Expose-Headers", "X-3D-Format")
-                .body(bytes);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-3D-Format", ext);
+            headers.set("Access-Control-Expose-Headers", "X-3D-Format");
+            return StoredFileResponse.streaming(path, MediaType.parseMediaType(mime), headers);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(null);
         }

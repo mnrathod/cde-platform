@@ -279,9 +279,18 @@ public class DocumentVersionService {
      * the document happens to point at now.
      */
     private String hashOf(Path path) {
-        try {
+        try (var source = Files.newInputStream(path)) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
+            // Fed through a fixed buffer rather than `digest(readAllBytes())`.
+            // A digest consumes its input a block at a time and has never
+            // needed the whole file, so holding it was pure cost — and this
+            // runs on commit, when the file is at its largest and the request
+            // is already doing the most work (§7.7).
+            byte[] buffer = new byte[64 * 1024];
+            for (int read = source.read(buffer); read != -1; read = source.read(buffer)) {
+                digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
         } catch (IOException | NoSuchAlgorithmException e) {
             log.warn("Could not hash {}: {}", path, e.getMessage());
             return null;
