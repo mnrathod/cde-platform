@@ -5,6 +5,7 @@ import com.cde.platform.dto.ViewerDtos.ViewerPayload;
 import com.cde.platform.openapi.ApiDocumentation;
 import com.cde.platform.openapi.StandardErrorResponses;
 import com.cde.platform.repository.DocumentRepository;
+import com.cde.platform.exception.ConverterOfflineException;
 import com.cde.platform.web.StoredFileResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -14,6 +15,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import com.cde.platform.service.ConverterService;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +26,7 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.time.Duration;
 import java.util.*;
 
 @RestController
@@ -42,6 +46,9 @@ public class ViewerController {
      * only ever work where the two run on one host.
      */
     private final String converterUrl;
+
+    /** Matches the timeout the byte-returning conversion path has always used. */
+    private static final Duration CONVERSION_TIMEOUT = Duration.ofSeconds(120);
 
     private static final Set<String> OFFICE_MIME = Set.of(
         "application/msword",
@@ -191,8 +198,12 @@ public class ViewerController {
             // ── Office -> PDF via LibreOffice ───────────────────
             if (OFFICE_EXT.contains(ext) || OFFICE_MIME.contains(ct)) {
                 try {
-                    byte[] pdf = converter.convertToPdf(path, ct);
-                    return servePdf(pdf, doc.getName() + ".pdf");
+                    return serveConvertedPdf(path, ct, doc.getName() + ".pdf");
+                } catch (ConverterOfflineException e) {
+                    return ResponseEntity.ok(Map.of(
+                        "type","office_error","name",doc.getName(),
+                        "fileName",s(doc.getFileName()),
+                        "error","converter_offline","loInstalled",false));
                 } catch (java.net.ConnectException e) {
                     return ResponseEntity.ok(Map.of(
                         "type","office_error","name",doc.getName(),
@@ -332,19 +343,48 @@ public class ViewerController {
     }
 
     /**
-     * A PDF the converter produced, which exists only in memory.
+     * Converts an Office document and sends the PDF without holding it.
      *
-     * <p>The one remaining {@code byte[]} body on this controller, and it is
-     * not a stored file: {@code ConverterService.convertToPdf} returns the
-     * conversion's output directly. Streaming it needs the converter to hand
-     * back a stream or a temporary file instead, which is a change to that
-     * service's contract rather than to this route.
+     * <p>This used to call {@code convertToPdf}, which returns the whole
+     * conversion as a {@code byte[]} — a 500-page specification is tens of
+     * megabytes of heap per reader (§7.7). {@code convertToPdfFile} writes
+     * the same output as it arrives, so the cost is one buffer whatever the
+     * document's size.
+     *
+     * <p>The temporary file is opened with {@code DELETE_ON_CLOSE} rather
+     * than deleted by this method, because the response is written after
+     * this returns: deleting here would race the send, and a
+     * try-with-resources around the return would close the stream before
+     * anything had been read from it. Tying the file's life to the stream's
+     * means it goes when the response finishes, including when the client
+     * disconnects halfway.
+     *
+     * <p>{@code InputStreamResource} and not {@code FileSystemResource},
+     * which is the one place that trade is worth making: a file-backed
+     * resource can be re-read and so supports ranges, but it can also be
+     * re-opened, and re-opening a file already deleted on close would fail.
+     * A converted document is fetched once, so ranges buy nothing here.
      */
-    private ResponseEntity<byte[]> servePdf(byte[] bytes, String filename) {
+    private ResponseEntity<Resource> serveConvertedPdf(Path source, String contentType,
+                                                       String filename) throws IOException {
+        Path converted = Files.createTempFile("viewer-converted-", ".pdf");
+        long sizeBytes;
+        try {
+            sizeBytes = converter.convertToPdfFile(
+                source, contentType, converted, CONVERSION_TIMEOUT);
+        } catch (RuntimeException e) {
+            Files.deleteIfExists(converted);
+            throw e;
+        }
+
         HttpHeaders headers = pdfHeaders(filename);
         headers.setContentType(MediaType.APPLICATION_PDF);
-        headers.setContentLength(bytes.length);
-        return new ResponseEntity<>(bytes, headers, org.springframework.http.HttpStatus.OK);
+        headers.setContentLength(sizeBytes);
+        return new ResponseEntity<>(
+            new InputStreamResource(
+                Files.newInputStream(converted, StandardOpenOption.READ,
+                                     StandardOpenOption.DELETE_ON_CLOSE)),
+            headers, org.springframework.http.HttpStatus.OK);
     }
 
     // ── 3D handler ────────────────────────────────────────────────
