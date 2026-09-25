@@ -71,12 +71,21 @@ rules:
       §3.5 requires each operation to name the specific permission it needs.
       An endpoint whose description does not say is one nobody can grant access
       to without reading the source.
+
+      Three forms are accepted, and the list is deliberately closed so this
+      stays a gate rather than a suggestion: a named permission, "Requires
+      authentication", or "Requires only a valid session". The third is for the
+      handful of operations that genuinely need no permission beyond being
+      signed in — reading your own session, and signing out — where inventing
+      a permission name would describe a grant nobody can make. It was missing,
+      and those two operations had been failing this rule while describing
+      their requirement perfectly well.
     severity: error
     given: $.paths[*][get,put,post,delete,patch].description
     then:
       function: pattern
       functionOptions:
-        match: "(permission|Requires authentication)"
+        match: "(permission|Requires authentication|Requires only a valid session)"
 
   cde-operation-id-is-camel-case:
     description: >

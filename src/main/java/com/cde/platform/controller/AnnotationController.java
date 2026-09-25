@@ -231,6 +231,37 @@ public class AnnotationController {
     }
 
     @Operation(
+        operationId = "getRepliesForDocument",
+        summary = "Get every reply on a document's markup at once",
+        description = """
+            The whole conversation on a document, oldest first, each reply carrying the \
+            `annotationId` it belongs to so a client can group them.
+
+            This exists because the review panel needs all of it to open, and asking per \
+            thread is an N+1 — a drawing with forty comments on it made forty requests, \
+            against §7.2's "one screen, one request". Prefer this over calling \
+            `getAnnotationReplies` in a loop.
+
+            An empty list means the document has no replies, not that it has no markup.
+
+            Requires the `annotation:read` permission.""")
+    @ApiResponse(responseCode = "200",
+        description = "Every reply on the document's markup, oldest first.")
+    @ApiResponse(responseCode = "404",
+        description = "No document with that id is visible to the caller.",
+        content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
+                           schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @GetMapping("/document/{documentId}/replies")
+    public ResponseEntity<List<ReplyResponse>> getRepliesForDocument(
+        @Parameter(description = "Identifier of the document.", example = "1180")
+        @PathVariable Long documentId
+    ) {
+        if (!documentRepo.existsById(documentId)) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(
+            replyRepo.findForDocument(documentId).stream().map(this::toReplyResponse).toList());
+    }
+
+    @Operation(
         operationId = "addAnnotationReply",
         summary = "Reply in a markup thread",
         description = """
