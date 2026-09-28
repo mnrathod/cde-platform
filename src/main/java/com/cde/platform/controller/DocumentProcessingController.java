@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.ProcessingDtos.ProcessingResponse;
 import com.cde.platform.service.DocumentProcessingService;
 import com.cde.platform.service.DocumentProcessingService.ProcessingResult;
@@ -102,6 +105,7 @@ public class DocumentProcessingController {
                     + "succeed once it is back.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/api/viewer/{documentId}/flatten")
     public ResponseEntity<ProcessingResponse> flattenAnnotations(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -140,6 +144,7 @@ public class DocumentProcessingController {
         description = "The conversion service is not reachable.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/api/documents/{documentId}/redact")
     public ResponseEntity<ProcessingResponse> redactDocument(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -178,6 +183,7 @@ public class DocumentProcessingController {
         description = "The conversion service is not reachable.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @PostMapping("/api/documents/{documentId}/find-text")
     public ResponseEntity<TextSearchResponse> findText(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -222,6 +228,7 @@ public class DocumentProcessingController {
         description = "The conversion service is not reachable.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/api/documents/{documentId}/redact-matching")
     public ResponseEntity<ProcessingResponse> redactMatching(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -259,6 +266,7 @@ public class DocumentProcessingController {
         description = "The conversion service is not reachable.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/api/documents/{documentId}/ocr")
     public ResponseEntity<ProcessingResponse> ocrDocument(
         @Parameter(description = "Identifier of the document.", example = "1180")

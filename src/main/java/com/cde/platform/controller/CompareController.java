@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.InspectionDtos.ComparisonResponse;
 import com.cde.platform.exception.ConverterOfflineException;
 import com.cde.platform.exception.DocumentProcessingException;
@@ -91,6 +94,7 @@ public class CompareController {
                     + "succeed once it is back.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @PostMapping
     public ResponseEntity<ComparisonResponse> compare(@Valid @RequestBody CompareRequest request) {
         Document first = requireReadableWithFile(request.documentId1());

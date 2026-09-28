@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.ProcessingDtos.PageArrangementResponse;
 import com.cde.platform.dto.ProcessingDtos.PageExtractionResponse;
 import com.cde.platform.service.PageArrangement;
@@ -76,6 +79,7 @@ public class PageManipulationController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping
     public ResponseEntity<PageLayoutResponse> describePages(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -108,6 +112,7 @@ public class PageManipulationController {
         description = "The layout names a page the document does not have, or would leave it empty.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/arrange")
     public ResponseEntity<PageArrangementResponse> arrangePages(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -176,6 +181,7 @@ public class PageManipulationController {
         description = "The source does not have the pages named, or is not a PDF.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/insert")
     public ResponseEntity<PageArrangementResponse> insertPages(
         @Parameter(description = "Identifier of the document to insert into.", example = "1180")
@@ -233,6 +239,7 @@ public class PageManipulationController {
         description = "The document does not have the pages named, or is not a PDF.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/extract")
     public ResponseEntity<PageExtractionResponse> extractPages(
         @Parameter(description = "Identifier of the document to extract from.", example = "1180")

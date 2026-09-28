@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.DocumentDtos.*;
 import com.cde.platform.exception.ApiProblem;
 import com.cde.platform.exception.ResourceNotFoundException;
@@ -113,6 +116,7 @@ public class DocumentUploadController {
                     + "the file is larger than this deployment accepts.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.WRITE + "')")
     @PostMapping("/upload")
     public ResponseEntity<?> upload(
         @Parameter(description = "Project to file the document under.", example = "42")
@@ -230,6 +234,7 @@ public class DocumentUploadController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.WRITE + "')")
     @PatchMapping("/{id}/status")
     public ResponseEntity<?> updateStatus(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -286,6 +291,7 @@ public class DocumentUploadController {
                     + "which, and the limit it exceeded.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.WRITE + "')")
     @PostMapping("/upload/chunk")
     public ResponseEntity<?> uploadChunk(
         @Parameter(description = "This chunk's bytes.")

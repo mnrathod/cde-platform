@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.DiagnosticsDtos.ConverterStatusResponse;
 import com.cde.platform.dto.ViewerDtos.ViewerPayload;
 import com.cde.platform.openapi.ApiDocumentation;
@@ -110,6 +113,7 @@ public class ViewerController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{documentId}")
     public ResponseEntity<?> getViewerData(
         @Parameter(description = "Identifier of the document to open.", example = "1180")
@@ -272,6 +276,7 @@ public class ViewerController {
         description = "The document is not a PDF.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{documentId}/pdf")
     public ResponseEntity<?> getPdfBytes(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -315,8 +320,10 @@ public class ViewerController {
             The viewer asks before offering conversion-dependent actions, so it can say why \
             something is unavailable rather than failing when someone tries it.
 
-            Requires authentication.""")
+            Requires the `document:read` permission — whoever may open a document may ask \
+            whether opening one will work.""")
     @ApiResponse(responseCode = "200", description = "Whether the conversion service answered.")
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/converter-status")
     public ResponseEntity<ConverterStatusResponse> converterStatus() {
         return ResponseEntity.ok(new ConverterStatusResponse(converter.isConverterRunning()));

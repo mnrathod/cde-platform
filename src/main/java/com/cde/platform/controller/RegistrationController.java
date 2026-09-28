@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.security.RolePermissions;
 import com.cde.platform.audit.AuditAction;
 import com.cde.platform.audit.AuditOutcome;
 import com.cde.platform.audit.AuditRequest;
@@ -170,7 +171,8 @@ public class RegistrationController {
                     .header(HttpHeaders.SET_COOKIE, sessionCookie.issueFor(token).toString())
                     .body(new AuthResponse(
                         token, registered.user().getUsername(),
-                        registered.user().getRole().name()));
+                        registered.user().getRole().name(),
+                        RolePermissions.grantedTo(registered.user().getRole())));
             }
 
             // One message covering username and email alike. Saying which one

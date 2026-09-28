@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
 import com.cde.platform.model.User;
@@ -13,7 +14,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,7 +70,7 @@ class DocumentVersionControllerTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("an unprocessed document reports its upload as version 1")
     void historyIsNeverEmpty() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions", document.getId()))
@@ -82,7 +82,7 @@ class DocumentVersionControllerTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("version 1 downloads without the history being listed first")
     void originalIsDownloadableStraightAway() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions/1/file", document.getId()))
@@ -91,7 +91,7 @@ class DocumentVersionControllerTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("the download is named after the document and its version")
     void downloadIsNamedForItsVersion() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions/1/file", document.getId()))
@@ -103,7 +103,7 @@ class DocumentVersionControllerTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a version that does not exist is a 404, not a backfilled blank")
     void unknownVersionIsNotFound() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions/9/file", document.getId()))
@@ -111,7 +111,7 @@ class DocumentVersionControllerTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("an unknown document is a 404")
     void unknownDocumentIsNotFound() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions", 999999L))

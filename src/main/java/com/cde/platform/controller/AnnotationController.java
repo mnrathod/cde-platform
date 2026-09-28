@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.MarkupPermission;
+
 import com.cde.platform.collaboration.CollaborationBroadcaster;
 import com.cde.platform.collaboration.CollaborationEvent;
 import com.cde.platform.dto.AnnotationDtos.*;
@@ -68,6 +71,7 @@ public class AnnotationController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.READ + "')")
     @GetMapping("/document/{documentId}")
     public List<AnnotationResponse> getByDocument(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -96,6 +100,7 @@ public class AnnotationController {
         description = "The markup failed validation — no shape data, or a page number below 1.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @PostMapping
     public ResponseEntity<AnnotationResponse> create(
         @Valid @RequestBody AnnotationRequest req,
@@ -134,6 +139,7 @@ public class AnnotationController {
         description = "The markup failed validation — no shape data, or a comment over the limit.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @PutMapping("/{id}")
     public ResponseEntity<AnnotationResponse> update(
         @Parameter(description = "Identifier of the markup.", example = "9042")
@@ -164,6 +170,7 @@ public class AnnotationController {
         description = "No markup with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @PatchMapping("/{id}/resolve")
     public ResponseEntity<AnnotationResponse> resolve(
         @Parameter(description = "Identifier of the markup.", example = "9042")
@@ -191,6 +198,7 @@ public class AnnotationController {
         description = "No markup with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
         @Parameter(description = "Identifier of the markup.", example = "9042")
@@ -221,6 +229,7 @@ public class AnnotationController {
         description = "No markup with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.READ + "')")
     @GetMapping("/{annotationId}/replies")
     public List<ReplyResponse> getReplies(
         @Parameter(description = "Identifier of the markup.", example = "9042")
@@ -251,6 +260,7 @@ public class AnnotationController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.READ + "')")
     @GetMapping("/document/{documentId}/replies")
     public ResponseEntity<List<ReplyResponse>> getRepliesForDocument(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -279,6 +289,7 @@ public class AnnotationController {
         description = "The reply is empty or longer than the limit.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @PostMapping("/{annotationId}/replies")
     public ResponseEntity<ReplyResponse> addReply(
         @Parameter(description = "Identifier of the markup to reply to.", example = "9042")
@@ -315,6 +326,7 @@ public class AnnotationController {
         description = "No reply with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @DeleteMapping("/replies/{replyId}")
     public ResponseEntity<Void> deleteReply(
         @Parameter(description = "Identifier of the reply.", example = "3311")

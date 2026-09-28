@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.DocumentVersion.DocumentOperation;
 import com.cde.platform.model.Project;
@@ -22,7 +23,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -133,7 +133,7 @@ class SignatureVersioningTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("signing records which version was signed")
     void signingRecordsTheVersion() throws Exception {
         String body = mapper.writeValueAsString(java.util.Map.of(
@@ -153,7 +153,7 @@ class SignatureVersioningTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a signature stays valid after the document is processed again")
     void signatureSurvivesLaterProcessing() throws Exception {
         String signatureId = sign();
@@ -170,7 +170,7 @@ class SignatureVersioningTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("tampering with the signed version's own bytes is still detected")
     void tamperingWithTheSignedVersionIsDetected() throws Exception {
         String signatureId = sign();
@@ -190,7 +190,7 @@ class SignatureVersioningTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a later signature attests to the later version")
     void signingAfterProcessingBindsToTheNewVersion() throws Exception {
         sign();
@@ -207,7 +207,7 @@ class SignatureVersioningTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("the signature is written into the document, not only recorded beside it")
     void signatureIsEmbeddedInTheFile() throws Exception {
         sign();

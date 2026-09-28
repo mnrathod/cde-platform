@@ -97,7 +97,7 @@ paths:
 
         It is `false` on any government or Defence deployment regardless of configuration: those tiers make no outbound calls, and the check is not something a tenant administrator can override.
 
-        Requires authentication.
+        Requires the `document:read` permission — the same authority as seeing the documents a summary would be about.
       operationId: getAssistanceAvailability
       responses:
         "200":
@@ -156,7 +156,7 @@ paths:
 
         Every call is recorded in the audit trail — who, when, which model and provider, and whether redaction fired. The prompt and the reply are never recorded.
 
-        Requires authentication.
+        Requires the `document:read` permission. Authentication alone is not enough: this forwards content to a third-party provider and spends this deployment's credit doing it, so it is gated on the authority to read the documents in question rather than on merely holding a session.
       operationId: summariseComparison
       requestBody:
         content:
@@ -5445,7 +5445,7 @@ paths:
       description: |-
         The viewer asks before offering conversion-dependent actions, so it can say why something is unavailable rather than failing when someone tries it.
 
-        Requires authentication.
+        Requires the `document:read` permission — whoever may open a document may ask whether opening one will work.
       operationId: getConverterStatus
       responses:
         "200":
@@ -6186,6 +6186,18 @@ components:
         the tenant claim is authoritative and cannot be overridden by any request
         parameter.
       properties:
+        permissions:
+          type: array
+          description: "Every permission this account holds, so a client can hide\
+            \ the controls it cannot use (§1.1) without keeping its own copy of the\
+            \ role-to-permission mapping."
+          example:
+          - document:read
+          - document:write
+          - annotation:write
+          items:
+            type: string
+          uniqueItems: true
         role:
           type: string
           description: Role the account holds. Client-side use is presentation only
@@ -6201,6 +6213,7 @@ components:
           description: Sign-in name the token authenticates.
           example: j.okafor
       required:
+      - permissions
       - role
       - token
       - username
@@ -8176,6 +8189,20 @@ components:
         \ session lives in an HttpOnly cookie precisely so that no script can read\
         \ it, and handing the same value back in a body would undo that."
       properties:
+        permissions:
+          type: array
+          description: "Every permission this account holds, so a client can hide\
+            \ the controls it cannot use (§1.1) without keeping its own copy of the\
+            \ role-to-permission mapping. Presentation only: each one is re-checked\
+            \ server-side on every request, and a client that ignores this list gains\
+            \ nothing."
+          example:
+          - document:read
+          - document:write
+          - annotation:write
+          items:
+            type: string
+          uniqueItems: true
         role:
           type: string
           description: Role the account holds. Presentation only — every permission
@@ -8186,6 +8213,7 @@ components:
           description: Sign-in name this session authenticates.
           example: j.okafor
       required:
+      - permissions
       - role
       - username
     SignatureRequest:

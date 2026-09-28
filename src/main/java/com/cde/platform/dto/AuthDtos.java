@@ -121,7 +121,14 @@ public final class AuthDtos {
         @Schema(description = "Role the account holds. Client-side use is presentation only — "
                             + "every permission is re-checked server-side on every request.",
                 example = "ENGINEER", requiredMode = Schema.RequiredMode.REQUIRED)
-        String role
+        String role,
+
+        @Schema(description = "Every permission this account holds, so a client can hide the "
+                            + "controls it cannot use (§1.1) without keeping its own copy of "
+                            + "the role-to-permission mapping.",
+                example = "[\"document:read\", \"document:write\", \"annotation:write\"]",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        java.util.Set<String> permissions
     ) {}
 
     @Schema(name = "SessionResponse",
@@ -137,6 +144,15 @@ public final class AuthDtos {
         @Schema(description = "Role the account holds. Presentation only — every permission is "
                             + "re-checked server-side on every request.",
                 example = "ENGINEER", requiredMode = Schema.RequiredMode.REQUIRED)
-        String role
+        String role,
+
+        @Schema(description = "Every permission this account holds, so a client can hide the "
+                            + "controls it cannot use (§1.1) without keeping its own copy of "
+                            + "the role-to-permission mapping. Presentation only: each one is "
+                            + "re-checked server-side on every request, and a client that "
+                            + "ignores this list gains nothing.",
+                example = "[\"document:read\", \"document:write\", \"annotation:write\"]",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        java.util.Set<String> permissions
     ) {}
 }

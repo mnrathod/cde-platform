@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Project;
 import com.cde.platform.model.Tenant;
 import com.cde.platform.model.User;
@@ -16,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -46,7 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@WithMockUser(username = ChunkedUploadIsolationTest.USERNAME)
+@ActingAs(value = User.Role.ENGINEER, username = ChunkedUploadIsolationTest.USERNAME)
 class ChunkedUploadIsolationTest {
 
     static final String USERNAME = "chunk-tenant-a";

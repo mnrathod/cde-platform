@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
 import com.cde.platform.model.User;
@@ -13,7 +14,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.io.IOException;
@@ -97,7 +97,7 @@ class DocumentDownloadStreamingTest {
     // ── The viewer's PDF route ────────────────────────────────────────────
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a PDF arrives whole when the whole thing is asked for")
     void pdfArrivesWhole() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}/pdf", pdf.getId()))
@@ -108,7 +108,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a PDF can be asked for a byte at a time, which a buffered body cannot do")
     void pdfAnswersARangeRequest() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}/pdf", pdf.getId())
@@ -118,7 +118,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a range from the middle of a PDF returns only that range")
     void pdfRangeIsTheRangeAskedFor() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}/pdf", pdf.getId())
@@ -130,7 +130,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a PDF is still served inline, under its own name, and not cached")
     void pdfKeepsItsHeaders() throws Exception {
         // These were on the old byte[] response and had to survive the move.
@@ -144,7 +144,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("asking the PDF route for something that is not a PDF is refused")
     void pdfRouteRefusesOtherFormats() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}/pdf", image.getId()))
@@ -152,7 +152,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a document that does not exist is a 404, not an empty download")
     void unknownDocumentIsNotFound() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}/pdf", 9_999_999L))
@@ -160,7 +160,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a document whose file has gone from disk says so rather than sending nothing")
     void missingFileIsReported() throws Exception {
         Files.delete(Path.of(pdf.getFilePath()));
@@ -173,7 +173,7 @@ class DocumentDownloadStreamingTest {
     // ── The viewer's image route ──────────────────────────────────────────
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("an image arrives with the media type it was stored under")
     void imageArrivesWhole() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}", image.getId()))
@@ -182,7 +182,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("an image answers a range request too")
     void imageAnswersARangeRequest() throws Exception {
         mockMvc.perform(get("/api/viewer/{id}", image.getId())
@@ -194,7 +194,7 @@ class DocumentDownloadStreamingTest {
     // ── The model route ───────────────────────────────────────────────────
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a model answers a range request, which is what resumable download needs")
     void modelAnswersARangeRequest() throws Exception {
         // The route this matters most for. A federated model is the largest
@@ -207,7 +207,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a model still declares its format to the viewer")
     void modelKeepsItsFormatHeader() throws Exception {
         mockMvc.perform(get("/api/viewer3d/{id}", model.getId()))
@@ -219,7 +219,7 @@ class DocumentDownloadStreamingTest {
     // ── The version download ──────────────────────────────────────────────
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a stored version answers a range request")
     void versionAnswersARangeRequest() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions/1/file", pdf.getId())
@@ -229,7 +229,7 @@ class DocumentDownloadStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a stored version is still an attachment named for its version")
     void versionKeepsItsDisposition() throws Exception {
         mockMvc.perform(get("/api/documents/{id}/versions/1/file", pdf.getId()))

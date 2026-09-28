@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Annotation;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
@@ -16,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
@@ -103,7 +103,7 @@ class DocumentAndXfdfEndpointsTest {
     class Reading {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("returns its metadata")
         void returnsMetadata() throws Exception {
             mockMvc.perform(get("/api/documents/{id}", sheet.getId()))
@@ -114,7 +114,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("names who uploaded it rather than exposing their record")
         void namesTheUploader() throws Exception {
             mockMvc.perform(get("/api/documents/{id}", sheet.getId()))
@@ -122,7 +122,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("does not include the path the file is stored at")
         void doesNotLeakTheStoragePath() throws Exception {
             // §5.13.13: a storage path in a response is an invitation to
@@ -133,7 +133,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/documents/{id}", 9_999_999L))
@@ -146,7 +146,7 @@ class DocumentAndXfdfEndpointsTest {
     class Listing {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("returns a page, not a bare array")
         void returnsAPage() throws Exception {
             mockMvc.perform(get("/api/documents/project/{id}", project.getId()))
@@ -156,7 +156,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("honours the page size asked for")
         void honoursPageSize() throws Exception {
             documentRepo.save(Document.builder()
@@ -170,7 +170,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("an empty project lists nothing rather than failing")
         void emptyProjectListsNothing() throws Exception {
             Project empty = projectRepo.save(Project.builder()
@@ -190,7 +190,7 @@ class DocumentAndXfdfEndpointsTest {
     class Deleting {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ADMIN")
+        @ActingAs(value = User.Role.ADMIN, username = USERNAME)
         @DisplayName("takes its markup with it")
         void cascadesToMarkup() throws Exception {
             // Annotations reference the document with a non-null,
@@ -207,7 +207,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ADMIN")
+        @ActingAs(value = User.Role.ADMIN, username = USERNAME)
         @DisplayName("deleting one that does not exist is a 404, not a silent success")
         void deletingUnknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(delete("/api/documents/{id}", 9_999_999L).with(csrf()))
@@ -222,7 +222,7 @@ class DocumentAndXfdfEndpointsTest {
     class Exporting {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("produces an XFDF document naming the file it belongs to")
         void producesXfdf() throws Exception {
             markup("Check this dimension");
@@ -234,7 +234,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("offers it as a download named after the document")
         void offersADownload() throws Exception {
             mockMvc.perform(get("/api/annotations/document/{id}/xfdf", sheet.getId()))
@@ -243,7 +243,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("carries the markup's own note")
         void carriesTheNote() throws Exception {
             markup("Check this dimension");
@@ -254,7 +254,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document with no markup exports an empty set, not an error")
         void emptyExportIsValid() throws Exception {
             // A reviewing tool asked for the markup and there is none. That
@@ -265,7 +265,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/annotations/document/{id}/xfdf", 9_999_999L))
@@ -296,7 +296,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("adds the file's markup to the document")
         void importsMarkup() throws Exception {
             mockMvc.perform(multipart("/api/annotations/document/{id}/xfdf", sheet.getId())
@@ -306,7 +306,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("adds to the markup already there rather than replacing it")
         void importAdds() throws Exception {
             // Importing adds. A replace would discard a colleague's review
@@ -321,7 +321,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("attributes imported markup to the caller, not to the file")
         void importedMarkupIsAttributedToTheCaller() throws Exception {
             // The file says who wrote it in the originating tool, and that
@@ -338,7 +338,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("an empty file is reported as empty, not as rejected")
         void emptyFileIsNotAnError() throws Exception {
             // "The file was empty" and "the file was rejected" call for
@@ -352,7 +352,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("does not resolve an external entity (§5.13.9)")
         void externalEntitiesAreNotResolved() throws Exception {
             // An XML upload is active content. The entity below points at a
@@ -382,7 +382,7 @@ class DocumentAndXfdfEndpointsTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("importing onto a document that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(multipart("/api/annotations/document/{id}/xfdf", 9_999_999L)

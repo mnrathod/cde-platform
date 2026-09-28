@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
 import com.cde.platform.model.User;
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -170,7 +170,7 @@ class Viewer3DControllerTest {
     class Dispatch {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a mesh is served as its own bytes")
         void meshIsServedDirectly() throws Exception {
             open(model("tower.glb", "model/gltf-binary", "glTFDATA"))
@@ -179,7 +179,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a Revit file says it cannot be opened directly")
         void revitIsNamed() throws Exception {
             open(model("tower.rvt", "application/octet-stream", "RVT"))
@@ -187,7 +187,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a Revit family file is the same answer")
         void revitFamilyIsNamed() throws Exception {
             open(model("door.rfa", "application/octet-stream", "RFA"))
@@ -195,7 +195,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("an IFC goes to the converter")
         void ifcIsConverted() throws Exception {
             nextReply.set(Reply.json("{\"success\":true,\"meshes\":[]}"));
@@ -206,7 +206,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a format nothing here can open names the extension")
         void unsupportedFormatIsNamed() throws Exception {
             open(model("drawing.dwg", "image/vnd.dwg", "AC1032"))
@@ -216,7 +216,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/viewer3d/{id}", 9_999_999L))
@@ -224,7 +224,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document with no stored file says so")
         void documentWithNoFileIsReported() throws Exception {
             open(withNoFile())
@@ -234,7 +234,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document whose file has gone from disk says that instead")
         void missingFileIsReported() throws Exception {
             Document gone = model("tower.ifc", "application/ifc", "ISO-10303-21;");
@@ -253,7 +253,7 @@ class Viewer3DControllerTest {
     class Tree {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("returns the hierarchy the converter extracted")
         void returnsTheRealHierarchy() throws Exception {
             nextReply.set(Reply.json("""
@@ -265,7 +265,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("does not mark an extracted hierarchy as synthetic")
         void realHierarchyIsNotMarked() throws Exception {
             nextReply.set(Reply.json("""
@@ -276,7 +276,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("marks a placeholder outline as synthetic when the converter fails")
         void placeholderIsMarked() throws Exception {
             // §1A.4 makes this tree the accessible equivalent of the canvas,
@@ -292,7 +292,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("names the placeholder root after the document")
         void placeholderIsNamedAfterTheDocument() throws Exception {
             nextReply.set(new Reply(500, "text/plain", "boom".getBytes(StandardCharsets.UTF_8)));
@@ -302,7 +302,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("gives the placeholder something to navigate")
         void placeholderHasChildren() throws Exception {
             // An empty tree is not an accessible equivalent of anything.
@@ -314,7 +314,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("returns an empty tree for a document with no file, not a placeholder")
         void noFileMeansNoTree() throws Exception {
             // There is no model, so there is nothing to outline. A
@@ -326,7 +326,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/viewer3d/{id}/tree", 9_999_999L))
@@ -341,7 +341,7 @@ class Viewer3DControllerTest {
     class Geometry {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("forwards the converter's bytes as bytes")
         void forwardsBytes() throws Exception {
             // Binary rather than JSON because the arrays are already
@@ -357,7 +357,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("never caches a geometry response")
         void geometryIsNotCached() throws Exception {
             nextReply.set(Reply.bytes("CDEG".getBytes(StandardCharsets.UTF_8)));
@@ -367,7 +367,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("passes a JSON explanation through as JSON")
         void forwardsJsonExplanation() throws Exception {
             // A model the converter cannot read comes back as JSON with a
@@ -381,7 +381,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("does not ask the converter to read a mesh as IFC")
         void meshIsNotSentToTheConverter() throws Exception {
             // Only IFC produces extracted geometry. Asking saves nothing and
@@ -392,7 +392,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("accepts an IFC declared only by its media type")
         void ifcRecognisedByMediaType() throws Exception {
             nextReply.set(Reply.bytes("CDEG".getBytes(StandardCharsets.UTF_8)));
@@ -402,7 +402,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document with no stored file says so rather than calling out")
         void noFileIsReported() throws Exception {
             geometry(withNoFile())
@@ -411,7 +411,7 @@ class Viewer3DControllerTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a document that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/viewer3d/{id}/geometry", 9_999_999L))

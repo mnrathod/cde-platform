@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.ViewerDtos.ModelTreeNode;
 import com.cde.platform.dto.ViewerDtos.ViewerPayload;
 import com.cde.platform.openapi.ApiDocumentation;
@@ -89,6 +92,7 @@ public class Viewer3DController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{documentId}")
     public ResponseEntity<?> get3DModel(
         @Parameter(description = "Identifier of the model document.", example = "1212")
@@ -154,6 +158,7 @@ public class Viewer3DController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{documentId}/tree")
     public ResponseEntity<?> getIfcTree(
         @Parameter(description = "Identifier of the model document.", example = "1212")
@@ -266,6 +271,7 @@ public class Viewer3DController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{documentId}/geometry")
     public ResponseEntity<?> getModelGeometry(
         @Parameter(description = "Identifier of the model document.", example = "1212")

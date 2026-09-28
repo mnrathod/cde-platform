@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.DocumentDtos.*;
 import com.cde.platform.dto.PageResponse;
 import com.cde.platform.exception.ApiProblem;
@@ -82,6 +85,7 @@ public class DocumentController {
         description = "No project with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/project/{projectId}")
     public PageResponse<DocumentResponse> listByProject(
         @Parameter(description = "Identifier of the project whose documents to list.", example = "42")
@@ -141,6 +145,7 @@ public class DocumentController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{id}")
     public ResponseEntity<DocumentResponse> get(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -165,6 +170,7 @@ public class DocumentController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.WRITE + "')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
         @Parameter(description = "Identifier of the document.", example = "1180")

@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Annotation;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
@@ -16,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
@@ -107,7 +107,7 @@ class AnnotationControllerTest {
     class Creating {
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("returns 201 with the markup as created")
         void createsMarkup() throws Exception {
             mockMvc.perform(post("/api/annotations").with(csrf())
@@ -119,7 +119,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("attributes it to the authenticated caller")
         void authorIsTheCaller() throws Exception {
             // Never taken from the body. An author a client can choose is an
@@ -131,7 +131,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = OTHER, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = OTHER)
         @DisplayName("attributes it to whoever is signed in, not to the document's owner")
         void authorIsNotTheDocumentOwner() throws Exception {
             mockMvc.perform(post("/api/annotations").with(csrf())
@@ -141,7 +141,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("starts open, whatever the request said")
         void startsOpen() throws Exception {
             mockMvc.perform(post("/api/annotations").with(csrf())
@@ -153,7 +153,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("refuses markup with no shape")
         void refusesMissingShape() throws Exception {
             mockMvc.perform(post("/api/annotations").with(csrf())
@@ -163,7 +163,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("refuses a page number below one")
         void refusesPageZero() throws Exception {
             // There is no page 0, and markup anchored there can never be
@@ -175,7 +175,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("refuses markup on a document that does not exist")
         void refusesUnknownDocument() throws Exception {
             mockMvc.perform(post("/api/annotations").with(csrf())
@@ -194,7 +194,7 @@ class AnnotationControllerTest {
     class Listing {
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("returns everything on the document")
         void listsMarkup() throws Exception {
             existingMarkup();
@@ -206,7 +206,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("includes resolved markup as well as open")
         void includesResolved() throws Exception {
             // Filtering is the client's job: a review panel usually wants
@@ -220,7 +220,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("returns an empty list for a document nobody has marked up")
         void emptyDocumentIsEmptyList() throws Exception {
             mockMvc.perform(get("/api/annotations/document/{id}", sheet.getId()))
@@ -236,7 +236,7 @@ class AnnotationControllerTest {
     class Updating {
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("changes the shape and the note")
         void updatesShapeAndComment() throws Exception {
             Annotation markup = existingMarkup();
@@ -251,7 +251,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("will not move markup to another page")
         void pageIsFixedAtCreation() throws Exception {
             // Every reply already written against it refers to what is on
@@ -268,7 +268,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("will not reattach markup to another document")
         void documentIsFixedAtCreation() throws Exception {
             Annotation markup = existingMarkup();
@@ -282,7 +282,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("changing markup that does not exist is a 404")
         void updatingUnknownMarkupIsNotFound() throws Exception {
             mockMvc.perform(put("/api/annotations/{id}", 9_999_999L).with(csrf())
@@ -301,7 +301,7 @@ class AnnotationControllerTest {
     class Resolving {
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("marks it resolved")
         void resolves() throws Exception {
             Annotation markup = existingMarkup();
@@ -312,7 +312,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("resolving twice succeeds and changes nothing")
         void resolvingIsIdempotent() throws Exception {
             Annotation markup = existingMarkup();
@@ -324,7 +324,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("keeps the markup and its note in place")
         void resolvingDoesNotErase() throws Exception {
             // Resolving records that the point was addressed. It does not
@@ -337,7 +337,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("resolving markup that does not exist is a 404")
         void resolvingUnknownMarkupIsNotFound() throws Exception {
             mockMvc.perform(patch("/api/annotations/{id}/resolve", 9_999_999L).with(csrf()))
@@ -352,7 +352,7 @@ class AnnotationControllerTest {
     class Deleting {
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("removes it")
         void deletes() throws Exception {
             Annotation markup = existingMarkup();
@@ -364,7 +364,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("deleting markup that does not exist is a 404, not a silent success")
         void deletingUnknownMarkupIsNotFound() throws Exception {
             // A 204 here would tell a client its markup had been removed
@@ -385,7 +385,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = OTHER, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = OTHER)
         @DisplayName("a reply is attributed to whoever wrote it")
         void replyIsAttributedToItsAuthor() throws Exception {
             Annotation markup = existingMarkup();
@@ -398,7 +398,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("replies come back in the thread")
         void repliesAreListed() throws Exception {
             Annotation markup = existingMarkup();
@@ -412,7 +412,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("an empty reply is refused")
         void refusesAnEmptyReply() throws Exception {
             Annotation markup = existingMarkup();
@@ -424,7 +424,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("replying to markup that does not exist is a 404")
         void replyingToUnknownMarkupIsNotFound() throws Exception {
             mockMvc.perform(post("/api/annotations/{id}/replies", 9_999_999L).with(csrf())
@@ -434,7 +434,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("deleting a reply leaves the markup and the rest of the thread")
         void deletingAReplyLeavesTheRest() throws Exception {
             Annotation markup = existingMarkup();
@@ -456,7 +456,7 @@ class AnnotationControllerTest {
         }
 
         @Test
-        @WithMockUser(username = AUTHOR, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = AUTHOR)
         @DisplayName("deleting a reply that does not exist is a 404")
         void deletingUnknownReplyIsNotFound() throws Exception {
             mockMvc.perform(delete("/api/annotations/replies/{id}", 9_999_999L).with(csrf()))

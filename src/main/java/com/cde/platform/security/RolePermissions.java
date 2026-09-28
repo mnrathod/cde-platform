@@ -48,7 +48,25 @@ public final class RolePermissions {
         // Converting a drawing to PDF produces a derivative, which is
         // originating information rather than authorising it — the same side
         // of the ISO 19650 division of labour as WRITE.
-        ConversionPermission.SUBMIT);
+        ConversionPermission.SUBMIT,
+        // The document surface, which is where an engineer does the work:
+        // upload drawings, revise them, and run the operations that rewrite a
+        // file — redaction, OCR, page rearrangement, form fields.
+        DocumentPermission.READ,
+        DocumentPermission.WRITE,
+        DocumentPermission.PROCESS,
+        MarkupPermission.READ,
+        MarkupPermission.WRITE,
+        ProjectPermission.READ,
+        ProjectPermission.WRITE,
+        // Signing too. A drawing carries "drawn by" as well as "approved by",
+        // and the originator signing their own work is the ordinary case — so
+        // the line between originating and authorising is drawn at PUBLISH,
+        // which this role does not hold, and not at the signature. Withholding
+        // it here would have meant an engineer could not sign the drawing they
+        // produced.
+        SignaturePermission.READ,
+        SignaturePermission.WRITE);
 
     /**
      * The lead appointed party's reviewers: they authorise or reject what has
@@ -61,10 +79,36 @@ public final class RolePermissions {
         ContainerPermission.SHARE,
         ContainerPermission.PUBLISH,
         ContainerPermission.REJECT,
-        ContainerPermission.ARCHIVE);
+        ContainerPermission.ARCHIVE,
+        DocumentPermission.READ,
+        // Markup is how a review is actually conducted, so this role writes
+        // comments and answers them while holding neither DocumentPermission
+        // .WRITE nor PROCESS: a reviewer marks a drawing up, and does not
+        // alter it.
+        MarkupPermission.READ,
+        MarkupPermission.WRITE,
+        ProjectPermission.READ,
+        // Signing is the authorising act, and this is the role that performs
+        // it — the same reasoning that gives this role PUBLISH and withholds
+        // it from the engineer.
+        SignaturePermission.READ,
+        SignaturePermission.WRITE);
 
+    /**
+     * Read, and nothing else.
+     *
+     * <p>Until the document vocabulary existed this was the role that showed
+     * the defect most plainly: its one granted permission was read access, and
+     * it could nevertheless delete a document, burn a redaction into one,
+     * rearrange its pages, revoke a signature or delete a project — because
+     * nothing on that surface checked a permission at all.
+     */
     private static final Set<String> VIEWER_PERMISSIONS = Set.of(
-        ContainerPermission.READ);
+        ContainerPermission.READ,
+        DocumentPermission.READ,
+        MarkupPermission.READ,
+        ProjectPermission.READ,
+        SignaturePermission.READ);
 
     /**
      * Everything, including the authority to decide who is in the tenant.
@@ -75,7 +119,9 @@ public final class RolePermissions {
      * use a feature, diagnosed as a bug in the feature.
      */
     private static final Set<String> ADMIN_PERMISSIONS =
-        Stream.of(ContainerPermission.ALL, TenantPermission.ALL, ConversionPermission.ALL)
+        Stream.of(ContainerPermission.ALL, TenantPermission.ALL, ConversionPermission.ALL,
+                  DocumentPermission.ALL, MarkupPermission.ALL, ProjectPermission.ALL,
+                  SignaturePermission.ALL)
               .flatMap(Set::stream)
               .collect(Collectors.toUnmodifiableSet());
 

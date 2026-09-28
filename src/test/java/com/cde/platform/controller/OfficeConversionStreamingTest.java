@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.exception.ConverterOfflineException;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -103,7 +103,7 @@ class OfficeConversionStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("the converted PDF is what the reader receives")
     void convertedPdfIsServed() throws Exception {
         converterWritesAPdf();
@@ -115,7 +115,7 @@ class OfficeConversionStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("it is served inline, named after the document, and not cached")
     void convertedPdfKeepsTheViewerHeaders() throws Exception {
         // The same headers a stored PDF carries. A converted document and a
@@ -132,7 +132,7 @@ class OfficeConversionStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("nothing is left behind on disk once the response has been sent")
     void temporaryFileDoesNotSurviveTheResponse() throws Exception {
         // The cost of streaming through a temporary file, and the reason the
@@ -152,7 +152,7 @@ class OfficeConversionStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("nothing is left behind when the conversion fails either")
     void temporaryFileDoesNotSurviveAFailure() throws Exception {
         doThrow(new RuntimeException("LibreOffice is not installed"))
@@ -166,7 +166,7 @@ class OfficeConversionStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a converter that cannot be reached is reported as such, not as a broken file")
     void converterOfflineIsNamed() throws Exception {
         // The distinction that decides who the reader goes to: their
@@ -182,7 +182,7 @@ class OfficeConversionStreamingTest {
     }
 
     @Test
-    @WithMockUser(username = USERNAME, roles = "ENGINEER")
+    @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
     @DisplayName("a converter that is running but cannot convert says something different")
     void conversionFailureIsNotReportedAsOffline() throws Exception {
         doThrow(new RuntimeException("Unsupported document revision"))

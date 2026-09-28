@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.ProjectPermission;
+
 import com.cde.platform.dto.ProjectDtos.*;
 import com.cde.platform.model.*;
 import com.cde.platform.openapi.ApiDocumentation;
@@ -50,6 +53,7 @@ public class ProjectController {
 
             Requires the `project:read` permission.""")
     @ApiResponse(responseCode = "200", description = "The projects in the caller's tenant.")
+    @PreAuthorize("hasAuthority('" + ProjectPermission.READ + "')")
     @GetMapping
     public List<ProjectResponse> list() {
         return projectRepo.findAll().stream().map(this::toResponse).toList();
@@ -68,6 +72,7 @@ public class ProjectController {
         description = "No project with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + ProjectPermission.READ + "')")
     @GetMapping("/{id}")
     public ResponseEntity<ProjectResponse> get(
         @Parameter(description = "Identifier of the project.", example = "42")
@@ -92,6 +97,7 @@ public class ProjectController {
                     + "its length limit.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + ProjectPermission.WRITE + "')")
     @PostMapping
     public ResponseEntity<ProjectResponse> create(
         @Valid @RequestBody ProjectRequest req,
@@ -131,6 +137,7 @@ public class ProjectController {
                     + "its length limit.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + ProjectPermission.WRITE + "')")
     @PutMapping("/{id}")
     public ResponseEntity<ProjectResponse> update(
         @Parameter(description = "Identifier of the project.", example = "42")
@@ -163,6 +170,7 @@ public class ProjectController {
         description = "No project with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + ProjectPermission.WRITE + "')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
         @Parameter(description = "Identifier of the project.", example = "42")

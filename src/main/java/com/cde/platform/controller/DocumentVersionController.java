@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.dto.VersionDtos.DocumentVersionResponse;
 import com.cde.platform.openapi.ApiDocumentation;
 import com.cde.platform.openapi.StandardErrorResponses;
@@ -79,6 +82,7 @@ public class DocumentVersionController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping
     public ResponseEntity<List<DocumentVersionResponse>> listVersions(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -110,6 +114,7 @@ public class DocumentVersionController {
         description = "No such document, no such version, or its file is no longer on disk.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/{versionNumber}/file")
     public ResponseEntity<Resource> downloadVersion(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -153,6 +158,7 @@ public class DocumentVersionController {
         description = "No such document, or no such version of it.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.WRITE + "')")
     @PostMapping("/{versionNumber}/restore")
     public ResponseEntity<DocumentVersionResponse> restoreVersion(
         @Parameter(description = "Identifier of the document.", example = "1180")

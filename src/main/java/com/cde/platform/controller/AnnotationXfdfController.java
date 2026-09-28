@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.MarkupPermission;
+
 import com.cde.platform.dto.AnnotationDtos.*;
 import com.cde.platform.exception.DocumentProcessingException;
 import com.cde.platform.exception.ResourceNotFoundException;
@@ -73,6 +76,7 @@ public class AnnotationXfdfController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.READ + "')")
     @GetMapping("/document/{documentId}/xfdf")
     public ResponseEntity<byte[]> exportXfdf(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -114,6 +118,7 @@ public class AnnotationXfdfController {
         description = "The file is not readable XFDF.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + MarkupPermission.WRITE + "')")
     @PostMapping("/document/{documentId}/xfdf")
     public ResponseEntity<XfdfImportResponse> importXfdf(
         @Parameter(description = "Identifier of the document to add the markup to.", example = "1180")

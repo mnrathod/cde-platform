@@ -1,5 +1,9 @@
 package com.cde.platform.ai;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.ai.AiPayloadSanitiser.ComparisonFacts;
 import com.cde.platform.exception.ApiProblem;
 import com.cde.platform.model.User;
@@ -62,10 +66,12 @@ public class AiAssistanceController {
             those tiers make no outbound calls, and the check is not something a tenant \
             administrator can override.
 
-            Requires authentication.""")
+            Requires the `document:read` permission — the same authority as seeing the documents \
+            a summary would be about.""")
     @ApiResponse(responseCode = "200", description = "Whether the feature can be used.",
         content = @Content(mediaType = "application/json",
                            schema = @Schema(implementation = AssistanceAvailability.class)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/availability")
     public AssistanceAvailability availability() {
         return new AssistanceAvailability(assistance.isAvailable());
@@ -92,7 +98,10 @@ public class AiAssistanceController {
             Every call is recorded in the audit trail — who, when, which model and provider, and \
             whether redaction fired. The prompt and the reply are never recorded.
 
-            Requires authentication.""")
+            Requires the `document:read` permission. Authentication alone is not enough: this \
+            forwards content to a third-party provider and spends this deployment's credit \
+            doing it, so it is gated on the authority to read the documents in question rather \
+            than on merely holding a session.""")
     @ApiResponse(responseCode = "200", description = "The report.",
         content = @Content(mediaType = "application/json",
                            schema = @Schema(implementation = ComparisonReportResponse.class)))
@@ -106,6 +115,7 @@ public class AiAssistanceController {
                     + "calls, or the provider could not be reached.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @PostMapping("/comparison-report")
     public ResponseEntity<?> summariseComparison(
         @Valid @RequestBody ComparisonReportRequest request,

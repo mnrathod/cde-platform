@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.support.ActingAs;
 import com.cde.platform.model.Document;
 import com.cde.platform.model.Project;
 import com.cde.platform.model.User;
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
@@ -108,7 +108,7 @@ class ViewerFormatDispatchTest {
     class Drawings {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("stored as markup is returned without touching the converter")
         void storedVectorDataIsReturnedDirectly() throws Exception {
             // A drawing already rendered once is kept, so opening it again
@@ -128,7 +128,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("is converted when no markup has been stored yet")
         void dxfIsConverted() throws Exception {
             when(converter.convert(any(), anyString())).thenReturn(
@@ -142,7 +142,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("says which renderer drew it when the converter reported one")
         void namesTheRenderer() throws Exception {
             // The viewer shows this, and it is the difference between a
@@ -156,7 +156,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("is recognised by media type when the name says nothing")
         void dxfIsRecognisedByMediaType() throws Exception {
             // Uploads arrive named "download" often enough that the media
@@ -176,7 +176,7 @@ class ViewerFormatDispatchTest {
     class UnconvertedDwg {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("reports the version so the reader knows what they have")
         void reportsTheVersion() throws Exception {
             when(converter.convert(any(), anyString())).thenReturn(
@@ -191,7 +191,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("passes through whatever the converter reported about itself")
         void passesThroughConverterDiagnostics() throws Exception {
             when(converter.convert(any(), anyString())).thenReturn(
@@ -207,7 +207,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("still reports the retired converter as absent")
         void retiredConverterIsStillReported() throws Exception {
             // ADR 13 removed LibreDWG, so the converter stopped sending
@@ -230,7 +230,7 @@ class ViewerFormatDispatchTest {
     class Pdfs {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("comes back as a pointer to its bytes, not as the bytes")
         void pdfReturnsAPointer() throws Exception {
             // The viewer fetches the bytes separately through pdf.js, and
@@ -246,7 +246,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("carries its version in the URL so a stale copy is not served")
         void versionTravelsInTheUrl() throws Exception {
             // Processing replaces the bytes behind a fixed URL, so without
@@ -263,7 +263,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("counts as version 1 when nothing has processed it yet")
         void unprocessedDocumentIsVersionOne() throws Exception {
             Document pdf = document("sheet.pdf", "application/pdf", "%PDF-1.7");
@@ -281,7 +281,7 @@ class ViewerFormatDispatchTest {
     class OtherFormats {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("an SVG is returned as its own markup")
         void svgIsReturnedInline() throws Exception {
             open(document("detail.svg", "image/svg+xml", "<svg>on disk</svg>"))
@@ -290,7 +290,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("an image comes back as bytes, not as JSON")
         void imageIsReturnedAsBytes() throws Exception {
             open(document("site.png", "image/png", "PNGDATA"))
@@ -299,7 +299,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a JPEG is served as image/jpeg, not as image/jpg")
         void jpgBecomesJpeg() throws Exception {
             // "image/jpg" is not a media type. Browsers mostly forgive it;
@@ -309,7 +309,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a Revit file says it must be exported first")
         void revitIsNamed() throws Exception {
             // The most common 3D upload that cannot be opened, and the one
@@ -319,7 +319,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a format nothing can open says so plainly")
         void unknownFormatIsNamed() throws Exception {
             open(document("archive.zip", "application/zip", "PK"))
@@ -328,7 +328,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("a file with no extension at all is still answered")
         void extensionlessFileIsAnswered() throws Exception {
             open(document("README", "application/octet-stream", "text"))
@@ -344,7 +344,7 @@ class ViewerFormatDispatchTest {
     class Unreadable {
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("one that does not exist is a 404")
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/viewer/{id}", 9_999_999L))
@@ -352,7 +352,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("one with no stored file says so")
         void documentWithNoFileIsReported() throws Exception {
             Document detached = documentRepo.save(Document.builder()
@@ -366,7 +366,7 @@ class ViewerFormatDispatchTest {
         }
 
         @Test
-        @WithMockUser(username = USERNAME, roles = "ENGINEER")
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
         @DisplayName("one whose file has gone from disk says that instead")
         void missingFileIsReported() throws Exception {
             // A different sentence from the one above, because they send

@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.DocumentPermission;
+
 import com.cde.platform.controller.DocumentProcessingDtos.AddFieldsRequest;
 import com.cde.platform.controller.DocumentProcessingDtos.FormFillRequest;
 import com.cde.platform.controller.DocumentProcessingDtos.RemoveFieldsRequest;
@@ -82,6 +85,7 @@ public class DocumentFormFieldsController {
         description = "The conversion service is not reachable.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.READ + "')")
     @GetMapping("/api/documents/{documentId}/form-fields")
     public ResponseEntity<FormFieldsResponse> getFormFields(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -116,6 +120,7 @@ public class DocumentFormFieldsController {
                     + "or reuses a name already in the form.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/api/documents/{documentId}/form-fields")
     public ResponseEntity<FormChangeResponse> addFormFields(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -146,6 +151,7 @@ public class DocumentFormFieldsController {
         description = "The document has no such field.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @DeleteMapping("/api/documents/{documentId}/form-fields")
     public ResponseEntity<FormChangeResponse> removeFormFields(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -180,6 +186,7 @@ public class DocumentFormFieldsController {
                     + "not suit the field's kind.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + DocumentPermission.PROCESS + "')")
     @PostMapping("/api/documents/{documentId}/form-fill")
     public ResponseEntity<ProcessingResponse> fillForm(
         @Parameter(description = "Identifier of the document.", example = "1180")

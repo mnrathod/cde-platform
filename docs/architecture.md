@@ -156,12 +156,69 @@ submits links and collects PDFs, and has no business creating information
 containers or moving them through the state machine. Folding it in would make
 authority over the contractual record the price of converting a drawing.
 
+**Container lifecycle** (`container:*`), plus the two tenant-administration
+permissions and conversion:
+
 | Role | read | write | share | publish | reject | archive | convert | user:manage | audit:read |
 |---|---|---|---|---|---|---|---|---|---|
 | Admin | ● | ● | ● | ● | ● | ● | ● | ● | ● |
 | Engineer | ● | ● | ● | — | — | ● | ● | — | — |
 | Reviewer | ● | — | ● | ● | ● | ● | — | — | — |
 | Viewer | ● | — | — | — | — | — | — | — | — |
+
+**The document surface** — the files themselves, their markup, the projects
+they sit in, and the signatures over them:
+
+| Role | document:read | document:write | document:process | annotation:read | annotation:write | project:read | project:write | signature:read | signature:write |
+|---|---|---|---|---|---|---|---|---|---|
+| Admin | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| Engineer | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| Reviewer | ● | — | — | ● | ● | ● | — | ● | ● |
+| Viewer | ● | — | — | ● | — | ● | — | ● | — |
+
+Three things in that second table are decisions rather than consequences:
+
+- **`document:process` is separate from `document:write`** because the
+  consequences differ in kind. Writing replaces a document with a new revision
+  and leaves the old one retrievable; processing — redaction, OCR, flattening,
+  page rearrangement — destroys information inside the file on purpose. A
+  redaction that could be undone would not be a redaction.
+- **A reviewer writes markup but not documents.** Commenting on a drawing is
+  how a review is conducted, so withholding it would leave the role unable to
+  do the only thing it exists for. Altering the drawing is the originator's
+  job.
+- **An engineer signs.** A drawing carries "drawn by" as well as "approved
+  by", so the line between originating and authorising is drawn at
+  `container:publish`, which the engineer does not hold — not at the
+  signature.
+
+> **This table was enforced by nothing until recently, and the gap was not a
+> near miss.** The entire document surface — sixty-two endpoints — carried no
+> permission check at all; `.anyRequest().authenticated()` was the only gate.
+> Every endpoint had published its requirement in its own OpenAPI description
+> ("Requires the `document:write` permission") and none of those statements was
+> true. A viewer could delete documents, burn redactions into them, rearrange
+> their pages, revoke signatures and delete projects. The permission names in
+> the table above were taken from those published descriptions rather than
+> invented, so the specification customers already had is what the code now
+> does.
+>
+> Two tests hold it: `EndpointPermissionCoverageTest` scans the classpath and
+> fails on any endpoint with neither a `@PreAuthorize` nor a justified entry in
+> its exception list, and `DocumentSurfaceAuthorisationTest` sends real
+> requests as each role, because an annotation is inert unless method security
+> is on, the authority string matches a real grant, and the filter chain lets
+> the request through.
+
+**The browser is told, not asked.** `/api/auth/session` and the two sign-in
+replies carry the caller's full permission list, so the client can hide
+controls it cannot use (§1.1) without keeping its own copy of this table. It
+used to keep one, and it had drifted: it knew roles named `PROJECT_MANAGER`,
+`EDITOR` and `GUEST`, which have never existed here, and not `ENGINEER` or
+`REVIEWER`, which do — both of which fell through a fallback to `VIEWER`, so
+the two roles that do most of the work were shown an interface with upload,
+delete and annotate removed. A second copy of an authorisation rule is a copy
+that can disagree with the first. There is now one.
 
 ---
 
@@ -598,6 +655,34 @@ claim that nothing else is needed.
 - **No message broker.** Conversion runs on an in-process queue (§8, with the
   reasoning); every *other* kind of processing — thumbnails, exports, bulk
   permission changes, notification dispatch — still runs inside the request.
+- **Document processing is synchronous, against the one-second budget.**
+  §7.1 is unambiguous that an endpoint either answers in under a second or
+  returns a job id in under a second, and that document processing is in the
+  bulk category by definition. These are not: they hold the request thread for
+  as long as the work takes, and their own timeouts say how long that is —
+
+  | Endpoint | Timeout |
+  |---|---|
+  | `POST /api/documents/{id}/ocr` | 10 minutes |
+  | `POST /api/compare` | 180 seconds |
+  | `GET /api/viewer3d/{id}/geometry`, `/tree` | 180 seconds |
+  | `GET /api/viewer/{id}` for an Office document | 120 seconds |
+  | `POST /api/documents/{id}/redact`, `/redact-matching` | 120 seconds |
+  | `POST /api/documents/{id}/pages/arrange`, `/insert`, `/extract` | 120 seconds |
+
+  The machinery to fix it already exists and is proven: `ConversionJob`, the
+  work queue, and `ConversionJobController` answering `202 Accepted` with a
+  job resource. Moving these endpoints onto it is the same pattern again
+  rather than a new one.
+
+  **It has not been done because it cannot be done inside this API version.**
+  Changing `POST /redact` from "200 with the result" to "202 with a job id" is
+  a breaking change; §3.4 permits only additive changes within a version, and
+  the `oasdiff` gate would refuse it. The honest route is a `/api/v2` that
+  answers with jobs while v1 keeps its contract until its sunset — and which
+  version a customer integration is written against is a product decision, not
+  one to take while fixing defects. Recorded here rather than left implicit so
+  the next person finds a known gap with a shape, not a surprise.
 - **No cache.** Permission resolution, tenant configuration and rate-limit
   counters are per instance, which is what makes the throttle looser on a scaled
   deployment.

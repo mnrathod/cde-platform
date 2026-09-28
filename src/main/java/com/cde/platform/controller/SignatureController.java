@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.cde.platform.security.SignaturePermission;
+
 import com.cde.platform.dto.SignatureDtos.SignatureRequest;
 import com.cde.platform.dto.SignatureDtos.SignatureResponse;
 import com.cde.platform.dto.SignatureDtos.SignatureVerification;
@@ -62,6 +65,7 @@ public class SignatureController {
         description = "No document with that id is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + SignaturePermission.READ + "')")
     @GetMapping("/document/{documentId}")
     public List<SignatureResponse> getSignatures(
         @Parameter(description = "Identifier of the document.", example = "1180")
@@ -91,6 +95,7 @@ public class SignatureController {
         description = "The document cannot be signed — it is not a PDF, or its file is missing.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + SignaturePermission.WRITE + "')")
     @PostMapping("/document/{documentId}/sign")
     public ResponseEntity<SigningResult> signDocument(
         @Parameter(description = "Identifier of the document to sign.", example = "1180")
@@ -131,6 +136,7 @@ public class SignatureController {
         description = "No signature with that identifier is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + SignaturePermission.READ + "')")
     @PostMapping("/{signatureId}/verify")
     public ResponseEntity<SignatureVerification> verifySignature(
         @Parameter(description = "Public identifier of the signature.", example = "sig_7f3a91c4e2b8")
@@ -160,6 +166,7 @@ public class SignatureController {
         description = "No signature with that identifier is visible to the caller.",
         content = @Content(mediaType = ApiDocumentation.PROBLEM_MEDIA_TYPE,
                            schema = @Schema(ref = ApiDocumentation.PROBLEM_REF)))
+    @PreAuthorize("hasAuthority('" + SignaturePermission.WRITE + "')")
     @DeleteMapping("/{signatureId}")
     public ResponseEntity<Void> revokeSignature(
         @Parameter(description = "Public identifier of the signature.", example = "sig_7f3a91c4e2b8")

@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.security.RolePermissions;
 import com.cde.platform.audit.AuditAction;
 import com.cde.platform.audit.AuditOutcome;
 import com.cde.platform.audit.AuditRequest;
@@ -191,7 +192,8 @@ public class AuthController {
             // cookie jar to protect. See SessionCookie.
             return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, sessionCookie.issueFor(token).toString())
-                .body(new AuthResponse(token, user.getUsername(), user.getRole().name()));
+                .body(new AuthResponse(token, user.getUsername(), user.getRole().name(),
+                                       RolePermissions.grantedTo(user.getRole())));
         } finally {
             // JwtFilter clears this for authenticated requests, but a login
             // arrives without a token and so never passes through that branch.
@@ -228,7 +230,8 @@ public class AuthController {
     public ResponseEntity<?> session(Authentication authentication) {
         return userRepo.findByUsername(authentication.getName())
             .<ResponseEntity<?>>map(user -> ResponseEntity.ok(
-                new SessionResponse(user.getUsername(), user.getRole().name())))
+                new SessionResponse(user.getUsername(), user.getRole().name(),
+                                    RolePermissions.grantedTo(user.getRole()))))
             // Authenticated against a user row that is no longer readable —
             // deleted, or moved out of this tenant mid-session. Treated as no
             // session rather than as a server fault, because that is what it
