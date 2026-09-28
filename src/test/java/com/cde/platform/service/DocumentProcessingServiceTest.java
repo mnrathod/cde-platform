@@ -457,4 +457,319 @@ class DocumentProcessingServiceTest {
                 .hasMessageContaining("no stored file");
         }
     }
+
+    // ── Recognition ───────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("recognising text on scanned pages")
+    class Recognising {
+
+        @Test
+        @DisplayName("commits a version when recognition succeeds")
+        void commitsAVersion() {
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":4,"skippedPages":0,"language":"eng"}""");
+
+            var result = processing.runOcr(document.getId(), "eng", 300, true, USERNAME);
+
+            assertThat(result.version()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("says how many pages were recognised")
+        void countsRecognisedPages() {
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":4,"skippedPages":0,"language":"eng"}""");
+
+            var result = processing.runOcr(document.getId(), "eng", 300, true, USERNAME);
+
+            assertThat(result.details()).containsEntry("ocrPages", 4);
+            assertThat(result.version().getSummary()).contains("4");
+        }
+
+        @Test
+        @DisplayName("says which pages it left alone, and why")
+        void mentionsSkippedPages() {
+            // Recognising over real text replaces it with a guess at the same
+            // words, so pages that already carry text are left alone — and the
+            // history has to say so, or the page count looks like a failure.
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":2,"skippedPages":6,"language":"eng"}""");
+
+            var result = processing.runOcr(document.getId(), "eng", 300, true, USERNAME);
+
+            assertThat(result.version().getSummary())
+                .contains("skipped 6").contains("already containing text");
+        }
+
+        @Test
+        @DisplayName("says nothing about skipping when nothing was skipped")
+        void omitsSkippedWhenNoneWere() {
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":3,"skippedPages":0,"language":"eng"}""");
+
+            var result = processing.runOcr(document.getId(), "eng", 300, true, USERNAME);
+
+            assertThat(result.version().getSummary()).doesNotContain("skipped");
+        }
+
+        @Test
+        @DisplayName("records the language actually used, not the one asked for")
+        void recordsTheLanguageUsed() {
+            // The service may fall back when a pack is missing; recording the
+            // request instead would make a German scan look like it had been
+            // recognised as German when it was not.
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":1,"skippedPages":0,"language":"eng"}""");
+
+            var result = processing.runOcr(document.getId(), "deu", 300, true, USERNAME);
+
+            assertThat(result.details()).containsEntry("language", "eng");
+        }
+
+        @Test
+        @DisplayName("falls back to the requested language when the answer omits it")
+        void fallsBackToTheRequestedLanguage() {
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":1,"skippedPages":0}""");
+
+            var result = processing.runOcr(document.getId(), "fra", 300, true, USERNAME);
+
+            assertThat(result.details()).containsEntry("language", "fra");
+        }
+
+        @Test
+        @DisplayName("passes the resolution and the skip choice to the converter")
+        void passesItsSettingsThrough() {
+            converterSucceedsWith("/ocr", """
+                {"success":true,"ocrPages":1,"skippedPages":0}""");
+
+            processing.runOcr(document.getId(), "eng", 450, false, USERNAME);
+
+            var request = org.mockito.ArgumentCaptor.forClass(ObjectNode.class);
+            org.mockito.Mockito.verify(converter)
+                .callJson(eq("/ocr"), request.capture(), any(Duration.class));
+            assertThat(request.getValue().path("dpi").asInt()).isEqualTo(450);
+            assertThat(request.getValue().path("skipTextPages").asBoolean()).isFalse();
+        }
+
+        @Test
+        @DisplayName("commits nothing when recognition fails")
+        void commitsNothingOnFailure() {
+            converterWritesThenFails("/ocr", """
+                {"success":false,"error":"No language pack for deu"}""");
+
+            assertThatThrownBy(() ->
+                processing.runOcr(document.getId(), "deu", 300, true, USERNAME))
+                .isInstanceOf(DocumentProcessingException.class);
+        }
+    }
+
+    // ── Flattening ────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("baking markup into the page")
+    class Flattening {
+
+        private List<?> oneShape() {
+            return List.of(java.util.Map.of("type", "rect", "page", 1, "x", 80, "y", 420));
+        }
+
+        @Test
+        @DisplayName("refuses when there is no markup to bake in")
+        void refusesAnEmptySelection() {
+            assertThatThrownBy(() ->
+                processing.flatten(document.getId(), List.of(), "screen", USERNAME))
+                .hasMessageContaining("no annotations");
+        }
+
+        @Test
+        @DisplayName("refuses when no markup was supplied at all")
+        void refusesNoSelection() {
+            assertThatThrownBy(() ->
+                processing.flatten(document.getId(), null, "screen", USERNAME))
+                .hasMessageContaining("no annotations");
+        }
+
+        @Test
+        @DisplayName("commits a version when flattening succeeds")
+        void commitsAVersion() {
+            converterSucceedsWith("/flatten", """
+                {"success":true,"flattenedPages":2}""");
+
+            var result = processing.flatten(document.getId(), oneShape(), "print", USERNAME);
+
+            assertThat(result.version()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("counts both the markup and the pages it landed on")
+        void countsShapesAndPages() {
+            // Two different numbers that are easy to confuse: three shapes can
+            // land on one page, and the summary has to say which is which.
+            converterSucceedsWith("/flatten", """
+                {"success":true,"flattenedPages":1}""");
+
+            var result = processing.flatten(document.getId(),
+                List.of(java.util.Map.of("type", "rect"), java.util.Map.of("type", "line"),
+                        java.util.Map.of("type", "text")),
+                "screen", USERNAME);
+
+            assertThat(result.details()).containsEntry("shapes", 3);
+            assertThat(result.details()).containsEntry("flattenedPages", 1);
+            assertThat(result.version().getSummary()).contains("3 annotation(s)").contains("1 page(s)");
+        }
+
+        @Test
+        @DisplayName("passes the rendering quality through")
+        void passesQualityThrough() {
+            converterSucceedsWith("/flatten", """
+                {"success":true,"flattenedPages":1}""");
+
+            processing.flatten(document.getId(), oneShape(), "print", USERNAME);
+
+            var request = org.mockito.ArgumentCaptor.forClass(ObjectNode.class);
+            org.mockito.Mockito.verify(converter)
+                .callJson(eq("/flatten"), request.capture(), any(Duration.class));
+            assertThat(request.getValue().path("quality").asString("")).isEqualTo("print");
+        }
+
+        @Test
+        @DisplayName("commits nothing when flattening fails")
+        void commitsNothingOnFailure() {
+            converterWritesThenFails("/flatten", """
+                {"success":false,"error":"unsupported shape"}""");
+
+            assertThatThrownBy(() ->
+                processing.flatten(document.getId(), oneShape(), "screen", USERNAME))
+                .isInstanceOf(DocumentProcessingException.class);
+        }
+    }
+
+    // ── Forms ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("filling in a form")
+    class FillingForms {
+
+        @Test
+        @DisplayName("describes the fields a document carries")
+        void describesTheFields() {
+            converterAnswers("/form-fields", """
+                {"success":true,"fields":[{"name":"contractor_name","kind":"TEXT"}]}""");
+
+            JsonNode found = processing.inspectForm(document.getId());
+
+            assertThat(found.path("fields").size()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("refuses to describe a document with no stored file")
+        void refusesToDescribeWithoutAFile() {
+            Document detached = documentRepo.save(Document.builder()
+                .name("No file").fileName("none.pdf").fileType("application/pdf")
+                .filePath(null)
+                .documentType(Document.DocumentType.DRAWING)
+                .project(document.getProject()).uploadedBy(document.getUploadedBy()).build());
+
+            assertThatThrownBy(() -> processing.inspectForm(detached.getId()))
+                .hasMessageContaining("no stored file");
+        }
+
+        @Test
+        @DisplayName("refuses a fill with no values")
+        void refusesAnEmptyFill() {
+            assertThatThrownBy(() ->
+                processing.fillForm(document.getId(), java.util.Map.of(), false, USERNAME))
+                .hasMessageContaining("No form values");
+        }
+
+        @Test
+        @DisplayName("refuses a fill with no values at all")
+        void refusesANullFill() {
+            assertThatThrownBy(() ->
+                processing.fillForm(document.getId(), null, false, USERNAME))
+                .hasMessageContaining("No form values");
+        }
+
+        @Test
+        @DisplayName("counts what it wrote")
+        void countsWhatItWrote() {
+            converterSucceedsWith("/form-fill", """
+                {"success":true,"filledFields":{"a":"x","b":"y"},"skippedFields":{}}""");
+
+            var result = processing.fillForm(document.getId(),
+                java.util.Map.of("a", "x", "b", "y"), false, USERNAME);
+
+            assertThat(result.details()).containsEntry("filledFields", 2);
+            assertThat(result.version().getSummary()).contains("Filled 2 field(s)");
+        }
+
+        @Test
+        @DisplayName("says which values it could not write, and keeps the reasons")
+        void reportsSkippedFields() {
+            // A silent partial fill is the failure mode here: somebody signs a
+            // form believing every value they typed went in.
+            converterSucceedsWith("/form-fill", """
+                {"success":true,"filledFields":{"a":"x"},
+                 "skippedFields":{"b":"no such field","c":"read-only"}}""");
+
+            var result = processing.fillForm(document.getId(),
+                java.util.Map.of("a", "x", "b", "y", "c", "z"), false, USERNAME);
+
+            assertThat(result.version().getSummary()).contains("skipped 2");
+            assertThat(result.details()).extractingByKey("skippedFields")
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                .containsEntry("b", "no such field");
+        }
+
+        @Test
+        @DisplayName("says nothing about skipping when everything was written")
+        void omitsSkippedWhenNoneWere() {
+            converterSucceedsWith("/form-fill", """
+                {"success":true,"filledFields":{"a":"x"},"skippedFields":{}}""");
+
+            var result = processing.fillForm(document.getId(),
+                java.util.Map.of("a", "x"), false, USERNAME);
+
+            assertThat(result.version().getSummary()).doesNotContain("skipped");
+        }
+
+        @Test
+        @DisplayName("says when the form was made uneditable")
+        void mentionsFlattening() {
+            // Irreversible, so the history has to record it: the form cannot
+            // be filled again afterwards.
+            converterSucceedsWith("/form-fill", """
+                {"success":true,"filledFields":{"a":"x"},"skippedFields":{}}""");
+
+            var result = processing.fillForm(document.getId(),
+                java.util.Map.of("a", "x"), true, USERNAME);
+
+            assertThat(result.version().getSummary()).contains("flattened the form");
+        }
+
+        @Test
+        @DisplayName("does not claim to have flattened a form it left editable")
+        void doesNotMentionFlatteningOtherwise() {
+            converterSucceedsWith("/form-fill", """
+                {"success":true,"filledFields":{"a":"x"},"skippedFields":{}}""");
+
+            var result = processing.fillForm(document.getId(),
+                java.util.Map.of("a", "x"), false, USERNAME);
+
+            assertThat(result.version().getSummary()).doesNotContain("flattened");
+        }
+
+        @Test
+        @DisplayName("commits nothing when the fill fails")
+        void commitsNothingOnFailure() {
+            converterWritesThenFails("/form-fill", """
+                {"success":false,"error":"document has no form"}""");
+
+            assertThatThrownBy(() -> processing.fillForm(document.getId(),
+                java.util.Map.of("a", "x"), false, USERNAME))
+                .isInstanceOf(DocumentProcessingException.class);
+        }
+    }
 }
