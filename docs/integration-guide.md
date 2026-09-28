@@ -61,8 +61,18 @@ curl -X POST https://cde.example.com/api/auth/register \
   }'
 
 # 201 Created
-# { "token": "eyJhbGciOi...", "username": "integration.service", "role": "ADMIN" }
+# {
+#   "token": "eyJhbGciOi...",
+#   "username": "integration.service",
+#   "role": "ADMIN",
+#   "permissions": ["document:read", "document:write", "document:process", ...]
+# }
 ```
+
+`permissions` is the full list the account holds, so a client can tell in
+advance which calls it may make rather than discovering it from a `403`. It is
+presentation only — every permission is re-checked server-side on every
+request, and ignoring the list gains a caller nothing.
 
 The account gets an organisation of its own, containing nothing, and administers
 it.
@@ -635,6 +645,11 @@ Records never carry a credential, a request body, or raw personal data.
 - **Does the account have the right role?** Permissions are an axis, not a ladder.
   An integration that originates, publishes and invites needs an administrator;
   one that only converts needs `document:convert`, which Engineer already has.
+  Compare the `permissions` list from sign-in against what each endpoint's
+  description says it requires — the two now agree, which was not true before:
+  the document endpoints published a requirement that nothing enforced, so an
+  integration built against a Viewer account would have appeared to work and
+  then failed the first time it met a version that checked.
 - **Are you sending an `Idempotency-Key` on every conversion?** Without it a
   timed-out retry converts the file twice.
 - **Are suitability codes populated?** None ship.

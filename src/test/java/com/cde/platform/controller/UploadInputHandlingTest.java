@@ -90,6 +90,114 @@ class UploadInputHandlingTest {
         assertThat(document.getFileName()).doesNotContain("..");
     }
 
+    // ── Enumerated parameters ────────────────────────────────────────────────
+
+    /** Every regular file currently under the upload root. */
+    private java.util.Set<Path> storedFiles() throws Exception {
+        Path root = Path.of(uploadDir);
+        if (!java.nio.file.Files.isDirectory(root)) return java.util.Set.of();
+        try (var walk = java.nio.file.Files.walk(root)) {
+            return walk.filter(java.nio.file.Files::isRegularFile)
+                .map(each -> each.toAbsolutePath().normalize())
+                .collect(java.util.stream.Collectors.toSet());
+        }
+    }
+
+    @Test
+    @DisplayName("an unknown document type is refused, and leaves no file behind")
+    void unknownDocumentTypeLeavesNothingOnDisk() throws Exception {
+        // The defect: the type was read while building the entity, which is
+        // after the bytes had been streamed to quarantine, scanned, and
+        // promoted to their final path. The exception then abandoned the file
+        // — no row was saved, so nothing referenced it and nothing would ever
+        // remove it. A typo in a parameter left rubbish on disk, and repeating
+        // it filled the volume.
+        var before = storedFiles();
+
+        // The status is deliberately not asserted here. It is covered by the
+        // case below, and asserting it first would mean that whenever the
+        // status regressed this test failed on the status and never reached
+        // the file — which is exactly how a cleanup assertion comes to be
+        // believed without ever having run.
+        mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan")
+                .param("documentType", "BLUEPRINT"));
+
+        assertThat(storedFiles())
+            .as("a refused upload must not leave a file nothing references")
+            .isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("the refusal names the permitted types rather than saying nothing")
+    void unknownDocumentTypeSaysWhatIsAllowed() throws Exception {
+        // "The request could not be processed as submitted" is what the
+        // generic handler says, and it is not something a caller can act on
+        // (§1.4).
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan")
+                .param("documentType", "BLUEPRINT"))
+            .andExpect(status().isUnprocessableContent())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("BLUEPRINT").contains("DRAWING").contains("BIM_MODEL");
+    }
+
+    @Test
+    @DisplayName("a document type is read whatever case it was sent in")
+    void documentTypeIsCaseInsensitive() throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "spec.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Spec")
+                .param("documentType", "specification"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(documentRepository.findById(idFrom(body)).orElseThrow().getDocumentType())
+            .isEqualTo(Document.DocumentType.SPECIFICATION);
+    }
+
+    @Test
+    @DisplayName("an upload that names no type is still accepted")
+    void documentTypeDefaults() throws Exception {
+        // The parameter has a default, and removing that default would turn
+        // every existing client's upload into a 422.
+        mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("an unknown status is refused, and names the permitted ones")
+    void unknownStatusIsRefused() throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+        long documentId = idFrom(body);
+
+        String refusal = mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .patch("/api/documents/" + documentId + "/status")
+                    .param("status", "RESCINDED"))
+            .andExpect(status().isUnprocessableContent())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(refusal).contains("RESCINDED").contains("IN_REVIEW");
+        assertThat(documentRepository.findById(documentId).orElseThrow().getStatus())
+            .as("a refused status change must not have changed the status")
+            .isNotNull();
+    }
+
     private long idFrom(String body) {
         int start = body.indexOf("\"id\":") + 5;
         return Long.parseLong(body.substring(start, body.indexOf(',', start)).trim());

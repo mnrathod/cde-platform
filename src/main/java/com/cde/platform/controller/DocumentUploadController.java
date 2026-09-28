@@ -1,5 +1,8 @@
 package com.cde.platform.controller;
 
+import java.util.stream.Collectors;
+import java.util.Locale;
+import java.util.Arrays;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.cde.platform.security.DocumentPermission;
 
@@ -146,6 +149,10 @@ public class DocumentUploadController {
     ) {
         var project = projectRepo.findById(projectId)
             .orElseThrow(() -> new ResourceNotFoundException("No such project."));
+        // Before a byte is accepted: an unreadable type used to be discovered
+        // after the file had been promoted out of quarantine, and left it there
+        // with nothing referencing it.
+        Document.DocumentType type = documentTypeFrom(documentType);
 
         try {
             // Streamed to disk, never held whole. A federated model is the
@@ -203,7 +210,7 @@ public class DocumentUploadController {
                 .filePath(dest.toString())
                 .fileType(ct)
                 .fileSize(storedBytes)
-                .documentType(Document.DocumentType.valueOf(documentType))
+                .documentType(type)
                 .revision(revision)
                 .drawingNumber(drawingNumber)
                 .vectorData(vectorData)
@@ -245,7 +252,7 @@ public class DocumentUploadController {
         @RequestParam String status
     ) {
         return documentRepo.findById(id).map(d -> {
-            d.setStatus(Document.DocumentStatus.valueOf(status));
+            d.setStatus(documentStatusFrom(status));
             documentRepo.save(d);
             return ResponseEntity.ok(toResponse(d));
         }).orElse(ResponseEntity.notFound().build());
@@ -349,6 +356,10 @@ public class DocumentUploadController {
 
             var project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("No such project."));
+            // Before assembly, for the same reason as the single-shot route:
+            // this one carries the largest files, so the orphan it would leave
+            // behind is the largest too.
+            Document.DocumentType type = documentTypeFrom(documentType);
 
             String storedName  = StoredFileName.forStorage(fileName);
             String displayName = StoredFileName.forDisplay(fileName);
@@ -370,7 +381,7 @@ public class DocumentUploadController {
                 .fileName(displayName).filePath(dest.toString())
                 .fileType(UploadedMediaType.of(displayName, chunk.getContentType()))
                 .fileSize(storedBytes)
-                .documentType(Document.DocumentType.valueOf(documentType))
+                .documentType(type)
                 .revision(revision).drawingNumber(drawingNumber)
                 .project(project).uploadedBy(uploader)
                 .status(Document.DocumentStatus.DRAFT)
@@ -388,6 +399,51 @@ public class DocumentUploadController {
         }
     }
 
+
+    /**
+     * Reads a document type from what the client sent, refusing anything else.
+     *
+     * <p>Called before a byte is accepted, which is the point. {@code
+     * DocumentType.valueOf} was being called inline while building the entity —
+     * after the file had been streamed to quarantine, scanned, and promoted to
+     * its final path. A client sending a type that does not exist therefore got
+     * its file written and moved into place, and then the exception abandoned
+     * it: no database row was ever saved, so nothing referenced the file and
+     * nothing would ever clean it up. A typo in a parameter left rubbish on
+     * disk, and repeating it filled the volume.
+     *
+     * <p>The message names the permitted values, because "the request could not
+     * be processed as submitted" — which is what the generic handler says — is
+     * not something a caller can act on (§1.4).
+     */
+    private static Document.DocumentType documentTypeFrom(String requested) {
+        if (requested == null || requested.isBlank()) {
+            return Document.DocumentType.DRAWING;
+        }
+        try {
+            return Document.DocumentType.valueOf(requested.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new UploadRejectedException(
+                "\"" + requested + "\" is not a document type. Use one of: "
+                + Arrays.stream(Document.DocumentType.values()).map(Enum::name)
+                    .collect(Collectors.joining(", ")) + ".");
+        }
+    }
+
+    /** As {@link #documentTypeFrom}, for the review status. */
+    private static Document.DocumentStatus documentStatusFrom(String requested) {
+        if (requested == null || requested.isBlank()) {
+            throw new UploadRejectedException("Name the status to move the document to.");
+        }
+        try {
+            return Document.DocumentStatus.valueOf(requested.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new UploadRejectedException(
+                "\"" + requested + "\" is not a document status. Use one of: "
+                + Arrays.stream(Document.DocumentStatus.values()).map(Enum::name)
+                    .collect(Collectors.joining(", ")) + ".");
+        }
+    }
 
     private DocumentResponse toResponse(Document d) {
         return new DocumentResponse(
