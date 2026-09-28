@@ -1,5 +1,6 @@
 package com.cde.platform.config;
 
+import com.cde.platform.collaboration.CollaborationDestinationAuthorisation;
 import com.cde.platform.security.SessionCookieHandshake;
 import com.cde.platform.security.StompAuthChannelInterceptor;
 import org.springframework.context.annotation.Configuration;
@@ -30,13 +31,16 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final StompAuthChannelInterceptor authInterceptor;
+    private final CollaborationDestinationAuthorisation destinationAuthorisation;
     private final SessionCookieHandshake sessionCookieHandshake;
     private final WebSecurityHeadersProperties webProperties;
 
     public WebSocketConfig(StompAuthChannelInterceptor authInterceptor,
+                           CollaborationDestinationAuthorisation destinationAuthorisation,
                            SessionCookieHandshake sessionCookieHandshake,
                            WebSecurityHeadersProperties webProperties) {
         this.authInterceptor = authInterceptor;
+        this.destinationAuthorisation = destinationAuthorisation;
         this.sessionCookieHandshake = sessionCookieHandshake;
         this.webProperties = webProperties;
     }
@@ -88,6 +92,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         // sends its token on the CONNECT frame; a browser's arrives as the
         // session cookie on the handshake, which SessionCookieHandshake
         // carries across for the interceptor to check.
-        registration.interceptors(authInterceptor);
+        // Order matters: authentication records the session's tenant, and the
+        // destination check reads it. Registered the other way round, the
+        // check would find no tenant on the CONNECT frame's own session and
+        // refuse everything.
+        registration.interceptors(authInterceptor, destinationAuthorisation);
     }
 }

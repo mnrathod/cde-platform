@@ -544,6 +544,31 @@ nothing else in the build would notice.
 no `Authorization` header — a browser cannot set one — so the session is
 authenticated on the STOMP `CONNECT` frame instead.
 
+Authenticating the socket says who is on it and nothing about what they may
+subscribe to, and for a while that was the whole of it. The broker is a plain
+in-memory one with no authorisation on destinations, and a topic is named
+`/topic/documents/{id}` from a single global sequence — so any authenticated
+caller, in any tenant, could subscribe to `/topic/documents/41` and receive
+that document's presence list with real usernames, its cursor traffic, and
+every annotation and reply broadcast on it, content and author included.
+Sending to `/app/documents/41/join` put them in somebody else's participant
+list. A cross-tenant leak of customer content, reachable by typing a different
+number.
+
+`CollaborationDestinationAuthorisation` now checks both directions — guarding
+`SUBSCRIBE` alone would have left the writing half working. The tenant is
+recorded on the session at `CONNECT`, because later frames carry no credential,
+and the check runs the lookup as that tenant so Row-Level Security answers it:
+no `WHERE tenant_id` is written there, which §5.6 forbids precisely so a
+forgotten one cannot be what stands between two customers.
+
+Cleared documents are remembered for the life of the socket. Without that the
+check is a query per frame, and the frames that matter are cursor positions —
+the browser throttles them to one every 60 ms, so ten people on a drawing would
+have put roughly a hundred and sixty queries a second through the pool for
+pointer movement. Only successes are remembered, so nothing cached can keep
+somebody in, and the set is capped because its key is client-supplied.
+
 ---
 
 ## 10. Mobile SDKs

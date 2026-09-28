@@ -46,6 +46,9 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     private static final String AUTH_HEADER  = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
+    /** Where {@link #rememberTenant} leaves the tenant for later frames. */
+    public static final String TENANT_ATTRIBUTE = "cde.tenantId";
+
     private final JwtTokenService            jwtTokenService;
     private final UserDetailsService userDetailsService;
 
@@ -64,24 +67,49 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             return message;
         }
 
-        UserDetails user = authenticate(accessor);
+        String token = credential(accessor);
+        UserDetails user = authenticate(token);
         if (user == null) {
             // Refusing the CONNECT closes the session, which is the point:
             // an unauthenticated socket must not be able to subscribe.
             throw new IllegalArgumentException("A valid token is required to connect.");
         }
 
+        rememberTenant(accessor, token);
         accessor.setUser(new UsernamePasswordAuthenticationToken(
             user, null, user.getAuthorities()));
         return message;
     }
 
-    /** @return the authenticated user, or null when the token is absent or invalid */
-    private UserDetails authenticate(StompHeaderAccessor accessor) {
+    /**
+     * Records the connecting session's tenant, for later frames to be checked
+     * against.
+     *
+     * <p>Authenticating the socket says who is on it, and says nothing about
+     * what they may subscribe to. The destinations carry a document id and
+     * nothing else, so without the tenant recorded here there is no way to tell
+     * one tenant's document 41 from another's — see
+     * {@link com.cde.platform.collaboration.CollaborationDestinationAuthorisation},
+     * which reads it.
+     *
+     * <p>On the session rather than re-derived per frame because the token is
+     * only in hand at CONNECT: later frames carry no credential.
+     */
+    private void rememberTenant(StompHeaderAccessor accessor, String token) {
+        Map<String, Object> attributes = accessor.getSessionAttributes();
+        if (attributes == null || token == null) return;
+        jwtTokenService.extractTenantId(token)
+            .ifPresent(tenantId -> attributes.put(TENANT_ATTRIBUTE, tenantId));
+    }
+
+    /** The token the CONNECT frame names, or the one the handshake carried. */
+    private String credential(StompHeaderAccessor accessor) {
         String token = bearerToken(accessor.getNativeHeader(AUTH_HEADER));
-        if (token == null) {
-            token = handshakeToken(accessor);
-        }
+        return token != null ? token : handshakeToken(accessor);
+    }
+
+    /** @return the authenticated user, or null when the token is absent or invalid */
+    private UserDetails authenticate(String token) {
         if (token == null || !jwtTokenService.isTokenValid(token)) return null;
 
         try {
