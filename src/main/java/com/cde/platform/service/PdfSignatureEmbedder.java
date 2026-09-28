@@ -97,6 +97,8 @@ public class PdfSignatureEmbedder {
      * @return empty when the document carries no embedded signature at all
      */
     public Optional<EmbeddedSignatureCheck> verifyEmbedded(Path path) throws IOException {
+        // Read first, and let this one throw: a file that cannot be read off
+        // disk is genuinely unreadable, and the caller must be able to say so.
         byte[] fileBytes = Files.readAllBytes(path);
 
         try (PDDocument document = Loader.loadPDF(path.toFile())) {
@@ -109,6 +111,19 @@ public class PdfSignatureEmbedder {
             byte[] container = signature.getContents(fileBytes);
 
             return Optional.of(check(signature, signed, container));
+
+        } catch (IOException notAPdf) {
+            // A file PDFBox cannot parse carries no embedded signature, which
+            // is exactly what this method's contract says empty means. It used
+            // to let the parse failure out, and because the only caller reads
+            // an IOException here as "the signed document could not be read",
+            // every detached signature — every signature on anything that is
+            // not a PDF — reported itself as unverifiable. The file was fine;
+            // it simply was not a PDF, and the fallback that exists precisely
+            // for that case was never reached.
+            log.debug("{} is not a readable PDF, so it holds no embedded signature: {}",
+                      path.getFileName(), notAPdf.getMessage());
+            return Optional.empty();
         }
     }
 

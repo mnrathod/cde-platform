@@ -155,8 +155,25 @@ public class CompareController {
                 .build();
 
             HttpResponse<String> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                // The status was not being looked at, only the body. A
+                // converter answering 500 with any JSON at all — `{}` is
+                // enough — therefore came back to the caller as a *successful*
+                // comparison, because `success` defaults to true when the
+                // member is absent. Reporting a comparison that never happened
+                // as one that found no differences is the worst of the
+                // available answers.
+                throw new DocumentProcessingException(
+                    converterMessage(response.body()));
+            }
             return mapper.readTree(response.body());
 
+        } catch (DocumentProcessingException alreadyExplained) {
+            // The refusal above, on its way out. Without this clause the
+            // catch-all below swallows it and replaces the converter's own
+            // reason with the generic sentence — which is how the reason it
+            // gave was being lost.
+            throw alreadyExplained;
         } catch (java.net.ConnectException e) {
             // Distinguished from a comparison failure because the remedy
             // differs: the request was fine and will work once the service is
@@ -168,6 +185,26 @@ public class CompareController {
         } catch (Exception e) {
             throw new DocumentProcessingException(
                 "Those two documents could not be compared.", e);
+        }
+    }
+
+    /**
+     * What to tell the reader when the comparison service refused.
+     *
+     * <p>Its own {@code error} where it sent one, because it knows why — "page
+     * counts differ too widely" is worth passing on. Anything else is
+     * discarded rather than echoed: the body of a failed call is as likely to
+     * be an HTML error page or a stack trace as a message, and §1.4 rules out
+     * both.
+     */
+    private String converterMessage(String body) {
+        String fallback = "Those two documents could not be compared.";
+        if (body == null || body.isBlank()) return fallback;
+        try {
+            JsonNode parsed = mapper.readTree(body);
+            return parsed.hasNonNull("error") ? parsed.get("error").asString() : fallback;
+        } catch (RuntimeException notJson) {
+            return fallback;
         }
     }
 
