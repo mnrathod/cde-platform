@@ -70,7 +70,12 @@ class XfdfWriter {
             case SQUIGGLY  -> textMarkupAnnot("squiggly",  data, author, date, page, color, comment);
             case STAMP -> stampAnnot(data, author, date, page, comment);
             case DIMENSION -> dimensionAnnot(data, author, date, page, color, width, comment);
-            default -> textAnnot(data, author, date, page, color, comment);
+            // No default arm, deliberately. Every constant is named above, so
+            // adding an eleventh annotation type stops this compiling until
+            // somebody decides what it exports as — which is precisely the
+            // decision that was missed for ARROW and CLOUD. A default would
+            // have caught the new type the same way it caught those two: by
+            // exporting it as a sticky note and saying nothing.
         };
     }
 
@@ -195,7 +200,7 @@ class XfdfWriter {
             "             vertices=\"%s\" author=\"%s\" date=\"%s\">\n" +
             "      <contents>%s</contents>\n" +
             "    </polygon>\n",
-            page, rect(minX, minY, maxX, maxY), color, width, intent,
+            page, boundsOf(minX, minY, maxX, maxY), color, width, intent,
             verts, author, date, comment);
     }
 
@@ -219,7 +224,7 @@ class XfdfWriter {
             "              vertices=\"%s\" author=\"%s\" date=\"%s\">\n" +
             "      <contents>%s</contents>\n" +
             "    </polyline>\n",
-            page, rect(minX, minY, maxX, maxY), color, width, verts, author, date, comment);
+            page, boundsOf(minX, minY, maxX, maxY), color, width, verts, author, date, comment);
     }
 
     /**
@@ -320,6 +325,23 @@ class XfdfWriter {
 
     private String rect(double x1, double y1, double x2, double y2) {
         return String.format("%.2f,%.2f,%.2f,%.2f", x1, y1, x2, y2);
+    }
+
+    /**
+     * The bounding box folded out of a shape's points, or an empty one when it
+     * has none.
+     *
+     * <p>The fold starts at {@code Double.MAX_VALUE} and its negative, which is
+     * the usual way to write it and is correct for every shape that has at
+     * least one point. A shape with none — markup saved mid-draw, or a row
+     * whose geometry did not survive — left those extremes in place, and they
+     * were written into the attribute as a three-hundred-digit number. That is
+     * not a very large rectangle; it is a file a reader cannot parse, so one
+     * half-drawn shape took the whole document's markup with it.
+     */
+    private String boundsOf(double minX, double minY, double maxX, double maxY) {
+        boolean empty = minX > maxX || minY > maxY;
+        return empty ? rect(0, 0, 0, 0) : rect(minX, minY, maxX, maxY);
     }
 
     private String escapeXml(String s) {
