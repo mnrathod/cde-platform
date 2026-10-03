@@ -109,4 +109,134 @@ class StompAuthChannelInterceptorTest {
 
         assertThat(send(message)).isSameAs(message);
     }
+
+    // ── The two places a credential can come from ─────────────────────────
+
+    /** A CONNECT frame whose handshake left a session cookie behind. */
+    private Message<?> frameWithHandshakeToken(Object token) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        java.util.Map<String, Object> session = new java.util.HashMap<>();
+        if (token != null) session.put(SessionCookieHandshake.TOKEN_ATTRIBUTE, token);
+        accessor.setSessionAttributes(session);
+        accessor.setLeaveMutable(true);
+        return org.springframework.messaging.support.MessageBuilder
+            .createMessage(new byte[0], accessor.getMessageHeaders());
+    }
+
+    @Test
+    @DisplayName("a browser's session cookie from the handshake authenticates the socket")
+    void handshakeCookieAuthenticates() {
+        // The browser path. A browser cannot set an Authorization header on a
+        // WebSocket handshake, and since the session moved into an HttpOnly
+        // cookie the web client holds no token to send on CONNECT either — so
+        // without this there is no way for it to connect at all.
+        assertThat(send(frameWithHandshakeToken(VALID_TOKEN))).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a session with no cookie on it is refused")
+    void handshakeWithoutACookieIsRefused() {
+        assertThatThrownBy(() -> send(frameWithHandshakeToken(null)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a blank cookie value is refused rather than treated as a token")
+    void blankHandshakeCookieIsRefused() {
+        assertThatThrownBy(() -> send(frameWithHandshakeToken("   ")))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a cookie attribute that is not a string is refused")
+    void nonStringHandshakeCookieIsRefused() {
+        // The attribute map is untyped, so something else landing under that
+        // key must not be handed to the token parser.
+        assertThatThrownBy(() -> send(frameWithHandshakeToken(42)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a CONNECT naming a token wins over the handshake's cookie")
+    void connectFrameWinsOverTheCookie() {
+        // Matching JwtFilter: a client that went to the trouble of naming an
+        // identity should not be overruled by an ambient one.
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setNativeHeader("Authorization", "Bearer " + VALID_TOKEN);
+        java.util.Map<String, Object> session = new java.util.HashMap<>();
+        session.put(SessionCookieHandshake.TOKEN_ATTRIBUTE, "a.different.token");
+        accessor.setSessionAttributes(session);
+        accessor.setLeaveMutable(true);
+
+        assertThat(send(org.springframework.messaging.support.MessageBuilder
+            .createMessage(new byte[0], accessor.getMessageHeaders()))).isNotNull();
+    }
+
+    @Test
+    @DisplayName("an empty Authorization header list falls through to the handshake")
+    void emptyHeaderListFallsThrough() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setNativeHeader("Authorization", null);
+        java.util.Map<String, Object> session = new java.util.HashMap<>();
+        session.put(SessionCookieHandshake.TOKEN_ATTRIBUTE, VALID_TOKEN);
+        accessor.setSessionAttributes(session);
+        accessor.setLeaveMutable(true);
+
+        assertThat(send(org.springframework.messaging.support.MessageBuilder
+            .createMessage(new byte[0], accessor.getMessageHeaders()))).isNotNull();
+    }
+
+    // ── Recording the tenant for later frames ─────────────────────────────
+
+    @Test
+    @DisplayName("the connecting session's tenant is recorded for later frames")
+    void recordsTheTenant() {
+        // The destinations later frames name carry a document id and nothing
+        // else, so without this there is no way to tell one tenant's document
+        // 41 from another's — which was a cross-tenant leak until
+        // CollaborationDestinationAuthorisation started reading it.
+        when(jwtTokenService.extractTenantId(VALID_TOKEN))
+            .thenReturn(java.util.Optional.of(7L));
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setNativeHeader("Authorization", "Bearer " + VALID_TOKEN);
+        java.util.Map<String, Object> session = new java.util.HashMap<>();
+        accessor.setSessionAttributes(session);
+        accessor.setLeaveMutable(true);
+
+        send(org.springframework.messaging.support.MessageBuilder
+            .createMessage(new byte[0], accessor.getMessageHeaders()));
+
+        assertThat(session).containsEntry(
+            StompAuthChannelInterceptor.TENANT_ATTRIBUTE, 7L);
+    }
+
+    @Test
+    @DisplayName("a token naming no tenant records nothing, so later frames are refused")
+    void recordsNothingWithoutATenantClaim() {
+        // Fail closed. Recording a default, or leaving the attribute absent and
+        // reading that as permission, is how the leak existed.
+        when(jwtTokenService.extractTenantId(VALID_TOKEN)).thenReturn(java.util.Optional.empty());
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setNativeHeader("Authorization", "Bearer " + VALID_TOKEN);
+        java.util.Map<String, Object> session = new java.util.HashMap<>();
+        accessor.setSessionAttributes(session);
+        accessor.setLeaveMutable(true);
+
+        send(org.springframework.messaging.support.MessageBuilder
+            .createMessage(new byte[0], accessor.getMessageHeaders()));
+
+        assertThat(session).doesNotContainKey(StompAuthChannelInterceptor.TENANT_ATTRIBUTE);
+    }
+
+    @Test
+    @DisplayName("a session with no attribute map at all still connects")
+    void connectsWithoutASessionMap() {
+        // Nothing to record the tenant on, which is survivable: the
+        // destination check refuses a session it cannot place, so the socket
+        // connects and reaches no document.
+        when(jwtTokenService.extractTenantId(VALID_TOKEN))
+            .thenReturn(java.util.Optional.of(7L));
+
+        assertThat(send(frame(StompCommand.CONNECT, "Bearer " + VALID_TOKEN))).isNotNull();
+    }
 }

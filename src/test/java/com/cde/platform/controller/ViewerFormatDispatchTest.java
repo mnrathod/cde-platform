@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -362,7 +363,7 @@ class ViewerFormatDispatchTest {
 
             open(detached)
                 .andExpect(jsonPath("$.error")
-                    .value(org.hamcrest.Matchers.containsString("No file path")));
+                    .value(org.hamcrest.Matchers.containsString("No file was recorded")));
         }
 
         @Test
@@ -375,9 +376,13 @@ class ViewerFormatDispatchTest {
             Document pdf = document("sheet.pdf", "application/pdf", "%PDF-1.7");
             Files.delete(Path.of(pdf.getFilePath()));
 
-            open(pdf)
+            String body = open(pdf)
                 .andExpect(jsonPath("$.error")
-                    .value(org.hamcrest.Matchers.containsString("not found on disk")));
+                    .value(org.hamcrest.Matchers.containsString("not in storage")))
+                .andReturn().getResponse().getContentAsString();
+
+            // Without the path it looked at, which it used to include.
+            assertThat(body).doesNotContain(pdf.getFilePath());
         }
     }
 }

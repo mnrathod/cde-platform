@@ -165,9 +165,17 @@ class DocumentDownloadStreamingTest {
     void missingFileIsReported() throws Exception {
         Files.delete(Path.of(pdf.getFilePath()));
 
-        mockMvc.perform(get("/api/viewer/{id}/pdf", pdf.getId()))
+        String body = mockMvc.perform(get("/api/viewer/{id}/pdf", pdf.getId()))
             .andExpect(status().isOk())
-            .andExpect(content().string(org.hamcrest.Matchers.containsString("not found on disk")));
+            .andExpect(content().string(
+                org.hamcrest.Matchers.containsString("not in storage")))
+            .andReturn().getResponse().getContentAsString();
+
+        // And says it without handing over where it looked. The message used
+        // to be "File not found on disk: " plus the absolute path, so an
+        // ordinary missing file published the deployment's storage layout to
+        // anybody who could open a document (§5.13.13).
+        assertThat(body).doesNotContain(pdf.getFilePath());
     }
 
     // ── The viewer's image route ──────────────────────────────────────────

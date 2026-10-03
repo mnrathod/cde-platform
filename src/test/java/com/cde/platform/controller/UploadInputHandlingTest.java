@@ -278,4 +278,105 @@ class UploadInputHandlingTest {
                 .param("fileName", "big.bin"))
             .andExpect(status().isUnprocessableContent());
     }
+
+    // ── Stored active content ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("an SVG is kept as markup the viewer can render without a converter")
+    void svgIsKeptInline() throws Exception {
+        // A drawing the viewer renders as markup rather than fetching back off
+        // disk each time. The bound on it is what stops this being a way to put
+        // an arbitrary amount of a file into a database column.
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(new MockMultipartFile("file", "plan.svg", "image/svg+xml",
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect/></svg>"
+                        .getBytes(StandardCharsets.UTF_8)))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(documentRepository.findById(idFrom(body)).orElseThrow().getVectorData())
+            .contains("<svg");
+    }
+
+    @Test
+    @DisplayName("a file claiming to be an SVG but carrying no SVG is not kept as markup")
+    void nonSvgContentIsNotKeptInline() throws Exception {
+        // §5.13.9 treats an SVG as active content, and the viewer renders this
+        // field. Storing whatever arrived under an SVG media type would make
+        // the content type — which the client chooses — the only thing deciding
+        // what gets rendered.
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(new MockMultipartFile("file", "plan.svg", "image/svg+xml",
+                    "this is not markup at all".getBytes(StandardCharsets.UTF_8)))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(documentRepository.findById(idFrom(body)).orElseThrow().getVectorData())
+            .isNull();
+    }
+
+    @Test
+    @DisplayName("an uppercase SVG root is recognised as markup too")
+    void uppercaseSvgIsRecognised() throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(new MockMultipartFile("file", "plan.svg", "image/svg+xml",
+                    "<SVG xmlns=\"http://www.w3.org/2000/svg\"></SVG>"
+                        .getBytes(StandardCharsets.UTF_8)))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(documentRepository.findById(idFrom(body)).orElseThrow().getVectorData())
+            .isNotNull();
+    }
+
+    @Test
+    @DisplayName("a document that is not an SVG keeps nothing inline")
+    void nonSvgKeepsNothingInline() throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.pdf"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(documentRepository.findById(idFrom(body)).orElseThrow().getVectorData())
+            .isNull();
+    }
+
+    // ── What the reply says about a document ──────────────────────────────
+
+    @Test
+    @DisplayName("the reply names the project the document was filed under")
+    void replyNamesTheProject() throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.pdf"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("\"projectId\":" + projectId);
+    }
+
+    @Test
+    @DisplayName("the reply names who uploaded it rather than exposing their record")
+    void replyNamesTheUploader() throws Exception {
+        // A username, not a user id and not an object: §5.13.13 rules out
+        // handing out enumerable identifiers, and nothing on this screen needs
+        // more than the name.
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.pdf"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains(USERNAME);
+    }
 }

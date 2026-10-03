@@ -1,5 +1,7 @@
 package com.cde.platform.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.cde.platform.security.DocumentPermission;
 
@@ -51,6 +53,8 @@ public class ViewerController {
     private final String converterUrl;
 
     /** Matches the timeout the byte-returning conversion path has always used. */
+    private static final Logger log = LoggerFactory.getLogger(ViewerController.class);
+
     private static final Duration CONVERSION_TIMEOUT = Duration.ofSeconds(120);
 
     private static final Set<String> OFFICE_MIME = Set.of(
@@ -133,11 +137,11 @@ public class ViewerController {
         }
 
         if (doc.getFilePath() == null)
-            return err("No file path stored for this document.");
+            return err(NO_FILE_RECORDED);
 
         Path path = Paths.get(doc.getFilePath());
         if (!Files.exists(path))
-            return err("File not found on disk: " + path);
+            return err(FILE_MISSING);
 
         String ct  = s(doc.getFileType()).toLowerCase();
         String name = s(doc.getFileName()).toLowerCase();
@@ -248,7 +252,7 @@ public class ViewerController {
                 "fileName",s(doc.getFileName()),"ext",ext));
 
         } catch (IOException e) {
-            return err("Read error: " + e.getMessage());
+            return err(readFailed(doc, e));
         }
     }
 
@@ -292,11 +296,11 @@ public class ViewerController {
         var doc = docOpt.get();
 
         if (doc.getFilePath() == null)
-            return err("No file path stored for this document.");
+            return err(NO_FILE_RECORDED);
 
         Path path = Paths.get(doc.getFilePath());
         if (!Files.exists(path))
-            return err("File not found on disk: " + path);
+            return err(FILE_MISSING);
 
         String ct   = s(doc.getFileType()).toLowerCase();
         String name = s(doc.getFileName()).toLowerCase();
@@ -309,7 +313,7 @@ public class ViewerController {
             return StoredFileResponse.streaming(
                 path, MediaType.APPLICATION_PDF, pdfHeaders(s(doc.getFileName())));
         } catch (IOException e) {
-            return err("Read error: " + e.getMessage());
+            return err(readFailed(doc, e));
         }
     }
 
@@ -454,6 +458,44 @@ public class ViewerController {
             return ResponseEntity.ok(Map.of(
                 "type","error","error","3D conversion error: " + e.getMessage()));
         }
+    }
+
+    /**
+     * What a reader is told when the file behind a document cannot be opened.
+     *
+     * <p>Deliberately says nothing about where it was looked for. These
+     * messages used to be {@code "File not found on disk: " + path} and
+     * {@code "Read error: " + e.getMessage()}, so an ordinary missing file
+     * handed the caller the deployment's absolute storage path, and an I/O
+     * fault handed them whatever the JDK had put in the exception — which is
+     * also a path, most of the time. §5.13.13 rules out exposing storage
+     * paths, and §1.4 rules out a raw error in a user-facing message.
+     *
+     * <p>The remedy a reader can act on is the same either way, so the
+     * sentence is the same either way; the detail goes to the log, where the
+     * trace id joins it up.
+     */
+    /**
+     * A document row that never recorded a file at all.
+     *
+     * <p>Kept separate from {@link #FILE_MISSING} on purpose, and the
+     * distinction is not cosmetic: a row with no path is a broken record and
+     * belongs to whoever created it, while a path that no longer resolves is
+     * missing storage and belongs to whoever runs the deployment. Collapsing
+     * them into one sentence sends both to the wrong person half the time.
+     */
+    private static final String NO_FILE_RECORDED =
+        "No file was recorded for this document, so there is nothing to open. "
+        + "Upload it again, or quote the trace id to support.";
+
+    private static final String FILE_MISSING =
+        "This document's file is not in storage. It may still be uploading, or it "
+        + "may have been removed. Quote the trace id to support.";
+
+    private String readFailed(com.cde.platform.model.Document doc, IOException cause) {
+        log.warn("Could not read the file for document {}: {}",
+                 doc.getId(), cause.getMessage());
+        return FILE_MISSING;
     }
 
     private ResponseEntity<?> err(String msg) {
