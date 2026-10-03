@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -144,6 +145,17 @@ class Viewer3DControllerTest {
             .project(project).uploadedBy(owner).build());
     }
 
+    /** A model stored without a filename, or without a declared type, or both. */
+    private Document withMediaTypeOnly(String fileName, String mediaType) throws IOException {
+        Path path = storage.resolve(UUID.randomUUID() + "_model");
+        Files.writeString(path, "ISO-10303-21;");
+        return documentRepo.save(Document.builder()
+            .name("Unnamed").fileName(fileName).fileType(mediaType)
+            .filePath(path.toString()).fileSize(Files.size(path))
+            .documentType(Document.DocumentType.BIM_MODEL)
+            .project(project).uploadedBy(owner).build());
+    }
+
     private Document withNoFile() {
         return documentRepo.save(Document.builder()
             .name("Detached").fileName("model.ifc").fileType("application/ifc")
@@ -230,7 +242,7 @@ class Viewer3DControllerTest {
             open(withNoFile())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error")
-                    .value(org.hamcrest.Matchers.containsString("No file path")));
+                    .value(org.hamcrest.Matchers.containsString("nothing to open")));
         }
 
         @Test
@@ -242,7 +254,113 @@ class Viewer3DControllerTest {
 
             open(gone)
                 .andExpect(jsonPath("$.error")
-                    .value(org.hamcrest.Matchers.containsString("File not found")));
+                    .value(org.hamcrest.Matchers.containsString("not in storage")));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("neither refusal names where the deployment keeps its files")
+        void refusalsDoNotNameTheStoragePath() throws Exception {
+            // This route answered "File not found: " + path, which put the
+            // storage root, the tenant prefix and the generated object name
+            // into a response any viewer displays (§5.13.13). The path is no
+            // use to the person reading it — they cannot reach that
+            // filesystem — and it is useful to someone probing the deployment.
+            Document gone = model("tower.ifc", "application/ifc", "ISO-10303-21;");
+            String leaked = storage.toString();
+            Files.delete(Path.of(gone.getFilePath()));
+
+            assertThat(open(gone).andReturn().getResponse().getContentAsString())
+                .doesNotContain(leaked);
+            assertThat(open(withNoFile()).andReturn().getResponse().getContentAsString())
+                .doesNotContain(leaked);
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a model with no filename recorded is read by its media type")
+        void mediaTypeDecidesWhenThereIsNoFilename() throws Exception {
+            // SCIM and API uploads do not always carry a filename, and a null
+            // here used to be the difference between opening the model and a
+            // NullPointerException on the extension.
+            nextReply.set(Reply.json("{\"success\":true,\"meshes\":[]}"));
+
+            open(withMediaTypeOnly(null, "application/ifc"))
+                .andExpect(jsonPath("$.success").value(true));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a filename with no extension falls back to the media type")
+        void noExtensionFallsBackToTheMediaType() throws Exception {
+            nextReply.set(Reply.json("{\"success\":true,\"meshes\":[]}"));
+
+            open(model("tower", "application/ifc", "ISO-10303-21;"))
+                .andExpect(jsonPath("$.success").value(true));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a STEP file declared by media type goes to the converter")
+        void stepIsConverted() throws Exception {
+            // STEP shares the IFC toolchain, and nothing in the extension says
+            // so — .stp and .step both appear, and neither is in the mesh list.
+            nextReply.set(Reply.json("{\"success\":true,\"meshes\":[]}"));
+
+            open(model("assembly.stp", "application/step", "ISO-10303-21;"))
+                .andExpect(jsonPath("$.success").value(true));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a model with neither a filename nor a media type is named unsupported")
+        void nothingToGoOnIsUnsupported() throws Exception {
+            // Not an error: the document exists and cannot be opened, which is
+            // what the viewer needs to be told so it can offer a download.
+            open(withMediaTypeOnly(null, null))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error")
+                    .value(org.hamcrest.Matchers.containsString("Unsupported")));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a conversion the converter itself refused passes its reason on")
+        void converterRefusalIsPassedOn() throws Exception {
+            // The reason is the converter's, and replacing it with a generic
+            // sentence leaves the user with nothing to act on (§1.4).
+            nextReply.set(Reply.json(
+                "{\"success\":false,\"error\":\"schema IFC4X3 is not supported\"}"));
+
+            open(model("tower.ifc", "application/ifc", "ISO-10303-21;"))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error").value("schema IFC4X3 is not supported"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a refusal with no reason given still says something")
+        void converterRefusalWithoutAReason() throws Exception {
+            nextReply.set(Reply.json("{\"success\":false}"));
+
+            open(model("tower.ifc", "application/ifc", "ISO-10303-21;"))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error").value(
+                    org.hamcrest.Matchers.containsString("conversion failed")));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a reply that is not JSON at all is reported, not thrown")
+        void unreadableConverterReply() throws Exception {
+            // A proxy error page where JSON was expected. The user gets a
+            // viewer that says it could not open the model, not a 500.
+            nextReply.set(new Reply(200, "text/html",
+                "<html>502 Bad Gateway</html>".getBytes(StandardCharsets.UTF_8)));
+
+            open(model("tower.ifc", "application/ifc", "ISO-10303-21;"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false));
         }
     }
 
@@ -416,6 +534,136 @@ class Viewer3DControllerTest {
         void unknownDocumentIsNotFound() throws Exception {
             mockMvc.perform(get("/api/viewer3d/{id}/geometry", 9_999_999L))
                 .andExpect(status().isNotFound());
+        }
+    }
+
+    // ── The media type each mesh format is served as ──────────────────────
+
+    @Nested
+    @DisplayName("serving a mesh")
+    class MeshMediaTypes {
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a binary glTF is served as binary glTF")
+        void glbHasItsOwnType() throws Exception {
+            open(model("tower.glb", "model/gltf-binary", "glTF"))
+                .andExpect(content().contentTypeCompatibleWith("model/gltf-binary"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a text glTF is served as JSON glTF, not as binary")
+        void gltfHasItsOwnType() throws Exception {
+            // three.js picks its loader off the response type, so serving a
+            // .gltf as octet-stream is a model that silently will not load.
+            open(model("tower.gltf", "model/gltf+json", "{\"asset\":{}}"))
+                .andExpect(content().contentTypeCompatibleWith("model/gltf+json"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("an OBJ is served as text, because that is what it is")
+        void objIsText() throws Exception {
+            open(model("tower.obj", "text/plain", "v 0 0 0"))
+                .andExpect(content().contentTypeCompatibleWith("text/plain"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a COLLADA file is served as XML")
+        void daeIsXml() throws Exception {
+            open(model("tower.dae", "model/vnd.collada+xml", "<COLLADA/>"))
+                .andExpect(content().contentTypeCompatibleWith("text/xml"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("an STL falls back to octet-stream")
+        void stlFallsBackToBytes() throws Exception {
+            open(model("tower.stl", "application/sla", "solid tower"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-3D-Format", "stl"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a PLY falls back to octet-stream too")
+        void plyFallsBackToBytes() throws Exception {
+            open(model("tower.ply", "application/octet-stream", "ply"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-3D-Format", "ply"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("the format header is readable from another origin")
+        void formatHeaderIsExposedCrossOrigin() throws Exception {
+            // A viewer embedded on a customer's own page reads this header to
+            // choose a loader, and a browser hides every header not named in
+            // Access-Control-Expose-Headers.
+            open(model("tower.glb", "model/gltf-binary", "glTF"))
+                .andExpect(header().string("Access-Control-Expose-Headers", "X-3D-Format"));
+        }
+    }
+
+    // ── The geometry route's own dispatch ─────────────────────────────────
+
+    @Nested
+    @DisplayName("deciding whether geometry can be extracted")
+    class GeometryDispatch {
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a model with no filename is judged by its media type")
+        void mediaTypeDecidesWithoutAFilename() throws Exception {
+            nextReply.set(Reply.bytes(new byte[]{1, 2, 3, 4}));
+
+            mockMvc.perform(get("/api/viewer3d/{id}/geometry",
+                    withMediaTypeOnly(null, "application/ifc").getId()))
+                .andExpect(status().isOk());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a filename with no extension is judged by its media type")
+        void noExtensionIsJudgedByMediaType() throws Exception {
+            nextReply.set(Reply.bytes(new byte[]{1, 2, 3, 4}));
+
+            geometry(model("tower", "application/ifc", "ISO-10303-21;"))
+                .andExpect(status().isOk());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a STEP file is extracted, because it shares the IFC toolchain")
+        void stepGoesToTheExtractor() throws Exception {
+            nextReply.set(Reply.bytes(new byte[]{1, 2, 3, 4}));
+
+            geometry(model("assembly.stp", "application/step", "ISO-10303-21;"))
+                .andExpect(status().isOk());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a model with nothing to go on is refused without calling out")
+        void nothingToGoOnIsRefusedLocally() throws Exception {
+            // Asking the converter to read a mesh as IFC is a round trip with a
+            // guaranteed failure at the end of it.
+            mockMvc.perform(get("/api/viewer3d/{id}/geometry",
+                    withMediaTypeOnly(null, null).getId()))
+                .andExpect(jsonPath("$.error").value("not_extracted_geometry"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a document whose file has gone says so without naming the path")
+        void missingGeometryFileDoesNotNameThePath() throws Exception {
+            Document gone = model("tower.ifc", "application/ifc", "ISO-10303-21;");
+            Files.delete(Path.of(gone.getFilePath()));
+
+            assertThat(geometry(gone).andReturn().getResponse().getContentAsString())
+                .doesNotContain(storage.toString());
         }
     }
 }

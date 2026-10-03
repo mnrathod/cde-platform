@@ -208,21 +208,36 @@ public class ViewerController {
                 try {
                     return serveConvertedPdf(path, ct, doc.getName() + ".pdf");
                 } catch (ConverterOfflineException e) {
-                    return ResponseEntity.ok(Map.of(
-                        "type","office_error","name",doc.getName(),
-                        "fileName",s(doc.getFileName()),
-                        "error","converter_offline","loInstalled",false));
-                } catch (java.net.ConnectException e) {
+                    // The only reachable "cannot be reached" case.
+                    //
+                    // A second arm caught java.net.ConnectException and
+                    // answered identically. It compiled because
+                    // serveConvertedPdf declares throws IOException, but
+                    // convertToPdfFile declares no checked exception and its
+                    // contract is to raise ConverterOfflineException when the
+                    // converter is unreachable — so the arm could never run,
+                    // and nothing under it (createTempFile, newInputStream)
+                    // raises a ConnectException either. Two identical arms, one
+                    // of them dead, read as though the condition were handled
+                    // in two places.
                     return ResponseEntity.ok(Map.of(
                         "type","office_error","name",doc.getName(),
                         "fileName",s(doc.getFileName()),
                         "error","converter_offline","loInstalled",false));
                 } catch (Exception e) {
+                    // s() rather than getMessage() directly: a RuntimeException
+                    // raised with no message is ordinary — an NPE from a
+                    // library, a cancelled future — and reading .contains() off
+                    // the null turned a handled conversion failure into a 500
+                    // with a stack trace, which §1.4 forbids outright. The
+                    // envelope is the useful answer; the viewer offers a
+                    // download from it.
+                    String reason = s(e.getMessage());
                     return ResponseEntity.ok(Map.of(
                         "type","office_error","name",doc.getName(),
                         "fileName",s(doc.getFileName()),
-                        "error",e.getMessage(),
-                        "loInstalled",!e.getMessage().contains("not installed")));
+                        "error", reason.isBlank() ? CONVERSION_FAILED : reason,
+                        "loInstalled", !reason.contains("not installed")));
                 }
             }
 
@@ -484,6 +499,11 @@ public class ViewerController {
      * missing storage and belongs to whoever runs the deployment. Collapsing
      * them into one sentence sends both to the wrong person half the time.
      */
+    /** Said when the converter failed without saying why. */
+    private static final String CONVERSION_FAILED =
+        "This document could not be converted for viewing. Download it to open it "
+        + "in its own application, or quote the trace id to support.";
+
     private static final String NO_FILE_RECORDED =
         "No file was recorded for this document, so there is nothing to open. "
         + "Upload it again, or quote the trace id to support.";

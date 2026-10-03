@@ -2,6 +2,7 @@ package com.cde.platform.ai;
 
 import com.cde.platform.ai.AiPayloadSanitiser.ComparisonFacts;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -186,5 +187,98 @@ class AiPayloadSanitiserTest {
 
         assertThat(payload.isRefused()).isFalse();
         assertThat(payload.redacted()).isFalse();
+    }
+
+    // ── The marking test, used directly ───────────────────────────────────
+    //
+    // carriesClassificationMarking is public so other outbound paths can apply
+    // the same test rather than writing their own — §10.1 calls the rule
+    // absolute, and a second implementation of an absolute rule is a second
+    // chance to get it wrong. Which means the method is a contract in its own
+    // right, not an internal of sanitise(), and the markings it has to
+    // recognise are the ones the contracts in §6.4–6.6 name.
+
+    @Nested
+    @DisplayName("recognising a classification marking")
+    class MarkingRecognition {
+
+        @ParameterizedTest(name = "{0} is a marking")
+        @ValueSource(strings = {
+            "OFFICIAL-SENSITIVE",
+            "OFFICIAL - SENSITIVE",
+            "OFFICIAL: SENSITIVE",
+            "OFFICIAL:SENSITIVE",
+            "PROTECTED",
+            "SECRET",
+            "TOP SECRET",
+            "CONFIDENTIAL",
+            "RESTRICTED",
+            "CODEWORD",
+            "ACCOUNTABLE MATERIAL"
+        })
+        @DisplayName("every marking the contracts name is recognised")
+        void everyMarkingIsRecognised(String marking) {
+            // UK GSCP and the Australian PSPF between them produce all of
+            // these. Missing one is not a partial failure — it is the whole
+            // control failing for whichever customer uses that marking.
+            assertThat(sanitiser.carriesClassificationMarking(
+                "Drawing A-101 " + marking + " do not distribute")).isTrue();
+        }
+
+        @ParameterizedTest(name = "{0} is recognised whatever its case")
+        @ValueSource(strings = {
+            "official-sensitive", "Official-Sensitive", "pRoTeCtEd", "top secret"
+        })
+        @DisplayName("case does not matter, because a marking is typed by hand")
+        void caseDoesNotMatter(String marking) {
+            assertThat(sanitiser.carriesClassificationMarking(marking)).isTrue();
+        }
+
+        @Test
+        @DisplayName("an em dash between the words is recognised, not only a hyphen")
+        void anEmDashIsRecognised() {
+            // Word processors substitute one for the other silently, so a
+            // marking pasted out of a document may carry either.
+            assertThat(sanitiser.carriesClassificationMarking("OFFICIAL–SENSITIVE"))
+                .isTrue();
+        }
+
+        @ParameterizedTest(name = "{0} is not a marking")
+        @ValueSource(strings = {
+            "the official drawing register",
+            "a protectedarea barrier",
+            "unclassified",
+            "secretarial notes"
+        })
+        @DisplayName("a word that merely contains a marking's letters is not one")
+        void ordinaryProseIsNotRefused(String prose) {
+            // The boundary anchors matter in both directions. Without them
+            // "secretarial" refuses a payload that is fine, and every tenant
+            // with a document called "Official Drawing Register" loses the
+            // feature — which is how a control comes to be switched off.
+            assertThat(sanitiser.carriesClassificationMarking(prose)).isFalse();
+        }
+
+        @Test
+        @DisplayName("text with no marking at all is not refused")
+        void plainTextIsNotRefused() {
+            assertThat(sanitiser.carriesClassificationMarking(
+                "Drawing A-101, revision P02, foundation layout")).isFalse();
+        }
+
+        @Test
+        @DisplayName("no text at all is not a marking")
+        void nullIsNotAMarking() {
+            // Absent is not classified. Reading it as a marking would refuse
+            // every payload with an empty optional field, which switches the
+            // feature off rather than protecting anything.
+            assertThat(sanitiser.carriesClassificationMarking(null)).isFalse();
+        }
+
+        @Test
+        @DisplayName("empty text is not a marking")
+        void emptyIsNotAMarking() {
+            assertThat(sanitiser.carriesClassificationMarking("")).isFalse();
+        }
     }
 }

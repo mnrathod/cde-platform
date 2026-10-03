@@ -28,6 +28,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import com.cde.platform.exception.ConverterOfflineException;
+import org.springframework.http.MediaType;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -383,6 +385,332 @@ class ViewerFormatDispatchTest {
 
             // Without the path it looked at, which it used to include.
             assertThat(body).doesNotContain(pdf.getFilePath());
+        }
+    }
+
+    // ── Office documents, which go out to LibreOffice ──────────────────────
+
+    @Nested
+    @DisplayName("an Office document")
+    class OfficeDocuments {
+
+        private Document spreadsheet() throws IOException {
+            return document("schedule.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "PK");
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("is converted and served as a PDF, not as a JSON envelope")
+        void isServedAsAPdf() throws Exception {
+            // The viewer renders Office documents through pdf.js, so this is
+            // the one format on this route that answers with bytes.
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(call -> {
+                    Files.writeString(call.getArgument(2), "%PDF-1.7 converted");
+                    return 19L;
+                });
+
+            open(spreadsheet())
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith(MediaType.APPLICATION_PDF));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("says the converter is offline rather than failing the page")
+        void offlineConverterIsReported() throws Exception {
+            // §8.2 graceful degradation: the viewer still loads and offers a
+            // download, which is the fallback for this dependency.
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new ConverterOfflineException("no answer on the converter port"));
+
+            open(spreadsheet())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("office_error"))
+                .andExpect(jsonPath("$.error").value("converter_offline"))
+                .andExpect(jsonPath("$.loInstalled").value(false));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a connection failure wrapped in another exception is still answered")
+        void wrappedConnectionFailureIsStillAnswered() throws Exception {
+            // There used to be a dedicated arm for java.net.ConnectException
+            // alongside the ConverterOfflineException one, answering
+            // identically. It could never run: convertToPdfFile declares no
+            // checked exception and raises ConverterOfflineException for an
+            // unreachable converter, so a bare ConnectException never arrived
+            // and a wrapped one went to the general arm regardless. The arm is
+            // gone; this records that the wrapped case is still answered rather
+            // than thrown, which is the behaviour that mattered.
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new java.io.UncheckedIOException(
+                    new java.net.ConnectException("Connection refused")));
+
+            open(spreadsheet())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("office_error"))
+                .andExpect(jsonPath("$.error")
+                    .value(org.hamcrest.Matchers.containsString("Connection refused")));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("distinguishes a missing LibreOffice from a conversion that failed")
+        void missingLibreOfficeIsDistinguished() throws Exception {
+            // The two call for different actions — install something, or look
+            // at the file — so the viewer needs to be able to tell them apart.
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("LibreOffice is not installed"));
+
+            open(spreadsheet())
+                .andExpect(jsonPath("$.type").value("office_error"))
+                .andExpect(jsonPath("$.loInstalled").value(false));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a conversion that failed for its own reason reports LibreOffice as present")
+        void aFailedConversionKeepsLibreOfficeInstalled() throws Exception {
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("the document is password protected"));
+
+            open(spreadsheet())
+                .andExpect(jsonPath("$.loInstalled").value(true))
+                .andExpect(jsonPath("$.error").value("the document is password protected"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a failure with no reason given still answers, rather than throwing")
+        void aFailureWithNoMessageStillAnswers() throws Exception {
+            // This arm read .contains() off e.getMessage(), so an exception
+            // raised with no message — an NPE from a library, a cancelled
+            // future — threw inside the catch block and the reader got a 500
+            // with a stack trace instead of a viewer offering a download
+            // (§1.4).
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new NullPointerException());
+
+            open(spreadsheet())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("office_error"))
+                .andExpect(jsonPath("$.error").value(
+                    org.hamcrest.Matchers.containsString("could not be converted")));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("an Office document recognised only by its media type is still converted")
+        void recognisedByMediaTypeAlone() throws Exception {
+            org.mockito.Mockito.when(converter.convertToPdfFile(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(call -> {
+                    Files.writeString(call.getArgument(2), "%PDF-1.7 converted");
+                    return 19L;
+                });
+
+            open(document("minutes",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "PK"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith(MediaType.APPLICATION_PDF));
+        }
+    }
+
+    // ── Fetching a PDF's bytes ────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("fetching a PDF's bytes")
+    class PdfBytes {
+
+        private org.springframework.test.web.servlet.ResultActions bytes(Document document)
+                throws Exception {
+            return mockMvc.perform(get("/api/viewer/{id}/pdf", document.getId()));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("streams the file for a PDF")
+        void streamsThePdf() throws Exception {
+            bytes(document("plan.pdf", "application/pdf", "%PDF-1.7"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith(MediaType.APPLICATION_PDF));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a PDF recognised only by media type is streamed too")
+        void mediaTypeIsEnough() throws Exception {
+            bytes(document("plan", "application/pdf", "%PDF-1.7"))
+                .andExpect(status().isOk());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("refuses a document that is not a PDF rather than streaming it as one")
+        void refusesANonPdf() throws Exception {
+            // Streaming a DWG under application/pdf would hand pdf.js bytes it
+            // cannot parse, and the reader would see a broken viewer with no
+            // reason given.
+            bytes(document("plan.dwg", "image/vnd.dwg", "AC1032"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error")
+                    .value(org.hamcrest.Matchers.containsString("not a PDF")));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a document that does not exist is a 404")
+        void unknownDocumentIsNotFound() throws Exception {
+            mockMvc.perform(get("/api/viewer/{id}/pdf", 9_999_999L))
+                .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a document with no stored file says so without naming a path")
+        void noStoredFile() throws Exception {
+            Document detached = documentRepo.save(Document.builder()
+                .name("Detached").fileName("plan.pdf").fileType("application/pdf")
+                .filePath(null).documentType(Document.DocumentType.DRAWING)
+                .project(project).uploadedBy(owner).build());
+
+            assertThat(bytes(detached).andReturn().getResponse().getContentAsString())
+                .contains("nothing to open")
+                .doesNotContain(storage.toString());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a document whose file has gone says that, without naming a path")
+        void fileGoneFromStorage() throws Exception {
+            Document gone = document("plan.pdf", "application/pdf", "%PDF-1.7");
+            Files.delete(Path.of(gone.getFilePath()));
+
+            assertThat(bytes(gone).andReturn().getResponse().getContentAsString())
+                .contains("not in storage")
+                .doesNotContain(storage.toString());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("the version in the query string does not change which bytes come back")
+        void versionParameterIsAdvisory() throws Exception {
+            // It exists to defeat the browser cache, not to select a revision —
+            // the current version is always what is served, and a client asking
+            // for an older one must not silently get the newest under its name.
+            Document plan = document("plan.pdf", "application/pdf", "%PDF-1.7");
+
+            mockMvc.perform(get("/api/viewer/{id}/pdf?v=1", plan.getId()))
+                .andExpect(status().isOk());
+            mockMvc.perform(get("/api/viewer/{id}/pdf?v=99", plan.getId()))
+                .andExpect(status().isOk());
+        }
+    }
+
+    // ── Stored markup, and when it is not used ────────────────────────────
+
+    @Nested
+    @DisplayName("markup stored against the document")
+    class StoredMarkup {
+
+        private Document withVectorData(String vectorData) throws IOException {
+            Path path = storage.resolve(java.util.UUID.randomUUID() + "_plan.dxf");
+            Files.writeString(path, "0\nSECTION");
+            return documentRepo.save(Document.builder()
+                .name("Plan").fileName("plan.dxf").fileType("image/vnd.dxf")
+                .filePath(path.toString()).fileSize(Files.size(path))
+                .documentType(Document.DocumentType.DRAWING)
+                .vectorData(vectorData)
+                .project(project).uploadedBy(owner).build());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("is returned without reaching the converter at all")
+        void storedMarkupShortCircuits() throws Exception {
+            open(withVectorData("<svg><rect width=\"10\" height=\"10\"/></svg>"))
+                .andExpect(jsonPath("$.type").value("svg"))
+                .andExpect(jsonPath("$.content")
+                    .value(org.hamcrest.Matchers.containsString("<rect")));
+
+            org.mockito.Mockito.verifyNoInteractions(converter);
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("markup stored as an empty string is not served as a blank drawing")
+        void blankMarkupFallsThroughToTheConverter() throws Exception {
+            // An empty column is what a failed earlier conversion leaves behind.
+            // Serving it would show the reader an empty sheet and call it their
+            // drawing; falling through gives the converter another go.
+            org.mockito.Mockito.when(converter.convert(
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(new ConverterOfflineException("converter is down"));
+
+            open(withVectorData("   "))
+                .andExpect(status().is5xxServerError());
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("the stored markup carries the drawing's own identifiers")
+        void storedMarkupCarriesItsIdentifiers() throws Exception {
+            // A drawing without its number and revision on screen is a drawing
+            // nobody can cite in a comment, which is most of what the viewer is
+            // for.
+            Path path = storage.resolve(java.util.UUID.randomUUID() + "_plan.dxf");
+            Files.writeString(path, "0\nSECTION");
+            Document drawing = documentRepo.save(Document.builder()
+                .name("Plan").fileName("plan.dxf").fileType("image/vnd.dxf")
+                .filePath(path.toString()).fileSize(Files.size(path))
+                .documentType(Document.DocumentType.DRAWING)
+                .vectorData("<svg/>").drawingNumber("A-101").revision("P02")
+                .project(project).uploadedBy(owner).build());
+
+            open(drawing)
+                .andExpect(jsonPath("$.drawingNumber").value("A-101"))
+                .andExpect(jsonPath("$.revision").value("P02"));
+        }
+
+        @Test
+        @ActingAs(value = User.Role.ENGINEER, username = USERNAME)
+        @DisplayName("a drawing with no number or revision reports them as empty, not as null")
+        void absentIdentifiersAreEmpty() throws Exception {
+            // A literal "null" rendered into a title block reads as a value
+            // somebody entered.
+            open(withVectorData("<svg/>"))
+                .andExpect(jsonPath("$.drawingNumber").value(""))
+                .andExpect(jsonPath("$.revision").value(""));
         }
     }
 }

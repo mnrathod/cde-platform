@@ -1,6 +1,7 @@
 package com.cde.platform.security;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -296,5 +297,95 @@ class AuthenticationThrottleTest {
     void allowedMeansNoWait() {
         assertThat(new AuthenticationThrottle().evaluate("fresh", "src").retryAfter())
             .isZero();
+    }
+
+    // ── The penalty has to end ────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("once the wait has been served")
+    class PenaltyRelease {
+
+        /**
+         * One real second of waiting, which is the shortest penalty the
+         * schedule produces: the fifth failure costs the base delay.
+         *
+         * <p>Sleeping in a unit test is normally a smell, and this one is
+         * deliberate. §4.2 chose progressive delay over account lockout
+         * specifically because lockout is a denial-of-service vector — anyone
+         * who knows a colleague's username can keep them out. That choice is
+         * only sound if the delay actually elapses, and every other assertion
+         * in this suite is about the penalty being applied rather than lifted.
+         * A clock abstraction would let the test assert on the arithmetic
+         * instead of the behaviour, which is the part that was never in doubt.
+         */
+        @Test
+        @DisplayName("the caller is let back in rather than locked out for good")
+        void thePenaltyElapses() throws InterruptedException {
+            String account = "serving-time-" + System.nanoTime();
+            String source = "198.51.100.7";
+
+            for (int attempt = 0; attempt < 5; attempt++) {
+                throttle.recordFailure(account, source);
+            }
+            assertThat(throttle.evaluate(account, source).isThrottled())
+                .as("the fifth failure costs time")
+                .isTrue();
+
+            Thread.sleep(1_100);
+
+            assertThat(throttle.evaluate(account, source).isThrottled())
+                .as("after the delay has passed, the same caller may try again — "
+                  + "a delay that never ends is the lockout §4.2 rejected")
+                .isFalse();
+        }
+
+        @Test
+        @DisplayName("a further failure after the wait costs more, not the same again")
+        void theScheduleKeepsClimbing() throws InterruptedException {
+            // The counter is not reset by serving the delay, only by a
+            // successful sign-in. Otherwise an attacker pays one second per
+            // five guesses for ever.
+            String account = "still-climbing-" + System.nanoTime();
+            String source = "198.51.100.8";
+
+            for (int attempt = 0; attempt < 5; attempt++) {
+                throttle.recordFailure(account, source);
+            }
+            Thread.sleep(1_100);
+            throttle.recordFailure(account, source);
+
+            assertThat(throttle.evaluate(account, source).retryAfter())
+                .as("the sixth failure costs more than the fifth did")
+                .isGreaterThan(java.time.Duration.ofSeconds(1));
+        }
+    }
+
+    @Nested
+    @DisplayName("the shape of a decision")
+    class DecisionShape {
+
+        @Test
+        @DisplayName("a zero wait is not a throttle")
+        void zeroIsNotThrottled() {
+            assertThat(new AuthenticationThrottle.Decision(java.time.Duration.ZERO)
+                .isThrottled()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a negative wait is not a throttle either")
+        void negativeIsNotThrottled() {
+            // Reachable from clock movement between the two Instant.now() reads.
+            // Reading it as "throttled" would hold a caller for a duration a
+            // Retry-After header cannot express.
+            assertThat(new AuthenticationThrottle.Decision(java.time.Duration.ofSeconds(-1))
+                .isThrottled()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a positive wait is a throttle")
+        void positiveIsThrottled() {
+            assertThat(new AuthenticationThrottle.Decision(java.time.Duration.ofSeconds(4))
+                .isThrottled()).isTrue();
+        }
     }
 }

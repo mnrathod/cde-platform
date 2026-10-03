@@ -233,4 +233,167 @@ class DeploymentTierPolicyTest {
                 .isBetween(tier.minimumExpiryDays(), tier.maximumExpiryDays());
         }
     }
+
+    // ── The guards that fire when the tier itself is unset ─────────────────
+
+    @Nested
+    @DisplayName("a configuration with no tier named")
+    class NoTierNamed {
+
+        private DeploymentProperties withNoTier() {
+            var properties = new DeploymentProperties();
+            properties.setTier(null);
+            return properties;
+        }
+
+        @Test
+        @DisplayName("the outbound rule does not refuse it on the tier's behalf")
+        void outboundRuleDefersToTheTierCheck() {
+            // There is a separate @NotNull saying the tier is required, and it
+            // produces the message an operator can act on. This rule answering
+            // first would replace that with "a government or Defence deployment
+            // may not call third-party services" on a configuration that names
+            // no tier at all — which sends them looking for the wrong fault.
+            assertThat(withNoTier().isOutboundUseAllowedByTier()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the contract-interval rule does not refuse it either")
+        void contractRuleDefersToTheTierCheck() {
+            var properties = withNoTier();
+            properties.setContractPasswordExpiryDays(45);
+
+            assertThat(properties.isContractExpiryWithinTierBounds()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a contract interval with no tier is not range-checked against nothing")
+        void boundsCheckNeedsATier() {
+            var properties = withNoTier();
+            properties.setContractPasswordExpiryDays(100_000);
+
+            assertThat(properties.isContractExpiryWithinTierBounds()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("the contract interval's range")
+    class ContractIntervalBounds {
+
+        private DeploymentProperties defenceWith(Integer days) {
+            var properties = new DeploymentProperties();
+            properties.setTier(DeploymentTier.DEFENCE);
+            properties.setContractPasswordExpiryDays(days);
+            return properties;
+        }
+
+        @Test
+        @DisplayName("no interval at all is not range-checked, only required")
+        void absentIntervalIsNotRangeChecked() {
+            // Two rules, two messages: one says the value is missing, the other
+            // says it is out of range. Running both on an absent value would
+            // report the second, which is not true of it.
+            assertThat(defenceWith(null).isContractExpiryWithinTierBounds()).isTrue();
+        }
+
+        @Test
+        @DisplayName("an interval inside the tier's range is accepted")
+        void insideTheRangeIsAccepted() {
+            assertThat(defenceWith(90).isContractExpiryWithinTierBounds()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the lowest permitted interval is inside the range")
+        void theMinimumIsInclusive() {
+            assertThat(defenceWith(DeploymentTier.DEFENCE.minimumExpiryDays())
+                .isContractExpiryWithinTierBounds()).isTrue();
+        }
+
+        @Test
+        @DisplayName("the highest permitted interval is inside the range")
+        void theMaximumIsInclusive() {
+            assertThat(defenceWith(DeploymentTier.DEFENCE.maximumExpiryDays())
+                .isContractExpiryWithinTierBounds()).isTrue();
+        }
+
+        @Test
+        @DisplayName("below the range is refused")
+        void belowTheRangeIsRefused() {
+            assertThat(defenceWith(DeploymentTier.DEFENCE.minimumExpiryDays() - 1)
+                .isContractExpiryWithinTierBounds()).isFalse();
+        }
+
+        @Test
+        @DisplayName("above the range is refused")
+        void aboveTheRangeIsRefused() {
+            assertThat(defenceWith(DeploymentTier.DEFENCE.maximumExpiryDays() + 1)
+                .isContractExpiryWithinTierBounds()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a zero interval is refused, because expiry cannot be switched off")
+        void zeroIsRefused() {
+            // §4.2 is explicit: tenants choose the interval, not whether it
+            // applies, and there is no "never expires" option. Zero would be
+            // one.
+            assertThat(defenceWith(0).isContractExpirySuppliedWhenRequired()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a negative interval is refused")
+        void negativeIsRefused() {
+            assertThat(defenceWith(-30).isContractExpirySuppliedWhenRequired()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a tier other than Defence needs no contract interval")
+        void otherTiersNeedNoContractInterval() {
+            var commercial = new DeploymentProperties();
+            commercial.setTier(DeploymentTier.COMMERCIAL);
+
+            assertThat(commercial.isContractExpirySuppliedWhenRequired()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("which interval actually applies")
+    class EffectiveInterval {
+
+        @Test
+        @DisplayName("Defence uses the contract value when one is set")
+        void defenceUsesTheContractValue() {
+            var properties = new DeploymentProperties();
+            properties.setTier(DeploymentTier.DEFENCE);
+            properties.setContractPasswordExpiryDays(45);
+
+            assertThat(properties.defaultExpiryDays()).isEqualTo(45);
+        }
+
+        @Test
+        @DisplayName("Defence falls back to the tier's own default without one")
+        void defenceFallsBackWithoutAContractValue() {
+            // Reachable only when validation has been bypassed, and still has
+            // to produce a number rather than a null: a policy that cannot say
+            // when a password expires is a policy that does not expire one.
+            var properties = new DeploymentProperties();
+            properties.setTier(DeploymentTier.DEFENCE);
+
+            assertThat(properties.defaultExpiryDays())
+                .isEqualTo(DeploymentTier.DEFENCE.defaultExpiryDays());
+        }
+
+        @Test
+        @DisplayName("another tier ignores a contract value even if one is set")
+        void otherTiersIgnoreTheContractValue() {
+            // The contract interval is a Defence concept. Honouring it
+            // elsewhere would let a commercial deployment pin an interval the
+            // tenant is supposed to be able to change.
+            var properties = new DeploymentProperties();
+            properties.setTier(DeploymentTier.COMMERCIAL);
+            properties.setContractPasswordExpiryDays(45);
+
+            assertThat(properties.defaultExpiryDays())
+                .isEqualTo(DeploymentTier.COMMERCIAL.defaultExpiryDays());
+        }
+    }
 }

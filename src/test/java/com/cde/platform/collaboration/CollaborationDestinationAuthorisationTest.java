@@ -277,4 +277,125 @@ class CollaborationDestinationAuthorisationTest {
 
         assertThat(TenantContext.currentTenantId()).isEmpty();
     }
+
+    // ── The edges of the destination match and the session's state ────────
+
+    @Nested
+    @DisplayName("frames the guard has nothing to work with")
+    class DegenerateFrames {
+
+        @Test
+        @DisplayName("a frame with no STOMP headers at all passes through")
+        void aFrameWithNoAccessorPasses() {
+            // Not every message on the channel is a STOMP frame. Refusing what
+            // cannot be read would break the broker's own internal traffic, and
+            // nothing in such a message names a document to leak.
+            Message<?> plain = MessageBuilder.withPayload(new byte[0]).build();
+
+            assertThat(authorisation.preSend(plain, mock(MessageChannel.class))).isNotNull();
+        }
+
+        @Test
+        @DisplayName("a frame with no destination passes")
+        void aFrameWithNoDestinationPasses() {
+            assertAllowed(StompCommand.SUBSCRIBE, null, OWN_TENANT);
+        }
+
+        @Test
+        @DisplayName("a session with no attributes at all is refused, not waved through")
+        void aSessionWithoutAttributesIsRefused() {
+            // There is nothing to check the document against. "Unknown" read as
+            // "permitted" is precisely the shape of the defect this guard
+            // exists to close, so the absence of a session has to refuse.
+            StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+            accessor.setDestination("/topic/documents/" + OWN_DOCUMENT);
+            accessor.setLeaveMutable(true);
+            Message<?> noSession =
+                MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+
+            assertThatThrownBy(() -> send(noSession))
+                .isInstanceOf(IllegalArgumentException.class);
+
+            // And refused without a lookup. Asserting only the refusal is too
+            // weak: a guard that substituted some placeholder tenant would also
+            // refuse, because no document is visible under a tenant that does
+            // not exist — the test would pass while the guard had stopped
+            // checking what it is for. No query at all is the behaviour that
+            // distinguishes the two.
+            org.mockito.Mockito.verify(documents, org.mockito.Mockito.never())
+                .findById(org.mockito.ArgumentMatchers.anyLong());
+        }
+
+        @Test
+        @DisplayName("a tenant recorded as something other than a number is refused")
+        void aNonNumericTenantIsRefused() {
+            // The attribute is written by the CONNECT interceptor, so a value of
+            // the wrong type means something upstream changed. Refusing is the
+            // only safe reading of a tenant identifier that cannot be read.
+            StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+            accessor.setDestination("/topic/documents/" + OWN_DOCUMENT);
+            Map<String, Object> session = new HashMap<>();
+            session.put(StompAuthChannelInterceptor.TENANT_ATTRIBUTE, "7");
+            accessor.setSessionAttributes(session);
+            accessor.setLeaveMutable(true);
+
+            assertThatThrownBy(() -> send(
+                    MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders())))
+                .isInstanceOf(IllegalArgumentException.class);
+
+            org.mockito.Mockito.verify(documents, org.mockito.Mockito.never())
+                .findById(org.mockito.ArgumentMatchers.anyLong());
+        }
+    }
+
+    @Nested
+    @DisplayName("which destinations name a document")
+    class DestinationMatching {
+
+        @Test
+        @DisplayName("a document id too large for a long is not matched as a document")
+        void anOversizedIdIsNotADocument() {
+            // It matches the digits in the pattern but no document can have it,
+            // so there is nothing to authorise. Letting the parse failure
+            // escape would turn a nonsense subscription into a broker error
+            // rather than a quiet pass.
+            assertAllowed(StompCommand.SUBSCRIBE,
+                "/topic/documents/99999999999999999999999", OWN_TENANT);
+        }
+
+        @Test
+        @DisplayName("a sub-path under a document is still checked against that document")
+        void aSubPathIsStillChecked() {
+            // /topic/documents/42/cursors carries the same information as
+            // /topic/documents/42, so a pattern anchored to the exact path
+            // would leave every sub-topic unguarded.
+            assertRefused(StompCommand.SUBSCRIBE,
+                "/topic/documents/" + OTHER_TENANTS_DOCUMENT + "/cursors", OWN_TENANT);
+        }
+
+        @Test
+        @DisplayName("the app prefix is checked as well as the topic prefix")
+        void theAppPrefixIsChecked() {
+            // Clients send to /app and subscribe to /topic. Guarding only one
+            // leaves the other open, and /app is the writing side.
+            assertRefused(StompCommand.SEND,
+                "/app/documents/" + OTHER_TENANTS_DOCUMENT, OWN_TENANT);
+        }
+
+        @Test
+        @DisplayName("a destination that merely contains a document path is not matched")
+        void aDestinationThatOnlyContainsThePathIsNotMatched() {
+            // The pattern is anchored at both ends. A prefix match would let
+            // /topic/documents/41/../42 style destinations, or a queue named
+            // after one, be judged against the wrong document.
+            assertAllowed(StompCommand.SUBSCRIBE,
+                "/queue/private/topic/documents/" + OTHER_TENANTS_DOCUMENT, OWN_TENANT);
+        }
+
+        @Test
+        @DisplayName("a document path with no id is not matched")
+        void aPathWithNoIdIsNotMatched() {
+            assertAllowed(StompCommand.SUBSCRIBE, "/topic/documents/", OWN_TENANT);
+        }
+    }
 }

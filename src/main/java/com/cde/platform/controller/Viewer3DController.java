@@ -40,6 +40,27 @@ import java.util.*;
 @StandardErrorResponses
 public class Viewer3DController {
 
+    /**
+     * Why a model cannot be opened, said without naming the deployment's
+     * storage layout.
+     *
+     * <p>This route used to answer {@code "File not found: " + path}, which
+     * handed every caller the absolute path the file was looked for at — the
+     * storage root, the tenant's prefix and the generated object name — in a
+     * response any viewer displays. §5.13.13 is explicit that a bucket path is
+     * not a client's business, and the path is no use to the person reading it
+     * either: they cannot reach the filesystem it describes. The trace id can
+     * be quoted to someone who can.
+     */
+    private static final String NO_FILE_RECORDED =
+        "No file was recorded for this model, so there is nothing to open. "
+        + "Upload it again, or quote the trace id to support.";
+
+    private static final String FILE_MISSING =
+        "This model's file is not in storage. It may still be uploading, or it "
+        + "may have been removed. Quote the trace id to support.";
+
+
     private static final Set<String> EXT_3D = Set.of(
         "ifc","glb","gltf","obj","stl","ply","dae","3ds","rvt","rfa"
     );
@@ -103,11 +124,11 @@ public class Viewer3DController {
         var doc = docOpt.get();
 
         if (doc.getFilePath() == null)
-            return ResponseEntity.ok(Map.of("success", false, "error", "No file path stored."));
+            return ResponseEntity.ok(Map.of("success", false, "error", NO_FILE_RECORDED));
 
         Path path = Paths.get(doc.getFilePath());
         if (!Files.exists(path))
-            return ResponseEntity.ok(Map.of("success", false, "error", "File not found: " + path));
+            return ResponseEntity.ok(Map.of("success", false, "error", FILE_MISSING));
 
         String name = doc.getFileName() != null ? doc.getFileName().toLowerCase() : "";
         String ext  = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1) : "";

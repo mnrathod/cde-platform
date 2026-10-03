@@ -318,4 +318,272 @@ class ContainerLifecycleIntegrationTest {
                 .isInstanceOf(DataAccessException.class);
         }
     }
+
+    // ── Suitability codes ─────────────────────────────────────────────────
+    //
+    // The code says what the information may be relied on for, which is the
+    // part of ISO 19650 that carries contractual weight: "approved for
+    // construction" on a drawing nobody has checked is the confusion the code
+    // list exists to prevent. These assert the three ways a code can be wrong
+    // for the revision it is being put on, each of which is a different
+    // mistake with a different answer.
+
+    @Nested
+    @DisplayName("marking a revision with a suitability code")
+    class SuitabilityCodes {
+
+        @Autowired com.cde.platform.cde.repository.SuitabilityCodeRepository codeRepo;
+
+        private com.cde.platform.cde.model.SuitabilityCode code(
+                String name, ContainerState validInState, boolean active) {
+            return codeRepo.save(com.cde.platform.cde.model.SuitabilityCode.builder()
+                .project(container.getProject())
+                .code(name + "-" + System.nanoTime())
+                .description("A code for " + name)
+                .validInState(validInState)
+                .active(active)
+                .build());
+        }
+
+        @Test
+        @DisplayName("a code valid in any state goes on a revision in progress")
+        void anyStateCodeIsAccepted() {
+            ContainerRevision revision =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            ContainerRevision marked =
+                lifecycle.assignSuitabilityCode(revision, code("S0", null, true));
+
+            assertThat(marked.getSuitabilityCode()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("a code restricted to the revision's own state is accepted")
+        void matchingStateCodeIsAccepted() {
+            ContainerRevision revision =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            ContainerRevision marked = lifecycle.assignSuitabilityCode(
+                revision, code("S1", ContainerState.WORK_IN_PROGRESS, true));
+
+            assertThat(marked.getSuitabilityCode()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("a code restricted to a different state is refused, naming both")
+        void codeFromTheWrongStateIsRefused() {
+            // The whole point of the restriction. A reviewer reading "suitable
+            // for construction" has no way to tell it was applied to unverified
+            // work in progress, so the check has to be here rather than in the
+            // reader's judgement.
+            ContainerRevision revision =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            assertThatThrownBy(() -> lifecycle.assignSuitabilityCode(
+                    revision, code("S4", ContainerState.PUBLISHED, true)))
+                .isInstanceOf(com.cde.platform.cde.domain
+                    .SuitabilityCodeNotValidInStateException.class)
+                // Both states named, in prose rather than enum constants: the
+                // reader has to be able to see which code was applied to which
+                // revision without looking either up.
+                .hasMessageContaining("published")
+                .hasMessageContaining("work in progress");
+        }
+
+        @Test
+        @DisplayName("a code the project has retired is refused")
+        void retiredCodeIsRefused() {
+            // Codes are tenant- and project-populated (§6.7.2), so they get
+            // superseded as a project's conventions change. Retiring one has to
+            // stop it being applied to anything new without invalidating the
+            // revisions already carrying it.
+            ContainerRevision revision =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            assertThatThrownBy(() -> lifecycle.assignSuitabilityCode(
+                    revision, code("S2", null, false)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("no longer in use");
+        }
+
+        @Test
+        @DisplayName("clearing the code is allowed while the revision is still mutable")
+        void clearingTheCodeIsAllowed() {
+            ContainerRevision revision =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+            lifecycle.assignSuitabilityCode(revision, code("S0", null, true));
+
+            assertThat(lifecycle.assignSuitabilityCode(revision, null).getSuitabilityCode())
+                .isNull();
+        }
+
+        @Test
+        @DisplayName("a published revision's code cannot be changed")
+        void publishedCodeIsFrozen() {
+            // The label is part of the frozen contractual record. The database
+            // trigger refuses the write too, but reaching it would report a
+            // deliberate rule as an internal fault.
+            ContainerRevision published = publishedRevision("C01");
+
+            assertThatThrownBy(() -> lifecycle.assignSuitabilityCode(
+                    published, code("S4", null, true)))
+                .isInstanceOf(StateTransitionNotPermittedException.class);
+        }
+
+        @Test
+        @DisplayName("an archived revision's code cannot be changed either")
+        void archivedCodeIsFrozen() {
+            ContainerRevision abandoned =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+            ContainerRevision archived =
+                lifecycle.archive(abandoned, author, "Scheme abandoned");
+
+            assertThatThrownBy(() -> lifecycle.assignSuitabilityCode(archived, null))
+                .isInstanceOf(StateTransitionNotPermittedException.class);
+        }
+
+        @Test
+        @DisplayName("clearing the code on a published revision is refused like setting one")
+        void clearingAPublishedCodeIsAlsoRefused() {
+            // Removing the label from the contractual record is the same edit
+            // as changing it, and a null argument must not slip past the state
+            // check on its way to the setter.
+            ContainerRevision published = publishedRevision("C01");
+
+            assertThatThrownBy(() -> lifecycle.assignSuitabilityCode(published, null))
+                .isInstanceOf(StateTransitionNotPermittedException.class);
+        }
+    }
+
+    // ── Publication and archival guards ───────────────────────────────────
+
+    @Nested
+    @DisplayName("the guards on publishing and archiving")
+    class PublicationGuards {
+
+        @Test
+        @DisplayName("publishing without a recorded approver is refused")
+        void publicationNeedsAnApprover() {
+            // A published revision is the contractual record and a database
+            // CHECK refuses one with no approver; failing here names the
+            // missing thing instead of surfacing a constraint violation.
+            ContainerRevision shared = lifecycle.share(
+                lifecycle.startWorkInProgress(container, "P01.01", author),
+                author, "Ready");
+
+            assertThatThrownBy(() -> lifecycle.publish(shared, null, "Approved"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("approver");
+        }
+
+        @Test
+        @DisplayName("a rejection reason of nothing but whitespace is refused")
+        void whitespaceRejectionReasonIsRefused() {
+            // The author has to know what to change, and "   " tells them
+            // nothing — it is the same omission as sending no reason at all.
+            ContainerRevision shared = lifecycle.share(
+                lifecycle.startWorkInProgress(container, "P01.01", author),
+                author, "Ready");
+
+            assertThatThrownBy(() -> lifecycle.reject(shared, author, "   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reason");
+        }
+
+        @Test
+        @DisplayName("an unpublished revision cannot be superseded — there is nothing to replace")
+        void onlyAPublishedRevisionIsSuperseded() {
+            // Supersession retires the contractual record. Work in progress is
+            // not one, and superseding it would archive work that was never
+            // issued while creating a replacement for nothing.
+            ContainerRevision inProgress =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            assertThatThrownBy(() -> lifecycle.supersede(inProgress, "P02.01", author))
+                .isInstanceOf(StateTransitionNotPermittedException.class);
+        }
+
+        @Test
+        @DisplayName("a shared revision cannot be superseded either")
+        void sharedRevisionCannotBeSuperseded() {
+            ContainerRevision shared = lifecycle.share(
+                lifecycle.startWorkInProgress(container, "P01.01", author),
+                author, "Ready");
+
+            assertThatThrownBy(() -> lifecycle.supersede(shared, "P02.01", author))
+                .isInstanceOf(StateTransitionNotPermittedException.class);
+        }
+
+        @Test
+        @DisplayName("abandoned work in progress can be archived without being published")
+        void abandonedWorkCanBeArchived() {
+            // Not every revision becomes a record. Work that will not proceed
+            // still has to leave the active set, and the only terminal state is
+            // archived.
+            //
+            // This did not work. A CHECK constraint demanded an approver for
+            // every ARCHIVED row as well as every PUBLISHED one, so archiving
+            // something that was never authorised raised a constraint violation
+            // — a 500, for an operation the service documents as its purpose.
+            // V9 narrows the constraint to publication, which is what its own
+            // comment describes.
+            ContainerRevision abandoned =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            assertThat(lifecycle.archive(abandoned, author, "Scheme abandoned").getState())
+                .isEqualTo(ContainerState.ARCHIVED);
+        }
+
+        @Test
+        @DisplayName("an archived revision that was published keeps its approver")
+        void archivedPublishedRevisionKeepsItsApprover() {
+            // The guarantee V9 had to preserve while relaxing the CHECK that
+            // demanded an approver on every archived row. It is preserved by the
+            // trigger rather than by the constraint: any UPDATE of a row whose
+            // state is PUBLISHED or ARCHIVED is refused if it touches
+            // published_by, published_at or approval_reason. So the path the old
+            // constraint was imagined to close — publish, archive, then null the
+            // approver — is still closed, and this is the test that says so
+            // rather than leaving it asserted in a migration comment.
+            ContainerRevision published = publishedRevision("C01");
+            lifecycle.supersede(published, "C02", author);
+
+            ContainerRevision archived = revisionRepo.findById(published.getId()).orElseThrow();
+            assertThat(archived.getState()).isEqualTo(ContainerState.ARCHIVED);
+            assertThat(archived.getPublishedBy()).isNotNull();
+
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                    "UPDATE container_revisions SET published_by = NULL WHERE id = ?",
+                    archived.getId()))
+                .isInstanceOf(DataAccessException.class);
+        }
+
+        @Test
+        @DisplayName("a revision archived without publication records no approver")
+        void archivedUnpublishedRevisionHasNoApprover() {
+            // The other half: the field stays empty rather than being filled in
+            // to satisfy a constraint. Recording a named person as having
+            // authorised information nobody authorised would be a false entry in
+            // the column a contractual dispute reads first.
+            ContainerRevision abandoned =
+                lifecycle.startWorkInProgress(container, "P01.01", author);
+
+            ContainerRevision archived =
+                lifecycle.archive(abandoned, author, "Scheme abandoned");
+
+            assertThat(archived.getPublishedBy()).isNull();
+            assertThat(archived.getPublishedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("a shared revision that will not proceed can be archived")
+        void sharedRevisionCanBeArchived() {
+            ContainerRevision shared = lifecycle.share(
+                lifecycle.startWorkInProgress(container, "P01.01", author),
+                author, "Ready");
+
+            assertThat(lifecycle.archive(shared, author, "Superseded by a change of scope")
+                .getState()).isEqualTo(ContainerState.ARCHIVED);
+        }
+    }
 }

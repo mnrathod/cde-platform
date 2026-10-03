@@ -10,6 +10,8 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -118,5 +120,88 @@ class ApiErrorResponseTest {
                     throw new AssertionError("expected 401/403 but got " + status);
                 }
             });
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("a 405 names the methods the endpoint does support")
+    void methodNotAllowedNamesWhatIsSupported() throws Exception {
+        // Without this the caller is told what they cannot do and not what they
+        // can, which costs them a trip to the documentation for a one-word
+        // answer. The Allow header carries the same list, but a problem
+        // document is what the SDKs parse.
+        mockMvc.perform(get("/api/signatures/any-signature-id/verify"))
+            .andExpect(status().isMethodNotAllowed())
+            .andExpect(jsonPath("$.supportedMethods").isArray())
+            .andExpect(jsonPath("$.supportedMethods[0]").value("POST"));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("a missing multipart part is named, not just the parameters")
+    void missingMultipartPartIsNamed() throws Exception {
+        // Two different exceptions reach one handler, and only one of them has
+        // getParameterName(). Reading the wrong one would have thrown inside the
+        // handler, which turns a 400 into a 500 at the exact moment a client is
+        // already getting something wrong.
+        mockMvc.perform(multipart("/api/documents/upload")
+                .param("projectId", "1")
+                .param("name", "Plan"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.parameterName").value("file"))
+            .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("a validation failure names every field that was wrong, not just the first")
+    void validationNamesEveryField() throws Exception {
+        // A form that reports one error at a time makes the user submit it
+        // repeatedly to discover the rest, and §1A.2 wants errors that identify
+        // the field and describe the fix — plural.
+        mockMvc.perform(post("/api/projects")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"","description":"%s"}""".formatted("x".repeat(2001))))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.invalidFields").isArray())
+            .andExpect(jsonPath("$.invalidFields.length()").value(2))
+            .andExpect(jsonPath("$.detail").value(
+                org.hamcrest.Matchers.containsString("fields are invalid")));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("a single bad field is reported in the singular")
+    void oneBadFieldReadsAsOne() throws Exception {
+        // "1 fields are invalid" is the kind of thing that makes a product look
+        // unfinished in a procurement demo, and it is a one-line fix in the
+        // place the count is already known.
+        mockMvc.perform(post("/api/projects")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":""}"""))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.invalidFields.length()").value(1))
+            .andExpect(jsonPath("$.detail").value(
+                org.hamcrest.Matchers.containsString("field is invalid")));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("each named field carries the reason it was rejected")
+    void eachFieldCarriesItsReason() throws Exception {
+        // The field name alone says which box; the message says what about it.
+        // Both come from our own constraint annotations, never from the parser,
+        // so neither can carry a Java type name out to a client.
+        String body = mockMvc.perform(post("/api/projects")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":""}"""))
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("name");
+        assertThat(body).doesNotContain("com.cde.platform");
+        assertThat(body).doesNotContain("jakarta.validation");
     }
 }

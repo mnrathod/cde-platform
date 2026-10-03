@@ -401,4 +401,145 @@ class PageManipulationServiceTest {
             assertThat(documentRepo.count()).isEqualTo(before);
         }
     }
+
+    // ── The edges each guard has two of ───────────────────────────────────
+
+    @Nested
+    @DisplayName("edges of the page selection")
+    class SelectionEdges {
+
+        @Test
+        @DisplayName("an insert with no selection at all is refused, not just an empty one")
+        void nullInsertSelectionIsRefused() {
+            // A client that omitted the property rather than sending it empty.
+            // Both are "nothing chosen" and both have to be refused before the
+            // files are opened, because the alternative is two PDFs read into
+            // memory to discover there was nothing to do.
+            assertThatThrownBy(() -> pages.insertPages(
+                    sheet.getId(), donor.getId(), null, 2, USERNAME))
+                .isInstanceOf(DocumentProcessingException.class)
+                .hasMessageContaining("at least one page");
+        }
+
+        @Test
+        @DisplayName("an extraction with no selection at all is refused")
+        void nullExtractionSelectionIsRefused() {
+            assertThatThrownBy(() -> pages.extractPages(
+                    sheet.getId(), null, "Extract", USERNAME))
+                .isInstanceOf(DocumentProcessingException.class)
+                .hasMessageContaining("at least one page");
+        }
+
+        @Test
+        @DisplayName("a single page is listed as itself, not as a one-page range")
+        void aSinglePageIsNotARange() {
+            // "4-4" is how a loop writes it and not how anyone reads it.
+            Document created = pages.extractPages(sheet.getId(), List.of(4), null, USERNAME)
+                .document();
+
+            assertThat(created.getName()).contains("4").doesNotContain("4-4");
+        }
+
+        @Test
+        @DisplayName("a selection with a repeated page does not become a false range")
+        void duplicatesDoNotFakeContiguity() {
+            // 2, 2, 3 is three entries spanning two numbers. Counting entries
+            // rather than distinct values would read it as the run 2-4.
+            Document created = pages.extractPages(
+                sheet.getId(), List.of(2, 2, 3), null, USERNAME).document();
+
+            assertThat(created.getName()).contains("2-3").doesNotContain("2-4");
+        }
+
+        @Test
+        @DisplayName("extraction with no actor named is attributed to the source's author")
+        void extractionWithoutAnActorInheritsAttribution() {
+            // Scheduled and system-initiated work has no signed-in user, and the
+            // new document still needs an author: pages taken out of someone's
+            // drawing are their drawing. Leaving it empty would produce a
+            // document with no owner in a column the audit trail reads.
+            Document created = pages.extractPages(sheet.getId(), List.of(1, 2), null, null)
+                .document();
+
+            assertThat(created.getUploadedBy()).isNotNull();
+            assertThat(created.getUploadedBy().getId())
+                .isEqualTo(sheet.getUploadedBy().getId());
+        }
+
+        @Test
+        @DisplayName("a username nobody has falls back the same way rather than failing")
+        void extractionWithAnUnknownActorInheritsAttribution() {
+            // A user deleted between the request being made and the job running.
+            // Failing here would lose work that is otherwise complete.
+            Document created = pages.extractPages(
+                sheet.getId(), List.of(1, 2), null, "nobody-by-this-name").document();
+
+            assertThat(created.getUploadedBy()).isNotNull();
+            assertThat(created.getUploadedBy().getId())
+                .isEqualTo(sheet.getUploadedBy().getId());
+        }
+
+        @Test
+        @DisplayName("extraction from a document filed under no project still lands somewhere")
+        void extractionFromAProjectlessDocument() throws IOException {
+            // The new document's directory is derived from the project. Without
+            // one it goes beside the file it came from, which is the only
+            // location that is certainly writable.
+            Document loose = documentRepo.save(Document.builder()
+                .name("loose").fileName("loose.pdf").fileType("application/pdf")
+                .filePath(sheet.getFilePath()).fileSize(1L)
+                .documentType(Document.DocumentType.DRAWING)
+                .project(null).uploadedBy(null).build());
+
+            Document created = pages.extractPages(loose.getId(), List.of(1), null, USERNAME)
+                .document();
+
+            assertThat(Path.of(created.getFilePath())).exists();
+        }
+
+        @Test
+        @DisplayName("a document with an empty file path is refused like one with none")
+        void blankFilePathIsRefused() {
+            // An empty string is not a path, and Paths.get("") resolves to the
+            // working directory — which would have the converter open whatever
+            // happens to be there.
+            Document pathless = documentRepo.save(Document.builder()
+                .name("pathless").fileName("pathless.pdf").fileType("application/pdf")
+                .filePath("   ").fileSize(1L)
+                .documentType(Document.DocumentType.DRAWING)
+                .project(null).uploadedBy(null).build());
+
+            assertThatThrownBy(() -> pages.extractPages(
+                    pathless.getId(), List.of(1), null, USERNAME))
+                .isInstanceOf(DocumentProcessingException.class)
+                .hasMessageContaining("no stored file");
+        }
+
+        @Test
+        @DisplayName("a page count the converter could not read is reported, not assumed")
+        void unreadablePageCountIsReported() {
+            // Defaulting to zero would make every position "past the end" and
+            // quietly append, which looks like the layout was applied.
+            doAnswer(invocation -> answer(
+                    "{\"success\":false,\"error\":\"the file is not a readable PDF\"}"))
+                .when(converter).callJson(eq("/page-info"), any(), any(Duration.class));
+
+            assertThatThrownBy(() -> pages.insertPages(
+                    sheet.getId(), donor.getId(), List.of(1), 2, USERNAME))
+                .isInstanceOf(DocumentProcessingException.class)
+                .hasMessageContaining("not a readable PDF");
+        }
+
+        @Test
+        @DisplayName("a page-info failure with no reason given still says something useful")
+        void unreadablePageCountWithoutAReason() {
+            doAnswer(invocation -> answer("{\"success\":false}"))
+                .when(converter).callJson(eq("/page-info"), any(), any(Duration.class));
+
+            assertThatThrownBy(() -> pages.insertPages(
+                    sheet.getId(), donor.getId(), List.of(1), 2, USERNAME))
+                .isInstanceOf(DocumentProcessingException.class)
+                .hasMessageContaining("could not be read");
+        }
+    }
 }

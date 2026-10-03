@@ -373,36 +373,43 @@ tasks.named('test') {
 }
 
 /**
- * Coverage floors, as a ratchet.
+ * Coverage floors — now the §14 figures themselves.
  *
- * §14 requires 90% line and 85% branch. Measured on 2026-09-24 this project
- * is at 84.3% line and 72.0% branch, so switching the required figures on
- * today would leave main permanently red — and a gate that is always red is
- * a gate everyone learns to ignore, which is worse than no gate. The
- * distance is real and is not closed by anything in this file.
+ * §14 requires 90% line and 85% branch. For most of this project's life it
+ * could not meet them: measured on 2026-09-24 it stood at 84.3% line and
+ * 72.0% branch, so the required figures were replaced by a ratchet against the
+ * measured floor. A gate that is always red is a gate everyone learns to
+ * ignore, which is worse than no gate.
  *
- * Those numbers went up from 66.2/47.9 without a test being written. The
- * conversion service moved to its own module and took 48 of the less-covered
- * files with it, so the denominator shrank — read this as an accounting
- * change, not as progress. The code it left with is gated by the same ratchet
- * in conversion-service/build.gradle, at the figures it actually measures.
+ * The distance has now been closed. Measured on 2026-10-03: 90.4% line
+ * (4370/4832) and 85.3% branch (1289/1512), so the floor is the standard and
+ * the ratchet is retired. `-PtargetCoverage` is kept so the two paths still
+ * agree, and because a future module split could pull the measurement below
+ * the standard again — at which point the honest move is to say so in a
+ * commit, not to lower this.
  *
- * So the build enforces the *measured floor* instead. Coverage cannot fall,
- * and each improvement is banked by raising these numbers in the same commit.
- * They ratchet up only. Lowering one to make a build pass defeats the whole
- * mechanism and should fail review.
+ * It still only ratchets up. Lowering either number to make a build pass
+ * defeats the whole mechanism and should fail review.
  *
- * `./gradlew jacocoTestCoverageVerification -PtargetCoverage` checks against
- * the §14 figures instead, which is how you see the remaining distance
- * without breaking anyone's build.
+ * One note on reading the figure, learned the expensive way: `test` is
+ * `finalizedBy jacocoTestReport`, so a filtered run (`--tests Something*`)
+ * regenerates the report from that run's execution data alone. Coverage read
+ * straight after one reflects only the classes it touched, which looks like a
+ * catastrophic regression and is not. Measure after a full run, and delete
+ * build/jacoco first.
  *
  * Nothing is excluded from the measurement. §14 permits excluding generated
  * code, DTOs and config classes, but excluding them would raise the reported
- * number without testing anything more, and the point of the number is to be
- * uncomfortable while it is low.
+ * number without testing anything more.
+ *
+ * The figure is a floor and not the point. §14 says so itself: high coverage
+ * with weak assertions is worse than honest lower coverage. Every assertion
+ * added to reach these numbers was checked by breaking the thing it guards and
+ * confirming it failed — which is also how several of the defects fixed along
+ * the way were found.
  */
-def measuredLineFloor = '0.84'
-def measuredBranchFloor = '0.71'
+def measuredLineFloor = '0.90'
+def measuredBranchFloor = '0.85'
 def targetLine = '0.90'
 def targetBranch = '0.85'
 

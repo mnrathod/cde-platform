@@ -1,5 +1,6 @@
 package com.cde.platform.controller;
 
+import com.cde.platform.exception.InvalidRequestException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.cde.platform.security.DocumentPermission;
 
@@ -126,7 +127,13 @@ public class DocumentController {
         String field = parts[0].trim();
 
         if (!SORTABLE_FIELDS.contains(field)) {
-            throw new IllegalArgumentException("Not a sortable field: " + field);
+            // Names the permitted fields. The caller cannot otherwise tell a
+            // typo from a field this version does not support, and the generic
+            // handler's "could not be processed as submitted" told them neither.
+            throw new InvalidRequestException(
+                "\"" + field + "\" is not a field documents can be sorted by. Use one of: "
+                + SORTABLE_FIELDS.stream().sorted()
+                    .collect(java.util.stream.Collectors.joining(", ")) + ".");
         }
         boolean descending = parts.length > 1 && "desc".equalsIgnoreCase(parts[1].trim());
         return descending ? Sort.by(field).descending() : Sort.by(field).ascending();

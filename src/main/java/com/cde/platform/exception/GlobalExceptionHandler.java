@@ -238,6 +238,22 @@ public class GlobalExceptionHandler {
             .body(problem);
     }
 
+    /**
+     * A request this code refused on purpose, with a sentence for the caller.
+     *
+     * <p>Separate from the {@link IllegalArgumentException} clause above, whose
+     * message is deliberately not echoed: that one catches whatever the JDK or
+     * a library threw, and those messages name classes and paths. This one is
+     * only thrown where the message was composed for the person reading it, so
+     * discarding it would throw away the only part they can act on (§1.4).
+     */
+    @ExceptionHandler(InvalidRequestException.class)
+    public ProblemDetail handleInvalidRequest(InvalidRequestException ex,
+                                              HttpServletRequest request) {
+        return ApiProblem.of(HttpStatus.BAD_REQUEST, "bad-request", "Bad request",
+            ex.getMessage(), request);
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleResourceNotFound(ResourceNotFoundException ex,
                                                 HttpServletRequest request) {

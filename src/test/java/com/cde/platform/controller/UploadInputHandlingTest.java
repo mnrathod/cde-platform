@@ -379,4 +379,141 @@ class UploadInputHandlingTest {
 
         assertThat(body).contains(USERNAME);
     }
+
+    @Test
+    @DisplayName("a blank status is refused with an instruction, not an enum list")
+    void blankStatusIsRefused() throws Exception {
+        // Sending the parameter empty is a different mistake from sending a
+        // value that is not a status, and listing the permitted values at
+        // someone who sent nothing does not tell them what went wrong.
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        String refusal = mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .patch("/api/documents/" + idFrom(body) + "/status")
+                    .param("status", "   "))
+            .andExpect(status().isUnprocessableContent())
+            .andReturn().getResponse().getContentAsString();
+
+        assertThat(refusal).contains("Name the status");
+    }
+
+    @Test
+    @DisplayName("a status is read whatever case it was sent in")
+    void statusIsCaseInsensitive() throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents/upload")
+                .file(file("file", "plan.txt"))
+                .param("projectId", String.valueOf(projectId))
+                .param("name", "Plan"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+        long documentId = idFrom(body);
+
+        mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .patch("/api/documents/" + documentId + "/status")
+                    .param("status", "in_review"))
+            .andExpect(status().isOk());
+
+        assertThat(documentRepository.findById(documentId).orElseThrow().getStatus())
+            .isEqualTo(Document.DocumentStatus.IN_REVIEW);
+    }
+
+    @Test
+    @DisplayName("changing the status of a document that does not exist is a 404")
+    void statusChangeOnAnUnknownDocument() throws Exception {
+        mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .patch("/api/documents/9999999/status")
+                    .param("status", "IN_REVIEW"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("the reply survives a document with no project or uploader recorded")
+    void replySurvivesAnIncompleteDocument() throws Exception {
+        // Rows like this exist: a project deleted, or a user removed, with the
+        // document retained for the audit trail. A status change on one must
+        // answer rather than throw, because the alternative is a record nobody
+        // can move on.
+        Document orphan = documentRepository.save(Document.builder()
+            .name("Orphan").fileName("orphan.txt").fileType("text/plain")
+            .filePath("/not/read/by/this/endpoint/orphan.txt").fileSize(1L)
+            .documentType(Document.DocumentType.DRAWING)
+            .project(null).uploadedBy(null).build());
+
+        mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .patch("/api/documents/" + orphan.getId() + "/status")
+                    .param("status", "APPROVED"))
+            .andExpect(status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .jsonPath("$.projectId").doesNotExist())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .jsonPath("$.uploadedBy").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("an unknown document type on a chunked upload is refused before assembly")
+    void unknownTypeOnAChunkedUploadIsRefused() throws Exception {
+        // The chunked route carries the largest files, so the orphan a late
+        // refusal would leave behind is the largest too.
+        String uploadId = "chunked-" + System.nanoTime();
+
+        mockMvc.perform(multipart("/api/documents/upload/chunk")
+                .file(new MockMultipartFile("chunk", "part", "application/octet-stream",
+                    "some bytes".getBytes(StandardCharsets.UTF_8)))
+                .param("uploadId", uploadId)
+                .param("chunkIndex", "0")
+                .param("totalChunks", "1")
+                .param("fileName", "model.ifc")
+                .param("projectId", String.valueOf(projectId))
+                .param("documentType", "NOT_A_TYPE"))
+            .andExpect(status().isUnprocessableContent());
+    }
+
+    @Test
+    @DisplayName("the last chunk without a project is acknowledged, not assembled")
+    void lastChunkWithoutAProjectIsOnlyAcknowledged() throws Exception {
+        // A client that uploads the bytes first and names the project on a
+        // later call. Assembling without one would have nowhere to file the
+        // document, so the count comes back and the chunks stay staged.
+        String uploadId = "pending-" + System.nanoTime();
+
+        mockMvc.perform(multipart("/api/documents/upload/chunk")
+                .file(new MockMultipartFile("chunk", "part", "application/octet-stream",
+                    "some bytes".getBytes(StandardCharsets.UTF_8)))
+                .param("uploadId", uploadId)
+                .param("chunkIndex", "0")
+                .param("totalChunks", "1")
+                .param("fileName", "model.ifc"))
+            .andExpect(status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .jsonPath("$.received").value(1))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .jsonPath("$.documentId").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("a chunked upload that completes files the document under its project")
+    void completedChunkedUploadIsFiled() throws Exception {
+        String uploadId = "complete-" + System.nanoTime();
+
+        mockMvc.perform(multipart("/api/documents/upload/chunk")
+                .file(new MockMultipartFile("chunk", "part", "application/octet-stream",
+                    "ISO-10303-21;".getBytes(StandardCharsets.UTF_8)))
+                .param("uploadId", uploadId)
+                .param("chunkIndex", "0")
+                .param("totalChunks", "1")
+                .param("fileName", "model.ifc")
+                .param("projectId", String.valueOf(projectId)))
+            .andExpect(status().isCreated())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .jsonPath("$.fileName").value("model.ifc"));
+    }
 }

@@ -265,4 +265,188 @@ class FormFieldBuilderTest {
         assertThat(builder.removeFields(plain, workspace.resolve("o.pdf"), List.of("anything")))
             .isEmpty();
     }
+
+    // ── Each refusal's second arm ─────────────────────────────────────────
+    //
+    // Every guard in validate() has two ways to fail and the tests above pick
+    // one each, which leaves the other arm of each condition standing on
+    // nothing. They are not interchangeable: a null name and a blank one come
+    // from different clients, a zero width and a zero height from different
+    // drawing mistakes, and an absent options list from a caller that omitted
+    // the field rather than sending it empty.
+
+    @Test
+    @DisplayName("a field with no name at all is refused, not just an empty one")
+    void refusesANullName() {
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                null, FieldKind.TEXT, 1, 70, 700, 200, 20, false, List.of())))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("name");
+    }
+
+    @Test
+    @DisplayName("a name of nothing but whitespace is refused")
+    void refusesAWhitespaceName() {
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                "   ", FieldKind.TEXT, 1, 70, 700, 200, 20, false, List.of())))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("page zero is refused, because pages are counted from one")
+    void refusesPageZero() {
+        // A client counting from zero would otherwise place its first field
+        // off the front of the document and get PDFBox's index error rather
+        // than a sentence naming the page it asked for.
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                "inspector", FieldKind.TEXT, 0, 70, 700, 200, 20, false, List.of())))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("page 0");
+    }
+
+    @Test
+    @DisplayName("a negative page is refused")
+    void refusesANegativePage() {
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                "inspector", FieldKind.TEXT, -1, 70, 700, 200, 20, false, List.of())))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("the last page is in range")
+    void acceptsTheLastPage() throws IOException {
+        // The fixture has two pages, so this is the boundary the page check
+        // has to let through — an off-by-one here refuses a legitimate field
+        // on the final sheet, which is where sign-off boxes usually go.
+        Path out = add(new FieldPlacement(
+            "inspector", FieldKind.TEXT, 2, 70, 700, 200, 20, false, List.of()));
+
+        try (PDDocument document = Loader.loadPDF(out.toFile())) {
+            assertThat(document.getPage(1).getAnnotations()).hasSize(1);
+        }
+    }
+
+    @Test
+    @DisplayName("a field with width but no height is refused")
+    void refusesZeroHeight() {
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                "inspector", FieldKind.TEXT, 1, 70, 700, 200, 0, false, List.of())))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("no area");
+    }
+
+    @Test
+    @DisplayName("a negative height is refused rather than drawn inverted")
+    void refusesNegativeHeight() {
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                "inspector", FieldKind.TEXT, 1, 70, 700, 200, -20, false, List.of())))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a dropdown whose options were omitted entirely is refused")
+    void refusesADropdownWithNoOptionsField() {
+        // Distinct from the empty-list case: this is a client that left the
+        // property out, and a null here would otherwise reach PDFBox.
+        assertThatThrownBy(() -> add(new FieldPlacement(
+                "status", FieldKind.DROPDOWN, 1, 70, 700, 200, 20, false, null)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("option");
+    }
+
+    @Test
+    @DisplayName("a text field with no options is not treated as an empty dropdown")
+    void optionsAreOnlyCheckedForDropdowns() {
+        // The options check is guarded by the kind, and it has to be: every
+        // other kind legitimately has none.
+        assertThat(catching(() -> add(new FieldPlacement(
+            "inspector", FieldKind.TEXT, 1, 70, 700, 200, 20, false, null)))).isNull();
+    }
+
+    private static Throwable catching(ThrowingCall call) {
+        try {
+            call.run();
+            return null;
+        } catch (Throwable thrown) {
+            return thrown;
+        }
+    }
+
+    private interface ThrowingCall {
+        void run() throws Exception;
+    }
+
+    @Test
+    @DisplayName("a form that already carries a font is not given a second one")
+    void keepsAnExistingDefaultFont() throws IOException {
+        // Replacing the resources of a document that already has them would
+        // discard whatever font its existing fields render with.
+        Path alreadyAForm = workspace.resolve("already-a-form.pdf");
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+            PDAcroForm form = new PDAcroForm(document);
+            form.setDefaultAppearance("/Helv 12 Tf 0 g");
+            org.apache.pdfbox.pdmodel.PDResources resources =
+                new org.apache.pdfbox.pdmodel.PDResources();
+            resources.put(org.apache.pdfbox.cos.COSName.getPDFName("Helv"),
+                new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                    org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA));
+            form.setDefaultResources(resources);
+            document.getDocumentCatalog().setAcroForm(form);
+            document.save(alreadyAForm.toFile());
+        }
+
+        Path out = workspace.resolve("kept.pdf");
+        builder.addFields(alreadyAForm, out, List.of(text("inspector")));
+
+        try (PDDocument document = Loader.loadPDF(out.toFile())) {
+            assertThat(document.getDocumentCatalog().getAcroForm().getDefaultAppearance())
+                .isEqualTo("/Helv 12 Tf 0 g");
+        }
+    }
+
+    @Test
+    @DisplayName("a form with resources but no default appearance is given one")
+    void suppliesAMissingDefaultAppearance() throws IOException {
+        // Without it, viewers have no font instruction and the field renders
+        // empty however much is typed into it.
+        Path noAppearance = workspace.resolve("no-appearance.pdf");
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+            PDAcroForm form = new PDAcroForm(document);
+            form.setDefaultResources(new org.apache.pdfbox.pdmodel.PDResources());
+            document.getDocumentCatalog().setAcroForm(form);
+            document.save(noAppearance.toFile());
+        }
+
+        Path out = workspace.resolve("given.pdf");
+        builder.addFields(noAppearance, out, List.of(text("inspector")));
+
+        try (PDDocument document = Loader.loadPDF(out.toFile())) {
+            assertThat(document.getDocumentCatalog().getAcroForm().getDefaultAppearance())
+                .isNotBlank();
+        }
+    }
+
+    @Test
+    @DisplayName("removing a field whose widget is on no page does not fail")
+    void survivesAWidgetWithNoPage() throws IOException {
+        // A widget that was never placed, or whose page reference was lost in
+        // an earlier edit. Removal has to get through it, because the
+        // alternative is a form nobody can clean up.
+        Path orphanWidget = workspace.resolve("orphan-widget.pdf");
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+            PDAcroForm form = new PDAcroForm(document);
+            form.setDefaultResources(new org.apache.pdfbox.pdmodel.PDResources());
+            PDTextField field = new PDTextField(form);
+            field.setPartialName("stray");
+            form.getFields().add(field);
+            document.getDocumentCatalog().setAcroForm(form);
+            document.save(orphanWidget.toFile());
+        }
+
+        assertThat(builder.removeFields(orphanWidget, workspace.resolve("cleaned.pdf"),
+            List.of("stray"))).containsExactly("stray");
+    }
 }
