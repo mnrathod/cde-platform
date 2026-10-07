@@ -143,6 +143,35 @@ revision issues a *new* revision that supersedes it; the previous one is
 archived and stays retrievable, with lineage written in both directions so it
 can be walked from either end.
 
+### Archived is reached from more than one place
+
+Supersession is the usual route into the terminal state, and it is not the only
+one. Abandoned work in progress, and a shared revision that will not proceed,
+both have to leave the active set, and archiving is how — a revision that was
+never authorised still needs somewhere to go.
+
+That did not work until `V9__archive_unpublished_revisions.sql`. A CHECK
+constraint demanded a recorded approver on every `ARCHIVED` row as well as every
+`PUBLISHED` one, so archiving something that had never been published raised a
+constraint violation: a 500, for an operation the service documents as its
+purpose. Its own comment described the narrower rule — "a published revision
+must carry its authorisation" — and the constraint had gone further than the
+comment.
+
+Filling the column in to satisfy the old constraint would have been worse than
+the defect. It would record a named person as having authorised information that
+nobody authorised, in the field a contractual dispute reads first. So the
+constraint was narrowed to publication.
+
+The guarantee it was protecting is unaffected, because the constraint was never
+the only thing protecting it.
+`trg_published_revisions_are_immutable` fires on every `UPDATE` of a row whose
+state is `PUBLISHED` or `ARCHIVED` and refuses any change to `published_by`,
+`published_at` or `approval_reason`. Publish, archive, then null the approver is
+closed by the trigger. Both halves are now asserted: an archived revision that
+*was* published keeps its approver and cannot be stripped of it even through raw
+SQL, and one archived without publication records none.
+
 ### Permissions are an axis, not a ladder
 
 An engineer originates information and issues it for coordination. A reviewer
@@ -633,6 +662,7 @@ stops every environment that already applied it.
 | MFA / TOTP | Enrolment, replay-protected verification, hashed recovery codes | Built |
 | Outbound fetch | Scheme and host allow-lists, resolved-address rules, no redirects, bounded transfer | Built |
 | Storage keys | Tenant carried by the key type; server-generated object ids | Built |
+| Storage paths kept out of responses | Viewer and model routes name no filesystem path | Built |
 | Outbound AI | Allow-list construction, pseudonymisation, classification refusal, tier gate | Built |
 | Browser hardening | CSP, HSTS, referrer, permissions, cross-origin isolation | Built |
 | WebAuthn / passkeys | — | Not built |
@@ -640,6 +670,32 @@ stops every environment that already applied it.
 | Field encryption beyond TOTP secrets | — | Not built |
 | KMS-held keys, envelope encryption, crypto-shredding | Key comes from configuration | Not built |
 | S3 / Azure / GCS storage adapters | Interface exists; local adapter only | Not built |
+
+### Two places a path used to escape
+
+§5.13.13 is explicit that a bucket path is not a client's business, and two
+viewer routes answered with one. `GET /api/viewer3d/{id}` replied
+`"File not found: " + path` — the storage root, the tenant's prefix and the
+generated object name, in a response any viewer displays — and
+`GET /api/viewer/{id}` had done the same until it was corrected earlier. The path
+is no use to the person reading it, who cannot reach that filesystem, and is
+useful to somebody mapping the deployment. Both now answer with a sentence that
+says what to do next and carries the trace id instead.
+
+The same route had a second fault of a different kind: an Office document whose
+conversion failed *without a message* returned a 500. The handler read
+`.contains()` off `e.getMessage()`, so a `RuntimeException` raised with no
+message — an NPE from a library, a cancelled future — threw inside its own catch
+block, and the reader got a stack trace where §1.4 requires a sentence. A
+message-less failure now produces the ordinary "could not be converted" envelope,
+from which the viewer offers a download.
+
+Beside it sat a `catch (java.net.ConnectException)` arm answering identically to
+the `ConverterOfflineException` arm above it. It compiled only because
+`serveConvertedPdf` declares `throws IOException`; `convertToPdfFile` declares no
+checked exception and raises `ConverterOfflineException` for an unreachable
+converter, so the arm could never run. Two identical arms, one of them dead, read
+as though the condition were handled in two places. It is gone.
 
 ---
 
@@ -666,6 +722,40 @@ surfaces in front of whoever deployed it.
 questions. Readiness fails for a required dependency and deliberately not for an
 optional one, because otherwise a degraded converter takes the whole fleet out of
 the load balancer.
+
+**Coverage is gated at the standard.** §14 requires 90% line and 85% branch, and
+for most of this project's life the build could not meet them: measured in
+September 2026 it stood at 84.3% line and 72.0% branch, so `build.gradle` gated
+on a ratchet against the measured floor instead. A gate that is always red is a
+gate everyone learns to ignore, which is worse than no gate.
+
+The distance is now closed — 90.4% line (4,370/4,832) and 85.3% branch
+(1,289/1,512), across 1,435 tests with no failures, no errors and nothing
+skipped — so the floor *is* the standard and the ratchet is retired. It still
+only moves up; lowering either number to make a build pass defeats the mechanism
+and should fail review.
+
+`./gradlew check` is green in full: static analysis, ArchUnit, the cross-tenant
+isolation suite, the OpenAPI gate, the licence scan (137 components, no policy
+violation) and both mobile SDK suites.
+
+Nothing is excluded from the measurement. §14 permits excluding generated code,
+DTOs and configuration classes; excluding them would raise the reported figure
+without testing anything more.
+
+The figure is a floor and not the point, and §14 says so itself: high coverage
+with weak assertions is worse than honest lower coverage. Every assertion written
+to reach it was checked by deliberately breaking the thing it guards and
+confirming it failed only the cases that name it — which is also how several of
+the defects recorded in this document were found, including the archived-revision
+constraint in §4 and both viewer faults in §12. None of them was failing
+anything.
+
+One trap worth recording, because it cost an afternoon: `test` is `finalizedBy
+jacocoTestReport`, so a filtered run (`--tests Something*`) regenerates the
+report from that run's execution data alone. Coverage read straight afterwards
+reflects only the classes that run touched, which looks like a catastrophic
+regression and is not. Measure after a full run, and delete `build/jacoco` first.
 
 ---
 
@@ -708,6 +798,19 @@ claim that nothing else is needed.
   version a customer integration is written against is a product decision, not
   one to take while fixing defects. Recorded here rather than left implicit so
   the next person finds a known gap with a shape, not a surprise.
+- **Unknown JSON properties are accepted and discarded.** §5.12 A03 asks for
+  them to be rejected. `FAIL_ON_UNKNOWN_PROPERTIES` is configured nowhere and
+  Spring Boot disables it, so this is the behaviour across the whole API rather
+  than anything peculiar to one endpoint: a client that misspells a field gets a
+  `201` and a document without the value it thought it set.
+
+  Turning it on is a breaking change for any integration already sending an
+  extra field, which §3.4 does not permit inside a version — the same constraint
+  that holds the synchronous processing endpoints where they are, and with the
+  same honest route out through `/api/v2`. What *is* asserted today is the half
+  that would be a security defect: an unknown member is discarded rather than
+  swept into a log or an entity, so a client cannot smuggle a value into a field
+  nobody is watching.
 - **No cache.** Permission resolution, tenant configuration and rate-limit
   counters are per instance, which is what makes the throttle looser on a scaled
   deployment.

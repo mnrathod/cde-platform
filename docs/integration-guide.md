@@ -161,6 +161,39 @@ mobile SDKs — they modelled the reply as a bare array after the API had moved 
 an envelope. If you are hand-writing a client, decode a real payload in a test
 rather than trusting a shape you inferred.
 
+### Sorting is on an allow-list, and a refusal names it
+
+`?sort=` takes a field and an optional direction — `?sort=name,desc`. The field
+is checked against a fixed list and anything else is refused with a `400`:
+
+```json
+{
+  "type": "/problems/bad-request",
+  "title": "Bad request",
+  "detail": "\"fileName\" is not a field documents can be sorted by. Use one of: createdAt, drawingNumber, fileSize, name, revision, updatedAt.",
+  "traceId": "4b1f…"
+}
+```
+
+Two things follow from that, and both are worth knowing before you write the
+query.
+
+**The list is shorter than the model.** `fileName` is a real column and is still
+refused. A sort field reaches `ORDER BY`, where it cannot be bound as a
+parameter, so the allow-list is a security control rather than a convenience —
+and a list derived from "which columns exist" would defeat it. Sort on one of the
+six, and filter client-side if you need an ordering we do not offer.
+
+**The refusal tells you what would have worked.** It used to answer "The request
+could not be processed as submitted", which left a caller unable to tell a typo
+from a field this version does not support. If you are building a column-sortable
+table against this API, read the permitted list out of a refusal once rather than
+hard-coding it.
+
+The direction is forgiving where the field is not: anything that is not `desc`
+sorts ascending rather than failing, and surrounding whitespace in the field is
+trimmed.
+
 ---
 
 ## 4. First integration
@@ -600,6 +633,26 @@ those in your own interface avoids all three constraints.
 | `422` | Validation, or a domain rule refused. Check `invalidFields`. | Fix the request. On upload, may be retryable. |
 | `429` | Too many attempts, or the conversion queue is full. | Wait for `Retry-After`. Never zero seconds. |
 | `503` | A dependency is unavailable. | Retry with backoff. The request was fine. |
+
+**`400` is used where `422` would be wrong.** A `422` says the values you sent
+failed validation; a `400` says the request asked for something that is not on
+offer at all — a sort field that is not sortable, a required parameter that is
+absent. Both carry a `detail` naming the offending thing, so neither needs to be
+guessed at.
+
+**Two viewer replies do not carry a status at all.** `GET /api/viewer/{id}` and
+`GET /api/viewer3d/{id}` answer `200` with `{"success": false, "error": "…"}` for
+a document they cannot open — no file recorded, the file gone from storage, a
+format nothing here renders. That is deliberate: the request succeeded, and the
+viewer needs to render a message rather than treat the page as broken. **Read
+`success` before using the body**, and read it as absent-means-false: a client
+that treated a missing `success` as `true` is how a conversion failure once
+reached a reader as a blank drawing.
+
+Those messages name no filesystem path. They used to — `"File not found: " +
+path` handed out the storage root, the tenant prefix and the generated object
+name — and they now carry the trace id instead, which is the thing support can
+act on.
 
 On conversion specifically, `202` means the *submission* was accepted and says
 nothing about the outcome. A job that fails does so with `status: "FAILED"` and a
