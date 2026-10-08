@@ -739,6 +739,18 @@ and should fail review.
 isolation suite, the OpenAPI gate, the licence scan (137 components, no policy
 violation) and both mobile SDK suites.
 
+**It needs a Docker daemon, and the failure when there is none does not say
+so in those words.** §14 forbids H2 and in-memory substitutes, because they
+hide the dialect, locking and RLS behaviour that RLS is a security control for,
+so the integration tests start real Postgres, Artemis, Valkey, ClamAV, MinIO
+and Keycloak through Testcontainers. Without a running daemon the build stops at
+`:test` with *Could not find a valid Docker environment*, which reads like a
+misconfigured project rather than a service that is not up — and a fresh
+container does not start one, so this is the first thing to check on a clean
+machine rather than something that only happens once. `dockerd` left behind a
+stale socket and a half-dead `containerd` from a previous container has to be
+cleared before it will start again.
+
 Nothing is excluded from the measurement. §14 permits excluding generated code,
 DTOs and configuration classes; excluding them would raise the reported figure
 without testing anything more.
