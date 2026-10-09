@@ -108,6 +108,19 @@ pipeline {
                                 # anything for a file nobody can review.
                                 npm run check:icons
                                 npm run check:samples
+
+                                # The embed protocol is written down three
+                                # times — the TypeScript union, the send()
+                                # calls, and the event table in the document
+                                # that source file calls the authority. They
+                                # had drifted: viewer.resized was declared and
+                                # documented, with a payload and advice on
+                                # when to ignore it, and sent by nothing. A
+                                # host would have waited for an event that
+                                # never arrives, and no test could catch it,
+                                # because the event nothing sends is also the
+                                # event nothing asserts.
+                                npm run check:embed-protocol
                             '''
                         }
                     }
