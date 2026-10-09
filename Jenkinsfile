@@ -97,6 +97,17 @@ pipeline {
                                 # silently empties the coverage denominator.
                                 npm run check:i18n-markup
                                 npm run test:scripts
+
+                                # The icons, the favicon and the demo's
+                                # sample documents are generated too, and
+                                # rot the same way the catalogue does. They
+                                # are committed binaries, so a diff shows
+                                # nothing a reviewer can read — these
+                                # regenerate and compare byte for byte,
+                                # which is the only check that means
+                                # anything for a file nobody can review.
+                                npm run check:icons
+                                npm run check:samples
                             '''
                         }
                     }
@@ -176,7 +187,18 @@ pipeline {
             steps {
                 sh './gradlew assemble -x test'
                 dir('../cde-angular') {
-                    sh 'npx ng build --configuration production'
+                    sh '''
+                        set -eu
+                        npx ng build --configuration production
+
+                        # Both of these read the bundle, so they cannot run
+                        # before it exists and must not be skipped when it
+                        # does not: a check that passes itself over a missing
+                        # artifact reports success for every build that never
+                        # produced one.
+                        npm run check:served-assets
+                        npm run check:bundle-budget
+                    '''
                 }
                 // Bring the bundle into this repository's Docker build
                 // context, which is where the Dockerfile copies it from
@@ -228,6 +250,34 @@ pipeline {
                     steps {
                         dir('../cde-angular') {
                             sh 'npx ng test --watch=false'
+                        }
+                    }
+                }
+                stage('Demo host') {
+                    steps {
+                        dir('../cde-angular') {
+                            sh '''
+                                set -eu
+                                # The demo host is plain HTML with no build
+                                # step, so this needs no bundle — only a
+                                # browser. The config reads
+                                # PLAYWRIGHT_CHROMIUM_PATH, so an agent that
+                                # already has one points at it; otherwise
+                                # fetch the build this version pins.
+                                #
+                                # Playwright resolves its browser by build
+                                # number, so a preinstalled browser of a
+                                # different build fails every test here with
+                                # "Executable doesn't exist" and an invitation
+                                # to run `playwright install`. That reads like
+                                # a broken gate rather than a version skew,
+                                # which is why the path is passed explicitly
+                                # rather than left to the lookup.
+                                if [ -z "${PLAYWRIGHT_CHROMIUM_PATH:-}" ]; then
+                                    npx playwright install chromium
+                                fi
+                                npm run test:demo
+                            '''
                         }
                     }
                 }
@@ -286,6 +336,14 @@ pipeline {
                 // component without a recorded approval, any licence change
                 // against the committed baseline, or a stale attribution file.
                 sh './gradlew checkLicences checkAttribution'
+                // The frontend has its own tree and its own notices file, and
+                // this script is both halves of the check: it refuses a
+                // forbidden licence (§2.1) or one on neither list, and refuses
+                // to write the attribution file over a violation — so it
+                // cannot report a clean file for a tree that is not.
+                dir('../cde-angular') {
+                    sh 'npm run check:attribution'
+                }
             }
             post {
                 always {
@@ -329,7 +387,6 @@ pipeline {
                         'E2E across supported browsers (Playwright)',
                         'oasdiff breaking-change detection',
                         'Schemathesis fuzzing from the spec',
-                        'npm licence scan and frontend attribution file',
                         'DCO sign-off verification'
                     ]
                     echo "This pipeline does NOT run the following CLAUDE.md 9.2 gates:\n" +

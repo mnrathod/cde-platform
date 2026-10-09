@@ -708,6 +708,24 @@ covers a local or small on-premises stack. The same image runs everywhere and
 differs only by environment variables. A declarative `Jenkinsfile` holds the
 gates as pipeline-as-code.
 
+**The pipeline states which §9.2 gates it does not provide, and marks the build
+UNSTABLE rather than green when it skips them.** They are listed individually
+rather than as one lump, so the log says exactly which assurances are missing —
+SAST, SCA, container scanning and signing, DAST, performance budgets, the
+accessibility gate and several more. A build that skipped its security gates
+must not report as passing, because the badge is read by people who will not
+read the log. Delete a line from that list when its stage becomes real.
+
+One line has now been deleted. The frontend carried six gates that existed,
+passed locally and were called by nothing — its attribution and licence check,
+the generated-icon and sample-document comparisons, the served-asset and
+bundle-budget checks, and the demo host's browser tests. All six are now
+stages: the asset comparisons beside the message-catalogue check in static
+analysis, the two bundle checks immediately after the production build in the
+same shell so neither can run without the artifact it reads, the attribution
+check beside this repository's own licence gate, and the demo tests under
+Tests. A gate nothing runs is documentation.
+
 | Tier | Password expiry | Admin may set | Outbound calls |
 |---|---|---|---|
 | Commercial | 90 days | 30–365 | Permitted |
