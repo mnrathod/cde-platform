@@ -53,6 +53,30 @@ is as much a traceability failure under §1A.6 as overstating would be. It is
 also the kind of error that persists, because nobody re-reads a row that
 already says "Partially Supports".
 
+**2.4.6 Headings and Labels.** The remark said there was no `<h1>` and that the
+heading hierarchy was incomplete. The first half was wrong when written —
+three `<h1>` elements existed — and is now wrong in a different way: every
+route has one, once there is something to name. Four did not before this
+correction, among them `/viewer/:id`, the main document viewer, where a reader
+navigating by headings arrived and found nothing naming the document that was
+open. The embedded frame is the one exception recorded in the row rather than
+glossed: its loading and waiting states have no document name to put in a
+heading yet, and an empty `<h1>` announces as a heading with no text, which is
+worse than the absence.
+
+The second half was true and still is, so the determination moves to
+**Partially Supports** rather than Supports. Heading levels skip from `h1` to
+`h3` in the viewer, compare and 3D routes: the sidebar that holds the `h3`
+panels contributes no heading of its own, and each panel picked its level
+independently. That is not fixable by changing a number in one template,
+because the same panel component appears at more than one depth and a single
+hard-coded level cannot be correct in both places. It needs the outline
+designing, which is a decision rather than an edit.
+
+**Labels are not covered by this row's evidence at all.** SC 2.4.6 is headings
+*and* labels; only headings were inspected. Reading the determination as a
+statement about labels would be reading more than was looked at.
+
 What has *not* changed: every criterion marked Not Evaluated still is. There is
 no axe run, no Lighthouse budget, no screen-reader pass and no manual keyboard
 pass, so the conclusion in the status note above stands unaltered.
@@ -105,7 +129,7 @@ pass, so the conclusion in the status note above stands unaltered.
 | 1.4.12 Text Spacing | AA | Not Evaluated | |
 | 1.4.13 Content on Hover or Focus | AA | Not Evaluated | |
 | 2.4.5 Multiple Ways | AA | **Partially Supports** | Search and navigation exist; no sitemap. |
-| 2.4.6 Headings and Labels | AA | **Does Not Support** | No `<h1>`; heading hierarchy is incomplete. |
+| 2.4.6 Headings and Labels | AA | **Partially Supports** | Every route now carries exactly one `<h1>` naming the page once it has something to name — the two viewers promote the title they already showed; sign-in, compare and the embedded frame carry a hidden one. The embedded frame's loading and waiting states carry none, deliberately: there is no document name yet and an empty heading is worse than no heading. Heading *levels* still skip: the viewer, compare and 3D routes go from `h1` straight to the `h3` their panels use, because each panel assumes a depth nothing coordinates. Labels have not been audited. |
 | 2.4.7 Focus Visible | AA | **Supports** | Global `:focus-visible` indicator; no `outline: none` anywhere in the codebase (verified, zero occurrences). |
 | 2.4.11 Focus Not Obscured (Min) | AA | Not Evaluated | The viewer has sticky toolbars — the likeliest place to fail. |
 | 2.5.7 Dragging Movements | AA | **Partially Supports** | Four drag interactions now have a single-pointer path: the upload drop zone is a button, page reordering has per-page move buttons, the comparison wipe is a range input answering arrow keys, and markup drawing has a keyboard crosshair — Space presses, arrows size, Enter finishes. Unverified: whether any other drag interaction lacks one, which source inspection alone cannot settle. |
