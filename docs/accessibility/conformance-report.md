@@ -13,7 +13,7 @@ procurement that requires demonstrable conformance. That conclusion is
 correct.
 
 - **Product:** CDE Platform
-- **Report date:** 2026-08-27
+- **Report date:** 2026-10-12 (corrections only — see below)
 - **Evaluation method:** source inspection only
 - **Standards in scope:** WCAG 2.2 Level A and AA · EN 301 549 · Section 508
 
@@ -29,6 +29,33 @@ correct.
 | **Not Evaluated** | No test has been performed |
 
 "Not Evaluated" is not a soft "probably fine". It means nobody has looked.
+
+---
+
+## Corrections since 2026-08-27
+
+**No test regime has been run. Nothing below was upgraded on the strength of a
+test.** These are corrections to statements of fact that source inspection —
+this report's stated and only method — can settle, and they are recorded
+separately so that a reader can see exactly what moved and why.
+
+**2.5.7 Dragging Movements.** The remark said markup drawing and page
+reordering were drag-only. Both were wrong by the time it was read: page
+reordering had been given per-page move buttons, and markup drawing has since
+been given a keyboard crosshair. The determination stays **Partially
+Supports** — not because those four paths are in doubt, but because nobody has
+audited whether some *other* drag interaction lacks an alternative, and
+"Supports" would assert that nobody has checked.
+
+**A wrong remark is worse than a cautious determination**, and it cuts both
+ways: this one understated the product by citing defects that were fixed, which
+is as much a traceability failure under §1A.6 as overstating would be. It is
+also the kind of error that persists, because nobody re-reads a row that
+already says "Partially Supports".
+
+What has *not* changed: every criterion marked Not Evaluated still is. There is
+no axe run, no Lighthouse budget, no screen-reader pass and no manual keyboard
+pass, so the conclusion in the status note above stands unaltered.
 
 ---
 
@@ -81,7 +108,7 @@ correct.
 | 2.4.6 Headings and Labels | AA | **Does Not Support** | No `<h1>`; heading hierarchy is incomplete. |
 | 2.4.7 Focus Visible | AA | **Supports** | Global `:focus-visible` indicator; no `outline: none` anywhere in the codebase (verified, zero occurrences). |
 | 2.4.11 Focus Not Obscured (Min) | AA | Not Evaluated | The viewer has sticky toolbars — the likeliest place to fail. |
-| 2.5.7 Dragging Movements | AA | **Partially Supports** | The upload drop zone is now a button, so file selection has a single-pointer path. Markup drawing and page reordering are drag-only. |
+| 2.5.7 Dragging Movements | AA | **Partially Supports** | Four drag interactions now have a single-pointer path: the upload drop zone is a button, page reordering has per-page move buttons, the comparison wipe is a range input answering arrow keys, and markup drawing has a keyboard crosshair — Space presses, arrows size, Enter finishes. Unverified: whether any other drag interaction lacks one, which source inspection alone cannot settle. |
 | 2.5.8 Target Size (Minimum) | AA | Not Evaluated | Not measured against 24×24 CSS px. |
 | 3.1.2 Language of Parts | AA | Not Applicable | Single language. |
 | 3.2.3 Consistent Navigation | AA | Supports | One shell, consistent across routes. |
