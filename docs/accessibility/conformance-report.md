@@ -13,7 +13,7 @@ procurement that requires demonstrable conformance. That conclusion is
 correct.
 
 - **Product:** CDE Platform
-- **Report date:** 2026-10-12 (corrections only — see below)
+- **Report date:** 2026-10-13 (corrections only — see below)
 - **Evaluation method:** source inspection only
 - **Standards in scope:** WCAG 2.2 Level A and AA · EN 301 549 · Section 508
 
@@ -77,6 +77,35 @@ designing, which is a decision rather than an edit.
 *and* labels; only headings were inspected. Reading the determination as a
 statement about labels would be reading more than was looked at.
 
+## Corrections since 2026-10-12
+
+**2.4.6, again — the reason given for not fixing the level skip was wrong.**
+The row said levels skipped because "each panel assumes a depth nothing
+coordinates", and the architecture document went further: the same panel
+appeared at more than one depth, so no single level could be right, and the
+route outlines needed designing. **Neither was true, and one grep showed it.**
+Each panel owning an `h3` is used in exactly one place.
+
+What was actually wrong was a missing level rather than an ambiguous one, with
+a second defect attached: the viewer's sidebar is a tabbed region in which
+seven of ten panels carried no heading and the region itself had no landmark
+role and no accessible name, so a reader who opened Measure or Outline had
+nothing telling them which panel they were in. One `h2` naming the showing
+panel — taken from the tab table, so there is no new string and it cannot
+disagree with the tab — fixed both, and let the panels keep the level they had
+instead of being renumbered around a gap. Compare and the model tree each had a
+heading already written as a `<span>` or a `<div>`, by their own translator
+notes' account, and are headings now.
+
+The determination stays **Partially Supports** because labels remain
+un-inspected, not because of anything to do with headings.
+
+**A deferral is a claim, and this one was never checked.** A defect left open
+with no reason given invites the next person to look; one left open with a
+plausible reason attached does the opposite. That makes a wrong reason more
+expensive than no reason, and it is the second time a row in this report has
+been wrong in a way that discouraged action rather than inviting it.
+
 What has *not* changed: every criterion marked Not Evaluated still is. There is
 no axe run, no Lighthouse budget, no screen-reader pass and no manual keyboard
 pass, so the conclusion in the status note above stands unaltered.
@@ -129,7 +158,7 @@ pass, so the conclusion in the status note above stands unaltered.
 | 1.4.12 Text Spacing | AA | Not Evaluated | |
 | 1.4.13 Content on Hover or Focus | AA | Not Evaluated | |
 | 2.4.5 Multiple Ways | AA | **Partially Supports** | Search and navigation exist; no sitemap. |
-| 2.4.6 Headings and Labels | AA | **Partially Supports** | Every route now carries exactly one `<h1>` naming the page once it has something to name — the two viewers promote the title they already showed; sign-in, compare and the embedded frame carry a hidden one. The embedded frame's loading and waiting states carry none, deliberately: there is no document name yet and an empty heading is worse than no heading. Heading *levels* still skip: the viewer, compare and 3D routes go from `h1` straight to the `h3` their panels use, because each panel assumes a depth nothing coordinates. Labels have not been audited. |
+| 2.4.6 Headings and Labels | AA | **Partially Supports** | Every route carries exactly one `<h1>` naming the page once it has something to name, and heading levels no longer skip — the viewer, compare and 3D routes run `h1` → `h2` → `h3`. The embedded frame's loading and waiting states carry no heading, deliberately: there is no document name yet and an empty heading is worse than none. `modal-dialog` keeps an `h3` on purpose, as the accessible name of an isolated `role="dialog"`. **Labels have not been audited**, and this criterion covers headings and labels both, so the evidence reaches half of it. |
 | 2.4.7 Focus Visible | AA | **Supports** | Global `:focus-visible` indicator; no `outline: none` anywhere in the codebase (verified, zero occurrences). |
 | 2.4.11 Focus Not Obscured (Min) | AA | Not Evaluated | The viewer has sticky toolbars — the likeliest place to fail. |
 | 2.5.7 Dragging Movements | AA | **Partially Supports** | Four drag interactions now have a single-pointer path: the upload drop zone is a button, page reordering has per-page move buttons, the comparison wipe is a range input answering arrow keys, and markup drawing has a keyboard crosshair — Space presses, arrows size, Enter finishes. Unverified: whether any other drag interaction lacks one, which source inspection alone cannot settle. |
