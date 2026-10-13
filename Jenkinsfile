@@ -121,6 +121,15 @@ pipeline {
                                 # because the event nothing sends is also the
                                 # event nothing asserts.
                                 npm run check:embed-protocol
+
+                                # WCAG 2.2 SC 2.4.6 is headings *and* labels.
+                                # The labels half had never been audited; it
+                                # found eight controls with no accessible
+                                # name, including empty links laid over the
+                                # text of every PDF cross-reference. A
+                                # placeholder is not a label — it disappears
+                                # as soon as the reader types.
+                                npm run check:labels
                             '''
                         }
                     }

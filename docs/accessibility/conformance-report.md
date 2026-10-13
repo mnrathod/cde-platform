@@ -13,7 +13,7 @@ procurement that requires demonstrable conformance. That conclusion is
 correct.
 
 - **Product:** CDE Platform
-- **Report date:** 2026-10-13 (corrections only — see below)
+- **Report date:** 2026-10-13 (corrections and the labels audit — see below)
 - **Evaluation method:** source inspection only
 - **Standards in scope:** WCAG 2.2 Level A and AA · EN 301 549 · Section 508
 
@@ -106,6 +106,23 @@ plausible reason attached does the opposite. That makes a wrong reason more
 expensive than no reason, and it is the second time a row in this report has
 been wrong in a way that discouraged action rather than inviting it.
 
+**2.4.6, the labels half.** Previously recorded as never audited, which was
+accurate. It has been audited now, and it found eight controls with no
+accessible name — the worst of them every link annotation in every PDF, which
+are empty anchors laid over the document's own words, so a page with fifty
+cross-references put fifty nameless links in the tab order. All eight are
+fixed and a CI gate now fails the build on a control with no name.
+
+The determination stays **Partially Supports** rather than moving to Supports,
+for two reasons that are limits of the method rather than known defects. The
+gate checks that a name *exists*; whether a name is *apt* is a judgement no
+tool makes. And it cannot verify a label whose `for` and a control whose `id`
+are both bound to expressions — correct code that no static reader can pair up,
+so a genuine mismatch of that shape would pass. Both need the rendered page,
+which is exactly the gap §1A.5 describes between automated checks and
+conformance, and neither has been closed by a screen-reader pass because none
+has been run.
+
 What has *not* changed: every criterion marked Not Evaluated still is. There is
 no axe run, no Lighthouse budget, no screen-reader pass and no manual keyboard
 pass, so the conclusion in the status note above stands unaltered.
@@ -158,7 +175,7 @@ pass, so the conclusion in the status note above stands unaltered.
 | 1.4.12 Text Spacing | AA | Not Evaluated | |
 | 1.4.13 Content on Hover or Focus | AA | Not Evaluated | |
 | 2.4.5 Multiple Ways | AA | **Partially Supports** | Search and navigation exist; no sitemap. |
-| 2.4.6 Headings and Labels | AA | **Partially Supports** | Every route carries exactly one `<h1>` naming the page once it has something to name, and heading levels no longer skip — the viewer, compare and 3D routes run `h1` → `h2` → `h3`. The embedded frame's loading and waiting states carry no heading, deliberately: there is no document name yet and an empty heading is worse than none. `modal-dialog` keeps an `h3` on purpose, as the accessible name of an isolated `role="dialog"`. **Labels have not been audited**, and this criterion covers headings and labels both, so the evidence reaches half of it. |
+| 2.4.6 Headings and Labels | AA | **Partially Supports** | Every route carries exactly one `<h1>` naming the page once it has something to name, and heading levels no longer skip — the viewer, compare and 3D routes run `h1` → `h2` → `h3`. The embedded frame's loading and waiting states carry no heading, deliberately: there is no document name yet and an empty heading is worse than none. `modal-dialog` keeps an `h3` on purpose, as the accessible name of an isolated `role="dialog"`. Labels have now been audited too: eight controls had no accessible name — two document searches and three form-field controls labelled only by a placeholder, the viewer's panel toggle, the per-document status chooser, and every PDF link annotation, which were empty anchors — and all eight are fixed, with a CI gate failing the build on a control with no name. The gate checks that a name exists, not that it is apt, and cannot verify a label whose `for` and a control whose `id` are both bound to expressions. |
 | 2.4.7 Focus Visible | AA | **Supports** | Global `:focus-visible` indicator; no `outline: none` anywhere in the codebase (verified, zero occurrences). |
 | 2.4.11 Focus Not Obscured (Min) | AA | Not Evaluated | The viewer has sticky toolbars — the likeliest place to fail. |
 | 2.5.7 Dragging Movements | AA | **Partially Supports** | Four drag interactions now have a single-pointer path: the upload drop zone is a button, page reordering has per-page move buttons, the comparison wipe is a range input answering arrow keys, and markup drawing has a keyboard crosshair — Space presses, arrows size, Enter finishes. Unverified: whether any other drag interaction lacks one, which source inspection alone cannot settle. |
