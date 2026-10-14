@@ -130,6 +130,21 @@ pipeline {
                                 # placeholder is not a label — it disappears
                                 # as soon as the reader types.
                                 npm run check:labels
+
+                                # Section 3.3 sets two hard limits — 400 lines
+                                # for a file, 200 for an Angular component —
+                                # and until this gate existed nothing measured
+                                # either. Both were crossed by the keyboard
+                                # work done for SC 2.5.7, and the only thing
+                                # that noticed was somebody reading the
+                                # architecture document against the code
+                                # afterwards. It carries a baseline of
+                                # seventeen files that were already over, and
+                                # the baseline can only shrink: a file on it
+                                # that grows fails, and one that comes back
+                                # inside the limit fails until its entry is
+                                # deleted.
+                                npm run check:file-size
                             '''
                         }
                     }

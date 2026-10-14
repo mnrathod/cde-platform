@@ -726,6 +726,24 @@ same shell so neither can run without the artifact it reads, the attribution
 check beside this repository's own licence gate, and the demo tests under
 Tests. A gate nothing runs is documentation.
 
+**Thirteen frontend gates now run here**, the newest being `check:file-size`.
+It is worth naming because of what it caught, which was work done in this
+pipeline's own name: the single-pointer alternative the accessibility work
+added for SC 2.5.7 pushed two viewer files past §3.3's 400-line limit, a hard
+limit, and **nothing in either repository measured it**. The only thing that
+noticed was somebody reading the viewer's architecture document against the
+code some weeks later. Both files are now split and under the limit, and the
+gate carries a baseline of seventeen files that were already over — each
+recorded at its measured length, allowed only to shrink, so a file on it that
+grows fails the build and one that comes back inside the limit fails until its
+entry is deleted.
+
+Twelve of those seventeen are spec files, and **whether §3.3's limit is meant
+to bind a spec file is an open question for the team** rather than one the gate
+should decide (§0.7). The limit as written says "files", so that is what it
+measures; if the answer is that a 500-line spec of independent cases is not the
+hazard a 500-line service is, the exclusion belongs in §3.3 first.
+
 | Tier | Password expiry | Admin may set | Outbound calls |
 |---|---|---|---|
 | Commercial | 90 days | 30–365 | Permitted |
